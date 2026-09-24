@@ -1,0 +1,276 @@
+@import 'tailwindcss';
+
+/*
+  HYPHY TOOLS — design tokens
+  ------------------------------------------------------------------
+  Material   Warm paper canvas, white sheets, ink type. Calm by default.
+  Color      Signal blue is the product's one accent (Create, focus, links).
+             Each tool brings its own color world; business modules stay ink.
+  Type       Mona Sans (interface) · Hubot Sans (display) · Martian Mono (labels, numbers)
+             — the Hyphy family, shared with Hyphy Studio.
+  Motion     One ease (cubic-bezier(.16,1,.3,1)), short durations, nothing loops.
+*/
+
+@theme {
+  --font-sans: var(--font-mona), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: var(--font-hubot), var(--font-mona), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-martian), ui-monospace, 'SFMono-Regular', monospace;
+
+  --color-canvas: #f3f1eb;
+  --color-surface: #ffffff;
+  --color-subtle: #f8f7f3;
+  --color-well: #edeae2;
+  --color-ink: #16150f;
+  --color-ink-2: #3d3b34;
+  --color-muted: #6c685e;
+  --color-faint: #a19c91;
+  --color-line: rgb(22 21 15 / 0.085);
+  --color-line-strong: rgb(22 21 15 / 0.16);
+  --color-night: #0e0e0c;
+  --color-night-2: #1b1b18;
+
+  --color-signal: #3240ff;
+  --color-signal-hover: #2430e0;
+  --color-signal-soft: #ecedff;
+  --color-signal-ink: #1f28b8;
+
+  --color-positive: #13784a;
+  --color-positive-soft: #e1f3e8;
+  --color-caution: #955800;
+  --color-caution-soft: #fcf0d3;
+  --color-critical: #c3301a;
+  --color-critical-soft: #fce5df;
+
+  --color-tool-pdf: #ff6a3d;
+  --color-tool-qr: #20d392;
+  --color-tool-image: #ffc53d;
+  --color-tool-receipt: #e4ff3a;
+  --color-tool-link: #ff8ad8;
+  --color-tool-miles: #7fd4ff;
+  --color-tool-files: #c7b5ff;
+
+  --radius-xs: 5px;
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-2xl: 26px;
+
+  --shadow-hair: 0 1px 0 rgb(22 21 15 / 0.04);
+  --shadow-card: 0 1px 2px rgb(22 21 15 / 0.04), 0 0 0 1px rgb(22 21 15 / 0.06);
+  --shadow-lift: 0 1px 2px rgb(22 21 15 / 0.05), 0 8px 24px -10px rgb(22 21 15 / 0.18);
+  --shadow-pop:
+    0 0 0 1px rgb(22 21 15 / 0.07), 0 4px 10px -4px rgb(22 21 15 / 0.1),
+    0 22px 48px -16px rgb(22 21 15 / 0.28);
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+
+  --animate-rise: rise 0.32s var(--ease-out) both;
+  --animate-fade: fade 0.2s ease-out both;
+  --animate-sheet-up: sheet-up 0.38s var(--ease-out) both;
+  --animate-sheet-in: sheet-in 0.34s var(--ease-out) both;
+  --animate-pop: pop 0.22s var(--ease-out) both;
+  --animate-shimmer: shimmer 1.4s linear infinite;
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes sheet-up {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: none;
+    }
+  }
+  @keyframes sheet-in {
+    from {
+      opacity: 0;
+      transform: translateX(28px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes pop {
+    from {
+      opacity: 0;
+      transform: translateY(-4px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes shimmer {
+    from {
+      background-position: -400px 0;
+    }
+    to {
+      background-position: 400px 0;
+    }
+  }
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    -webkit-tap-highlight-color: transparent;
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    color-scheme: light;
+  }
+  body {
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.45;
+    min-height: 100dvh;
+    background: var(--color-canvas);
+  }
+  @media (min-width: 1024px) {
+    body {
+      font-size: 14px;
+    }
+  }
+  ::selection {
+    background: var(--color-signal-soft);
+    color: var(--color-signal-ink);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-signal);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  button,
+  [role='button'],
+  summary,
+  label[for] {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+  /* 16px inputs on phones stop iOS from zooming the page on focus. */
+  @media (max-width: 1023px) {
+    input,
+    select,
+    textarea {
+      font-size: 16px;
+    }
+  }
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+  svg {
+    flex-shrink: 0;
+  }
+  dialog {
+    color: inherit;
+  }
+  dialog::backdrop {
+    background: rgb(14 14 12 / 0.34);
+    animation: fade 0.2s ease-out both;
+  }
+  input[type='range'] {
+    accent-color: var(--color-ink);
+  }
+}
+
+@layer components {
+  /* Martian Mono labels: section eyebrows, table heads, metadata. */
+  .label {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    line-height: 1.3;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-variation-settings: 'wdth' 87.5;
+    color: var(--color-muted);
+  }
+  /* Hubot Sans display type, slightly expanded. */
+  .display {
+    font-family: var(--font-display);
+    font-weight: 750;
+    letter-spacing: -0.025em;
+    font-variation-settings: 'wdth' 108;
+    line-height: 1.02;
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1;
+  }
+  .mono-num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-variation-settings: 'wdth' 87.5;
+    letter-spacing: -0.01em;
+  }
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--color-well) 0,
+      color-mix(in oklab, var(--color-well), white 55%) 120px,
+      var(--color-well) 240px
+    );
+    background-size: 800px 100%;
+    animation: var(--animate-shimmer);
+    border-radius: var(--radius-sm);
+  }
+  /* A hairline between list rows that stops short of the leading glyph. */
+  .row-divide > * + * {
+    border-top: 1px solid var(--color-line);
+  }
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* An open sheet or palette freezes the page behind it. */
+html:has(dialog[open]) {
+  overflow: hidden;
+}
