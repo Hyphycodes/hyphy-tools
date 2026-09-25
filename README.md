@@ -60,13 +60,15 @@ src/
   lib/data/                what they can see (Repository) — demo repository now, Supabase later
   lib/data/demo/           seeded world + the per-browser change journal
   lib/demo/                Demo Mode controls (Preview As, Reset) — removed with real sign-in
+  lib/files/               files: what's accepted, the storage providers, the upload pipeline
   components/shell/        sidebar, phone bars, Space switcher, command bar, Create menu
   components/create/       Universal Create sheets (receipt, mileage, project, person, vehicle, files)
   components/dashboard/    role-aware dashboard widgets
   components/records/      shared rows: activity, inbox, projects, vehicles, files, receipts
+  components/files/        upload queue, drop zone, previews, Open/Download, Trash, logo
   components/tools/        the tools (QR, PDF, Images ported from Studio; Links, Receipts, Mileage)
   components/ui/           design system primitives
-supabase/                  proposed schema + RLS (not applied), with an RLS smoke test
+supabase/                  migrations, RLS and Storage policies, SQL test suites, the local stack
 docs/                      architecture, auth plan, Demo Mode, design, Studio inventory
 tests/                     unit (rules) and end-to-end (personas, access, flows, phones)
 ```
@@ -79,6 +81,8 @@ tests/                     unit (rules) and end-to-end (personas, access, flows,
 - [docs/BUSINESS.md](docs/BUSINESS.md) — businesses, teams, invitations, roles and ownership.
 - [docs/CUSTOMIZATION.md](docs/CUSTOMIZATION.md) — how a business makes Hyphy its own: words, tools,
   fields, receipt and mileage rules, approvals, presets.
+- [docs/FILES.md](docs/FILES.md) — files and their bytes: private Storage, uploads, who can open
+  what, receipt photos, the logo, what's accepted, Demo Mode.
 - [docs/DESIGN.md](docs/DESIGN.md) — the visual system.
 - [docs/STUDIO-INVENTORY.md](docs/STUDIO-INVENTORY.md) — what came from Hyphy Studio and what stays there.
 

@@ -141,7 +141,7 @@ the live records, so a rename follows everywhere.
 `InboxItem` is "needs attention": either for an audience (everyone with a permission, e.g.
 `expenses.approve`) or a recipient. In the demo, events for your own changes are derived when the
 journal is applied; on the database, triggers write them as the person acting (`log_submission`,
-`log_review`, `log_record`, `log_file`, …), along with each submission's approval history in
+`log_review`, `log_record`, `log_file_change`, `finish_upload`, …), along with each submission's approval history in
 `approval_events` (submitted, returned with its reason, resubmitted, approved — actor and time).
 
 ## Files
@@ -149,8 +149,12 @@ journal is applied; on the database, triggers write them as the person acting (`
 Files attach to records (`attachedTo: [{ type: 'project' | 'vehicle' | 'person' | 'receipt', id }]`)
 and carry an access level (`team`, `managers`, `private`, `shared`). A certificate of insurance can
 belong to a subcontractor and two projects at once. The file panel answers "Who can open it?" in
-plain words. Uploads record name, type, size and attachments (on the database, as real rows); the
-bytes stay on the device — there is no Storage bucket yet, and Download is disabled.
+plain words. Since Phase 2D the bytes are real (docs/FILES.md): one private Supabase Storage
+bucket behind a `StorageProvider` (`lib/files/storage.ts`), paths Hyphy makes
+(`spaces/{space}/files/{file}/…`), Storage policies that ask the file's record, one upload pipeline
+(pending → ready, progress, cancel, retry without duplicates) for the Files page, tools, receipt
+photos, records and the business logo, and Open/Download through short-lived signed links that
+are never stored. In Demo Mode the same pipeline keeps the bytes in the uploading browser.
 
 ## Business customization (Phase 2C)
 
@@ -180,9 +184,10 @@ with the same result shape (`SearchItem` in `lib/search.ts`).
 | Works for real                                                                                                                                  | Simulated in the preview                             |
 | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
 | PDF merge and page extract with page thumbnails (pdf-lib + PDF.js), QR PNG/SVG for links, Wi-Fi and email, image resize/convert (all on-device) | Real accounts are built but off (Demo Mode is live)  |
-| Every create flow, approvals, inbox actions, turning tools on/off — persisted in Postgres with `HYPHY_DATA=supabase`                            | Storage: files record metadata only                  |
+| Every create flow, approvals, inbox actions, turning tools on/off — persisted in Postgres with `HYPHY_DATA=supabase`                            | Demo Mode file bytes stay in the uploading browser   |
 | Role-scoped reads everywhere, server-side permission checks on every change                                                                     | Receipt auto-reading (sample receipt shows the flow) |
 | Mileage CSV export, link page editing, saving QR codes                                                                                          | Link page publishing, email invitations, billing     |
+| Files: private Storage with real accounts, uploads, previews, Open/Download, Trash, receipt photos, the business logo                           | Seeded sample files (details only, no bytes)         |
 
 With `HYPHY_DATA=demo`, changes persist per browser in the Demo Mode journal until Reset; with
 `HYPHY_DATA=supabase`, in the development database (see DEMO-MODE.md and supabase/README.md).

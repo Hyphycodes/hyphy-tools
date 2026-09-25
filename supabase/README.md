@@ -6,28 +6,32 @@ or on plain Postgres (with `tests/prelude.sql` standing in for what Supabase pro
 
 ## What's here
 
-| Path                                                   | What it is                                                                                                                                                                                                   |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `migrations/20260925000000_platform_foundation.sql`    | Profiles, Spaces, memberships and every Space-owned table; `can(space, permission)` mirroring `src/lib/platform/roles.ts`; Row Level Security on all of it                                                   |
-| `migrations/20260925100000_connected_systems.sql`      | One review shape for receipts and trips, project value and allowance, work style, pins                                                                                                                       |
-| `migrations/20260926000000_real_persistence.sql`       | Approval history, activity written by triggers, review guards, invitations, the Space directory, indexes, policy fixes found in review                                                                       |
-| `migrations/20260927000000_hosted_hardening.sql`       | Found deploying to hosted Supabase: no `anon` access to anything, internal helpers not callable, seeding mode not usable by a person, the `hyphy_app` role, guests' directory narrowed                       |
-| `migrations/20260927100000_advisor_fixes.sql`          | Supabase's database advisor: trigger functions not offered as RPCs, a fixed search path                                                                                                                      |
-| `migrations/20260927200000_no_truncate.sql`            | No TRUNCATE (which bypasses Row Level Security), TRIGGER or REFERENCES for people or the public API                                                                                                          |
-| `migrations/20260928000000_real_accounts.sql`          | Real accounts: every new Supabase Auth user gets a profile, Personal Space and owner membership, once; profile email follows Auth; Personal Spaces hold only their owner; reserved addresses                 |
-| `migrations/20260929000000_business_spaces.sql`        | Businesses and teams: create_business, invitations (hashed links, confirmed-email acceptance), role changes, removal, leaving, ownership transfer, one owner always, current membership required everywhere  |
-| `migrations/20260929010000_team_indexes.sql`           | Indexes for who revoked an invitation and who removed a member (advisor follow-up)                                                                                                                           |
-| `migrations/20260930000000_business_customization.sql` | Business customization: rules (`space_settings`), fields (`custom_fields`), answers on records, every answer and rule checked, who approves, filing without approval, setup activity (docs/CUSTOMIZATION.md) |
-| `migrations/20260930010000_mileage_rate_snapshot.sql`  | Each trip keeps the per-mile rate it was logged at, stamped by the database; a new rate never re-prices old trips                                                                                            |
-| `migrations/20260930020000_setup_rule_fixes.sql`       | The job rule asks only people with a job to pick; words and accent are checked separately (so an old accent never blocks saving words)                                                                       |
-| `tests/customization.sql`                              | Business setup attacked from every side: other businesses, wrong answers, stopped fields, roles, approvals, rates, removed members; always rolled back                                                       |
-| `tests/teams.sql`                                      | Businesses, invitations and team management as real accounts — including everything that must fail; always rolled back                                                                                       |
-| `tests/accounts.sql`                                   | The account bootstrap: once and idempotent, nobody bootstraps or edits anyone else, personas untouched; always rolled back                                                                                   |
-| `dev/dev_tools.sql`                                    | **Development only.** The development marker, Demo Mode's personas, and the guarded `dev.reset_world` / `dev.changes_since_seed`                                                                             |
-| `tests/isolation.sql`                                  | RLS attack suite: real people trying what must fail (other Spaces, ids from elsewhere, self-approval, guest enumeration, `anon`)                                                                             |
-| `tests/fingerprint.sql`                                | What every persona can see, hashed — identical on every database holding the development world                                                                                                               |
-| `tests/flows.sql`                                      | The product's write paths as real people, checking what the triggers record; always rolled back                                                                                                              |
-| `tests/prelude.sql`                                    | Stand-ins for Supabase's `auth` schema and roles, so the migrations run on plain Postgres                                                                                                                    |
+| Path                                                   | What it is                                                                                                                                                                                                                                  |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `migrations/20260925000000_platform_foundation.sql`    | Profiles, Spaces, memberships and every Space-owned table; `can(space, permission)` mirroring `src/lib/platform/roles.ts`; Row Level Security on all of it                                                                                  |
+| `migrations/20260925100000_connected_systems.sql`      | One review shape for receipts and trips, project value and allowance, work style, pins                                                                                                                                                      |
+| `migrations/20260926000000_real_persistence.sql`       | Approval history, activity written by triggers, review guards, invitations, the Space directory, indexes, policy fixes found in review                                                                                                      |
+| `migrations/20260927000000_hosted_hardening.sql`       | Found deploying to hosted Supabase: no `anon` access to anything, internal helpers not callable, seeding mode not usable by a person, the `hyphy_app` role, guests' directory narrowed                                                      |
+| `migrations/20260927100000_advisor_fixes.sql`          | Supabase's database advisor: trigger functions not offered as RPCs, a fixed search path                                                                                                                                                     |
+| `migrations/20260927200000_no_truncate.sql`            | No TRUNCATE (which bypasses Row Level Security), TRIGGER or REFERENCES for people or the public API                                                                                                                                         |
+| `migrations/20260928000000_real_accounts.sql`          | Real accounts: every new Supabase Auth user gets a profile, Personal Space and owner membership, once; profile email follows Auth; Personal Spaces hold only their owner; reserved addresses                                                |
+| `migrations/20260929000000_business_spaces.sql`        | Businesses and teams: create_business, invitations (hashed links, confirmed-email acceptance), role changes, removal, leaving, ownership transfer, one owner always, current membership required everywhere                                 |
+| `migrations/20260929010000_team_indexes.sql`           | Indexes for who revoked an invitation and who removed a member (advisor follow-up)                                                                                                                                                          |
+| `migrations/20260930000000_business_customization.sql` | Business customization: rules (`space_settings`), fields (`custom_fields`), answers on records, every answer and rule checked, who approves, filing without approval, setup activity (docs/CUSTOMIZATION.md)                                |
+| `migrations/20260930010000_mileage_rate_snapshot.sql`  | Each trip keeps the per-mile rate it was logged at, stamped by the database; a new rate never re-prices old trips                                                                                                                           |
+| `migrations/20260930020000_setup_rule_fixes.sql`       | The job rule asks only people with a job to pick; words and accent are checked separately (so an old accent never blocks saving words)                                                                                                      |
+| `migrations/20261001000000_file_storage.sql`           | Real files: the private `hyphy-files` bucket and its Storage policies (asking the file's record), pending → ready uploads, Trash, delete-for-good order, receipt photos and the photo rule, the business logo, storage used (docs/FILES.md) |
+| `migrations/20261001010000_file_policy_tuning.sql`     | Advisor follow-up: two file policies ask `auth.uid()` once per query; an index for a receipt's photo                                                                                                                                        |
+| `tests/files.sql`                                      | Files and their bytes attacked from every side as the seeded people: start, upload, finish, see, open, rename, Trash, delete, attach, receipt photos, logo, storage used; always rolled back                                                |
+| `local/`                                               | A real Supabase stack in Docker (Postgres, Auth, Storage, Mailpit, a small gateway) for `npm run test:auth`; secrets generated per run into `.hyphy-local/`                                                                                 |
+| `tests/customization.sql`                              | Business setup attacked from every side: other businesses, wrong answers, stopped fields, roles, approvals, rates, removed members; always rolled back                                                                                      |
+| `tests/teams.sql`                                      | Businesses, invitations and team management as real accounts — including everything that must fail; always rolled back                                                                                                                      |
+| `tests/accounts.sql`                                   | The account bootstrap: once and idempotent, nobody bootstraps or edits anyone else, personas untouched; always rolled back                                                                                                                  |
+| `dev/dev_tools.sql`                                    | **Development only.** The development marker, Demo Mode's personas, and the guarded `dev.reset_world` / `dev.changes_since_seed`                                                                                                            |
+| `tests/isolation.sql`                                  | RLS attack suite: real people trying what must fail (other Spaces, ids from elsewhere, self-approval, guest enumeration, `anon`)                                                                                                            |
+| `tests/fingerprint.sql`                                | What every persona can see, hashed — identical on every database holding the development world                                                                                                                                              |
+| `tests/flows.sql`                                      | The product's write paths as real people, checking what the triggers record; always rolled back                                                                                                                                             |
+| `tests/prelude.sql`                                    | Stand-ins for Supabase's `auth` schema and roles, so the migrations run on plain Postgres                                                                                                                                                   |
 
 ### Tables
 
@@ -35,7 +39,7 @@ or on plain Postgres (with `tests/prelude.sql` standing in for what Supabase pro
 `files` + `file_attachments`, `qr_codes`, `link_pages`, `activity`, `inbox_items`,
 `approval_events`, `pins`, `space_invitations`, `space_settings`, `custom_fields`, and the
 `approval_queue` view. Every Space-owned row carries `space_id`
-and its creator (`created_by`). **No Storage buckets yet** — see "Files" below.
+and its creator (`created_by`). One Storage bucket, `hyphy-files` (private) — see "Files" below.
 
 ### What Row Level Security protects
 
@@ -110,10 +114,12 @@ psql "$DATABASE_ADMIN_URL" -f supabase/tests/isolation.sql     # attack suite, r
 HYPHY_DATA=supabase HYPHY_DEMO_RESET=on npm run dev
 ```
 
-**`hyphy-tools-dev`** (hosted, `jgvrqdausbjkfsspjgce`) holds all twelve migrations, with the
+**`hyphy-tools-dev`** (hosted, `jgvrqdausbjkfsspjgce`) holds all fourteen migrations, with the
 migration history's versions matching the files (`real_accounts` and `business_spaces` checked there
 with `tests/accounts.sql` and `tests/teams.sql`; `business_customization` and
-`mileage_rate_snapshot` and `setup_rule_fixes` with `tests/customization.sql`, 86 checks), the dev tools and the seeded
+`mileage_rate_snapshot` and `setup_rule_fixes` with `tests/customization.sql`, 86 checks;
+`file_storage` and `file_policy_tuning` with `tests/files.sql` against the real `storage` schema,
+and `tests/flows.sql` and `tests/isolation.sql` again), the dev tools and the seeded
 world. It was checked with the same files: `tests/isolation.sql` (every attack
 refused), `tests/flows.sql` (every write path as real people) and `tests/fingerprint.sql`, whose
 hash is identical to the local database's — every persona sees exactly the same rows on hosted
@@ -148,10 +154,23 @@ the policy helpers, `invite_member`, `space_directory`, the team functions, `nee
 `tests/isolation.sql`, `tests/teams.sql` or `tests/customization.sql`); and, for scale rather than correctness,
 policies that call `auth.uid()` per row instead of `(select auth.uid())`, and foreign keys on
 `created_by`-style columns without indexes. Worth doing before production data volumes, not now.
+Phase 2D adds `can_read_file_object`, `can_upload_file_object`, `can_remove_file_object`,
+`finish_upload`, `set_space_logo` and `space_storage_bytes` to the first list (Storage's policies
+run them as the person; each answers only about that person's own access, `tests/files.sql`). Its
+own policies use `(select auth.uid())` (`file_policy_tuning`).
 
 ## Files
 
-File records, their attachments and their activity are real rows. The bytes are not stored yet:
-there is no Storage bucket, Download is disabled, and the file panel says so. Adding a private
-`space-files` bucket whose policies call `can_see_file()` is part of the production work in
-`docs/AUTH.md`.
+docs/FILES.md. The private `hyphy-files` bucket (50 MB, MIME allowlist) and its three policies on
+`storage.objects` (read, upload, remove — no update) call `can_read_file_object`,
+`can_upload_file_object` and `can_remove_file_object`, which ask the file's record and
+`can_see_file()`. `finish_upload()` marks a file ready only once Storage holds bytes of the promised
+size and type. `private.file_storage_reconciliation` lists bytes and records that don't agree (for
+operators; nobody else can read it).
+
+On `hyphy-tools-dev` the bucket, policies and functions are in place and `tests/files.sql` passes
+against Supabase's real `storage` schema, as the seeded people. The Storage HTTP API itself (signed
+uploads, signed links, removal) is tested on the local stack (`supabase/local/`,
+`tests/storage.spec.ts`, `tests/files.spec.ts`); the hosted project's HTTP API has not been
+exercised from a deployed app yet. After the hosted tests, the bucket held no objects and no
+records pointed at Storage.

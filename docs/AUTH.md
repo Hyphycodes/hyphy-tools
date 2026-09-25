@@ -200,10 +200,11 @@ This is a checklist, not something done yet.
 
 1. **Finish the hosted verification.** A Vercel deployment connected to hosted Supabase with
    `HYPHY_DATA=supabase` must be verified end to end first. Real accounts have not been tested on
-   hosted Supabase Auth (the development container can't reach it).
-2. **Migrations.** Every migration through `20260930020000_setup_rule_fixes.sql` (Phase 2C) is
-   applied to `hyphy-tools-dev`, and `supabase/tests/accounts.sql`, `teams.sql` and
-   `customization.sql` pass there. A production project gets every migration with
+   hosted Supabase Auth (the development container can't reach it), and file uploads have not
+   been tested against hosted Storage's HTTP API (only its policies, in SQL; docs/FILES.md).
+2. **Migrations.** Every migration through `20261001010000_file_policy_tuning.sql` (Phase 2D) is
+   applied to `hyphy-tools-dev`, and `supabase/tests/accounts.sql`, `teams.sql`,
+   `customization.sql` and `files.sql` pass there. A production project gets every migration with
    `supabase db push` — never `supabase/dev/`.
 3. **Supabase Auth settings** (dashboard → Authentication):
    - Email provider on, **Confirm email on**, minimum password length **8**, **leaked password
@@ -213,8 +214,14 @@ This is a checklist, not something done yet.
    - **Email templates** — use token-hash links, which work in any browser and aren't broken by a
      second email to the same browser (found in testing: with the default PKCE links, asking for
      a reset before confirming invalidates the confirmation link):
-     - Confirm signup: `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email&next=/welcome`
-     - Reset password: `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=recovery&next=/reset-password`
+     - Confirm signup: `{{ .RedirectTo }}&token_hash={{ .TokenHash }}&type=email`
+     - Reset password: `{{ .RedirectTo }}&token_hash={{ .TokenHash }}&type=recovery`
+
+     `{{ .RedirectTo }}` is the app's own `…/auth/confirm?next=…` (`confirmUrl()` in
+     `lib/auth/actions.ts`), so an invited person's sign-up comes back to their invitation rather
+     than to Welcome (found in Phase 2D's browser tests on the local stack). It only works while
+     `/auth/confirm**` is in the Redirect URLs; otherwise Supabase falls back to the Site URL.
+
    - Custom SMTP (the built-in sender is rate-limited and only for team addresses).
    - Add `https://hyphy-studio.com/platform/invite/**` to the Redirect URLs: invited people sign up
      with `next=/invite/…` and come back there after confirming.
@@ -271,4 +278,5 @@ billing cancelled. Build it as a guarded server flow with a grace period.
 
 **Also later:** email change (Profile shows the login email as managed by the account), OAuth
 providers and magic links (the confirm route already handles `token_hash` types and PKCE codes),
-Storage for avatars and file bytes, MFA.
+avatars, MFA. (File bytes are stored since Phase 2D, docs/FILES.md; deleting an account must
+also delete its Personal Space's stored files.)

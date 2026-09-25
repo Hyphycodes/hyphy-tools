@@ -23,8 +23,12 @@ account, database or setup. It is a preview tool, not security.
   browser reads it, so you can set ABC Construction up as Dana (owner), preview as Mike and meet the
   forms she made straight away. If a setup ever grows too big for the cookie, the change is refused
   in plain words instead of half-kept (docs/CUSTOMIZATION.md).
-- **Reset** clears the journal, the pins and the business setup, back to the seeded businesses'
-  own setup. The seeded world is regenerated relative to the current time, so "3h ago" is always
+- **Files** you add or save from a tool are real files, but their bytes stay in _this browser_
+  (IndexedDB `hyphy-demo-files`); the record goes in the journal like any change. Open, Download
+  and previews work here; another browser sees the record and says where the file is. Seeded
+  files are samples with details only (docs/FILES.md, "Demo Mode").
+- **Reset** clears the journal, the pins, the business setup and this browser's stored files, back
+  to the seeded businesses' own setup. The seeded world is regenerated relative to the current time, so "3h ago" is always
   three hours ago.
 
 ## On real data
@@ -41,6 +45,8 @@ development database instead of the seed plus a journal:
 - **Your changes** are real rows, seen by everyone using that database, and survive refreshes,
   other browsers and restarts. The count on Reset is what's changed since the last seed.
 - **Pins** are rows in `pins`, per person per Space.
+- **Files** are real rows too; their bytes still stay in the uploading browser, because Storage
+  checks a signed-in account and personas have none.
 - **Reset** re-seeds the whole development database, for everyone. The server refuses unless
   `HYPHY_DEMO_RESET=on` is set **and** the database is marked as development; without the flag
   the button isn't shown.

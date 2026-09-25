@@ -65,8 +65,8 @@ own role's Home. No invented activity.
 
 ### Settings
 
-Business settings (docs/CUSTOMIZATION.md): name, kind, words, accent color and the mark (a logo
-placeholder until file storage exists), tools, fields, receipt and mileage rules and who approves.
+Business settings (docs/CUSTOMIZATION.md): name, kind, words, accent color and the mark (the
+business logo, uploaded by owners and admins), tools, fields, receipt and mileage rules and who approves.
 **The address never changes**: links, bookmarks and
 invitations keep working, and records refer to the Space by id, so a new name shows everywhere at
 once. (Address changes with redirects can come later if there's a real need.)
@@ -226,7 +226,7 @@ real sessions (`lib/teams/index.ts`).
 
 ## Later
 
-- Address changes with redirects; logo upload (with Storage); closing a business (it must have a
+- Address changes with redirects; closing a business (it must have a
   plan for its records and members); ownership among several owners, if ever needed.
 - Account deletion must first transfer or close owned businesses (the one-owner rule already
   refuses a delete that would leave one ownerless).
