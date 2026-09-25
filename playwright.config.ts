@@ -21,7 +21,7 @@ export default defineConfig({
     ? undefined
     : {
         command: `npm run start -- --port ${port}`,
-        url: `http://localhost:${port}`,
+        url: `http://localhost:${port}/platform`,
         reuseExistingServer: true,
       },
 });

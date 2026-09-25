@@ -1,4 +1,5 @@
 import { expect, test, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { BASE_PATH } from '../src/lib/base-path';
 
 /* The product, end to end, through Demo Mode. */
 
@@ -8,7 +9,7 @@ async function previewAs(context: BrowserContext, person: string, baseURL: strin
 
 /** Opens a page once it's interactive: scripts loaded and the page hydrated. */
 async function visit(page: Page, path: string) {
-  await page.goto(path, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE_PATH}${path === '/' ? '' : path}`, { waitUntil: 'networkidle' });
 }
 
 /**
@@ -388,7 +389,7 @@ test('every tool in the library has a way in', async ({ page, context, baseURL }
   // Image Resize has no Create action in a business Space; its card still leads somewhere.
   await expect(page.getByRole('link', { name: 'Resize images' })).toHaveAttribute(
     'href',
-    '/abc-construction/tools/images',
+    `${BASE_PATH}/abc-construction/tools/images`,
   );
 });
 

@@ -13,7 +13,7 @@ Node 22+ and npm.
 
 ```sh
 npm ci
-npm run dev          # http://localhost:3000
+npm run dev          # http://localhost:3000/platform
 ```
 
 No environment variables, database or accounts are needed. `/` opens the current person's main
@@ -76,6 +76,10 @@ tests/                     unit (rules) and end-to-end (personas, access, flows,
 - [docs/STUDIO-INVENTORY.md](docs/STUDIO-INVENTORY.md) — what came from Hyphy Studio and what stays there.
 
 ## Routes
+
+Everything is served under `/platform` (`basePath`, set in `src/lib/base-path.ts`):
+hyphy-studio.com/platform is a Vercel rewrite to this deployment, which ships on its own. The
+paths below are relative to it.
 
 `/` → your main Space. Inside any Space (`/{space}`):
 
