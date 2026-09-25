@@ -1,4 +1,5 @@
 import { CreateButton } from '@/components/create/create-button';
+import { fieldRows, listLine } from '@/components/fields/field-facts';
 import { Relations, relationsOf } from '@/components/records/relations';
 import { ReturnedNotice, ReviewActions } from '@/components/records/review';
 import { MileageRow } from '@/components/records/rows';
@@ -11,6 +12,7 @@ import { ToolHeader } from '@/components/tools/tool-header';
 import { EmptyState } from '@/components/ui/empty';
 import { Page } from '@/components/ui/page';
 import { Panel, PanelHeader } from '@/components/ui/panel';
+import { paidBack } from '@/lib/insights';
 import { openPage } from '@/lib/page';
 import { cn } from '@/components/ui/cn';
 import { tripTitle } from '@/lib/platform/approvals';
@@ -23,7 +25,8 @@ import {
   plural,
 } from '@/lib/platform/format';
 import { getTool } from '@/lib/platform/tools';
-import type { MileageEntry } from '@/lib/platform/types';
+import { exportField, fieldsFor } from '@/lib/platform/custom-fields';
+import type { FieldType, MileageEntry } from '@/lib/platform/types';
 
 export const metadata = { title: 'Mileage' };
 
@@ -38,11 +41,20 @@ export default async function MileagePage({
 }: PageProps<'/[space]/tools/mileage'>) {
   const { workspace, repo, people, tz, can, base } = await openPage(params, 'mileage');
   const query = await searchParams;
-  const [entries, vehicles, projects] = await Promise.all([
+  const [entries, vehicles, projects, fields] = await Promise.all([
     repo.mileage(),
     repo.vehicles(),
     repo.projects(),
+    repo.fields('mileage'),
   ]);
+  const lookup = (type: FieldType, value: string) =>
+    type === 'person'
+      ? people.get(value)?.name
+      : type === 'project'
+        ? projects.find((project) => project.id === value)?.name
+        : type === 'vehicle'
+          ? vehicles.find((vehicle) => vehicle.id === value)?.name
+          : undefined;
   const business = workspace.space.kind === 'business';
   const approver = business && can('expenses.approve');
   const pending = entries.filter((entry) => entry.status === 'submitted');
@@ -56,11 +68,16 @@ export default async function MileagePage({
       ? [
           vehicles.find((vehicle) => vehicle.id === entry.vehicleId)?.name ?? 'Personal vehicle',
           projects.find((project) => project.id === entry.projectId)?.name,
+          ...listLine(fields, 'mileage', entry.custom, lookup, tz),
         ]
           .filter(Boolean)
           .join(' · ')
       : undefined;
+  // Each trip is paid back at the rate it was logged at; the current rate covers only trips from
+  // before trips kept their own.
   const rate = workspace.space.mileageRate;
+  const tripRate = (entry: MileageEntry) => entry.rate ?? rate ?? 0;
+  const paysBack = business && entries.some((entry) => !entry.vehicleId && tripRate(entry) > 0);
 
   const monthKey = (iso: string) =>
     new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric', timeZone: tz }).format(
@@ -84,6 +101,13 @@ export default async function MileagePage({
   for (const entry of entries) destinations.set(entry.to, (destinations.get(entry.to) ?? 0) + 1);
   const often = [...destinations.entries()].sort((a, b) => b[1] - a[1])[0];
 
+  // The complete records: Hyphy's columns, what the business pays back at its own rate, and every
+  // field the business asks for (or asked for, on the trips that have an answer).
+  const exported = fields.filter(
+    (field) =>
+      !field.archivedAt ||
+      entries.some((entry) => fieldsFor([field], 'mileage', entry.custom).length),
+  );
   const csv: (string | number)[][] = [
     [
       'Date',
@@ -96,6 +120,8 @@ export default async function MileagePage({
       'Vehicle',
       'Project',
       'Status',
+      ...(paysBack ? ['Paid back'] : []),
+      ...exported.map((field) => field.label),
     ],
     ...entries.map((entry) => [
       new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date(entry.date)),
@@ -108,6 +134,8 @@ export default async function MileagePage({
       vehicles.find((vehicle) => vehicle.id === entry.vehicleId)?.name ?? 'Own car',
       projects.find((project) => project.id === entry.projectId)?.name ?? '',
       entry.status,
+      ...(paysBack ? [entry.vehicleId ? '' : paidBack(entry, rate).toFixed(2)] : []),
+      ...exported.map((field) => exportField(field, entry.custom?.[field.id], lookup)),
     ]),
   ];
 
@@ -283,8 +311,8 @@ export default async function MileagePage({
                 </p>
                 <p className="mt-1.5 text-[13px] text-ink/60">
                   {selected.roundTrip ? 'Round trip' : 'One way'}
-                  {business && !selected.vehicleId && rate
-                    ? ` · ${formatCurrency(selected.miles * rate)} paid back at ${formatCurrency(rate)}/mi`
+                  {business && !selected.vehicleId && tripRate(selected)
+                    ? ` · ${formatCurrency(paidBack(selected, rate))} paid back at ${formatCurrency(tripRate(selected))}/mi`
                     : ''}
                 </p>
               </div>
@@ -303,6 +331,7 @@ export default async function MileagePage({
                 ['From', selected.from],
                 ['To', selected.to],
                 ['Purpose', selected.purpose || '—'],
+                ...fieldRows(fields, 'mileage', selected.custom, lookup, tz),
               ].map(([label, value]) => (
                 <div
                   key={label}

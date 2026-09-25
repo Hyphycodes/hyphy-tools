@@ -118,9 +118,22 @@ export type ProjectMoney = {
   pending: number;
   /** Where it went: receipt categories, then trips paid back by the mile. */
   lines: { label: string; total: number }[];
-  /** Miles in people's own vehicles, paid back at the Space's rate. */
+  /** Miles in people's own vehicles, paid back at the rate each trip was logged at. */
   reimbursedMiles: number;
+  /** That rate, when every one of those trips shares it (for "12 mi × $0.70"). */
+  rate?: number;
 };
+
+/**
+ * What a trip pays back: miles in a personal vehicle × the rate it was logged at. `fallback` (the
+ * business's current rate) only covers a trip that has no rate of its own.
+ */
+export function paidBack(
+  entry: Pick<MileageEntry, 'miles' | 'vehicleId' | 'rate'>,
+  fallback = 0,
+): number {
+  return entry.vehicleId ? 0 : entry.miles * (entry.rate ?? fallback);
+}
 
 const counts = (status: string) => status === 'approved' || status === 'submitted';
 
@@ -144,12 +157,14 @@ export function projectMoney(
   const lines = [...byCategory.entries()]
     .map(([category, total]) => ({ label: categoryLabel[category], total }))
     .sort((a, b) => b.total - a.total);
-  if (reimbursedMiles && rate)
-    lines.push({ label: 'Mileage paid back', total: reimbursedMiles * rate });
+  const paid = ownCar.reduce((sum, entry) => sum + paidBack(entry, rate), 0);
+  if (reimbursedMiles && paid) lines.push({ label: 'Mileage paid back', total: paid });
+  const rates = new Set(ownCar.map((entry) => entry.rate ?? rate));
   const pending =
     kept.filter((receipt) => receipt.status === 'submitted').reduce((sum, r) => sum + r.total, 0) +
-    ownCar.filter((entry) => entry.status === 'submitted').reduce((sum, e) => sum + e.miles, 0) *
-      rate;
+    ownCar
+      .filter((entry) => entry.status === 'submitted')
+      .reduce((sum, entry) => sum + paidBack(entry, rate), 0);
   return {
     value: project.value,
     allowance: project.costAllowance,
@@ -157,6 +172,7 @@ export function projectMoney(
     pending,
     lines,
     reimbursedMiles: Math.round(reimbursedMiles * 10) / 10,
+    rate: rates.size === 1 ? [...rates][0] || undefined : undefined,
   };
 }
 
@@ -274,7 +290,7 @@ export function weekSummary(
     miles: Math.round(trips.reduce((sum, row) => sum + row.miles, 0) * 10) / 10,
     tracked:
       receipts.filter((row) => row.status !== 'returned').reduce((sum, row) => sum + row.total, 0) +
-      trips.filter((row) => !row.vehicleId).reduce((sum, row) => sum + row.miles, 0) * rate,
+      trips.reduce((sum, row) => sum + paidBack(row, rate), 0),
     activeProjects: data.projects.filter((item) => item.status === 'active').length,
     waiting: [...data.receipts, ...data.mileage].filter((row) => row.status === 'submitted').length,
     busiest: project && top ? { project, events: top[1] } : undefined,

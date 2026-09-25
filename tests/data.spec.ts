@@ -17,6 +17,7 @@ import { createSupabaseSource } from '@/lib/data/supabase/source';
 import { applyWorld, worldSql } from '@/lib/data/supabase/world';
 import type { Workspace } from '@/lib/identity/types';
 import { permissionsFor } from '@/lib/platform/roles';
+import { createBusiness } from '@/lib/business';
 
 /*
  * The real data layer, against the development database: the product's repository over the
@@ -151,6 +152,14 @@ test.describe('parity: the database shows each persona exactly what Demo Mode sh
           expected,
         );
       }
+      // The business's own fields: named by record type and key, the same everywhere.
+      const named = (list: Visible['fields']) =>
+        list
+          .map((field) => `${field.appliesTo}:${field.id}:${field.label}:${field.position}`)
+          .sort();
+      expect(named(await source.load('fields')), `fields for ${person} in ${slug}`).toEqual(
+        named(demo.fields),
+      );
     });
 });
 
@@ -777,3 +786,267 @@ test.describe('businesses and invitations under pressure', () => {
     expect(after?.memberships.map((m) => m.space.kind)).toEqual(['personal']);
   });
 });
+
+/* ---------- business customization (Phase 2C) ---------- */
+
+test.describe('a business sets itself up, and the database holds it to that', () => {
+  /** The Workspace as the app builds it — permissions follow the business's approval setting. */
+  async function as(key: string, slug: string) {
+    const session = await loadSession(u(key), 'demo');
+    const found = session!.memberships.find((item) => item.space.slug === slug)!;
+    const { space, ...membership } = found;
+    const ws: Workspace = {
+      session: session!,
+      person: session!.person,
+      space,
+      membership,
+      permissions: permissionsFor(membership, space),
+    };
+    return { ws, repo: createRepository(ws, createSupabaseSource(ws)) };
+  }
+
+  test('Dana adds a required Cost Code; Mike’s receipt needs it; Dana sees it and approves', async () => {
+    const dana = await as('dana', 'abc-construction');
+    await dana.repo.addField({
+      appliesTo: 'receipts',
+      label: 'Cost Code',
+      type: 'select',
+      options: ['100 — General', '200 — Materials', '300 — Equipment'],
+      required: true,
+    });
+    await dana.repo.updateSettings({ receipts: { requireProject: true, requireVehicle: true } });
+
+    const mike = await as('mike', 'abc-construction');
+    expect(mike.ws.space.settings).toEqual({
+      receipts: { requireProject: true, requireVehicle: true },
+    });
+    expect((await mike.repo.fields('receipts')).map((field) => field.label)).toEqual(['Cost Code']);
+    const receipt = {
+      vendor: 'Menards',
+      category: 'materials' as const,
+      total: 184.2,
+      date: new Date().toISOString(),
+      projectId: u('prj_oakbrook'),
+      vehicleId: u('veh_t24'),
+    };
+    // The database refuses what the form would have caught, whatever sends it.
+    await expect(mike.repo.createReceipt(receipt)).rejects.toThrow('Cost Code is required.');
+    await expect(
+      mike.repo.createReceipt({
+        ...receipt,
+        projectId: undefined,
+        custom: { cost_code: '200 — Materials' },
+      }),
+    ).rejects.toThrow('Choose the project this receipt is for.');
+    await expect(
+      mike.repo.createReceipt({ ...receipt, custom: { cost_code: '999 — Nope' } }),
+    ).rejects.toThrow(/choose one of the options/);
+    const sent = await mike.repo.createReceipt({
+      ...receipt,
+      custom: { cost_code: '200 — Materials' },
+    });
+    expect(sent.status).toBe('submitted');
+
+    const danaAgain = await as('dana', 'abc-construction');
+    const item = (await danaAgain.repo.inbox()).find((entry) => entry.subject.id === sent.id)!;
+    expect(item.detail).toContain('Cost Code: 200 — Materials');
+    await danaAgain.repo.review('receipt', sent.id, 'approved');
+    const onProject = await danaAgain.repo.receipts({ projectId: u('prj_oakbrook') });
+    expect(onProject.find((row) => row.id === sent.id)).toMatchObject({
+      status: 'approved',
+      custom: { cost_code: '200 — Materials' },
+    });
+    const lines = (await danaAgain.repo.activity()).filter(
+      (event) => event.object.type === 'setting',
+    );
+    expect(lines.map((event) => `${event.verb} ${event.object.label}`)).toEqual(
+      expect.arrayContaining([
+        'added required receipt field “Cost Code”',
+        'changed the receipt rules',
+      ]),
+    );
+  });
+
+  test('mileage: the business’s rate and a required purpose, and trips that need no yes', async () => {
+    const dana = await as('dana', 'abc-construction');
+    await dana.repo.updateSettings({
+      mileage: { requirePurpose: true, approval: { mode: 'never' } },
+    });
+    await dana.repo.updateSpace({ mileageRate: 0.67 });
+    const mike = await as('mike', 'abc-construction');
+    expect(mike.ws.space.mileageRate).toBe(0.67);
+    const trip = {
+      date: new Date().toISOString(),
+      from: 'Shop',
+      to: 'Oak Brook',
+      miles: 12,
+      purpose: '',
+    };
+    await expect(mike.repo.createMileage(trip)).rejects.toThrow('Add what the trip was for.');
+    const filed = await mike.repo.createMileage({ ...trip, purpose: 'Site visit' });
+    // Filed with nobody named as its approver: none was needed.
+    expect(filed).toMatchObject({ status: 'approved' });
+    expect(filed.reviewedBy).toBeUndefined();
+    const danaAgain = await as('dana', 'abc-construction');
+    const history = await danaAgain.repo.approvalHistory(filed.id);
+    expect(history.map((event) => event.action)).toEqual(['submitted']);
+    // The new trip is paid back at $0.67; one logged before the change keeps its $0.70.
+    const trips = await danaAgain.repo.mileage();
+    expect(trips.find((row) => row.id === filed.id)?.rate).toBe(0.67);
+    expect(trips.find((row) => row.id === u('mi_abc_07'))?.rate).toBe(0.7);
+  });
+
+  test('receipts over an amount wait; only owners and admins approve when Dana says so', async () => {
+    const dana = await as('dana', 'abc-construction');
+    await dana.repo.updateSettings({
+      receipts: { approval: { mode: 'over', over: 250 } },
+      approvals: { approvers: 'admins' },
+    });
+    const mike = await as('mike', 'abc-construction');
+    const base = {
+      vendor: 'Menards',
+      category: 'materials' as const,
+      date: new Date().toISOString(),
+    };
+    expect((await mike.repo.createReceipt({ ...base, total: 40 })).status).toBe('approved');
+    const big = await mike.repo.createReceipt({ ...base, total: 400 });
+    expect(big.status).toBe('submitted');
+    const ray = await as('ray', 'abc-construction');
+    expect(ray.ws.permissions).not.toContain('expenses.approve');
+    // Even going around the app, the database says no.
+    const forced = await as_(
+      'ray',
+      (tx) =>
+        tx`update receipts set status = 'approved', reviewed_by = ${u('ray')} where id = ${big.id} returning id`,
+    );
+    expect(forced).toHaveLength(0);
+    await (await as('luis', 'abc-construction')).repo.review('receipt', big.id, 'approved');
+  });
+
+  test('configuration stays inside its business, and only owners and admins change it', async () => {
+    const rosa = await as('rosa', 'salt-and-ember');
+    expect((await rosa.repo.fields()).every((field) => field.spaceId === rosa.ws.space.id)).toBe(
+      true,
+    );
+    const mike = await as('mike', 'abc-construction');
+    await expect(
+      mike.repo.addField({ appliesTo: 'receipts', label: 'Tip', type: 'currency' }),
+    ).rejects.toThrow(RuleError);
+    await expect(mike.repo.updateSettings({ receipts: { allowPersonal: false } })).rejects.toThrow(
+      RuleError,
+    );
+    const chris = await as('chris', 'abc-construction');
+    expect(new Set((await chris.repo.fields()).map((field) => field.appliesTo))).toEqual(
+      new Set(['projects']),
+    );
+    const dana = await as('dana', 'abc-construction');
+    await dana.repo.updateSettings({ receipts: { requireProject: true } });
+    expect((await as('chris', 'abc-construction')).ws.space.settings).toBeUndefined();
+    expect((await as('tasha', 'abc-construction')).ws.space.settings).toEqual({
+      receipts: { requireProject: true },
+    });
+  });
+
+  test('stopping a field keeps every answer; a used field can’t be deleted or retyped', async () => {
+    const luis = await as('luis', 'abc-construction');
+    await expect(luis.repo.removeField('projects', 'permit')).rejects.toThrow(RuleError);
+    // Past the repository's own check, the database refuses too.
+    const deleted = await as_(
+      'luis',
+      (tx) =>
+        tx`delete from custom_fields where space_id = ${spaceId('abc-construction')} and key = 'permit' returning key`,
+    ).catch((error: Error) => error);
+    expect(deleted).toBeInstanceOf(Error);
+    await luis.repo.setFieldArchived('projects', 'permit', true);
+    const project = await luis.repo.project(u('prj_oakbrook'));
+    expect(project?.custom?.permit).toBe('BP-26-0412');
+    // Editing other answers leaves the stopped one exactly as it was.
+    await luis.repo.setRecordFields('projects', u('prj_oakbrook'), {
+      ...project!.custom,
+      job_type: 'Commercial',
+    });
+    expect((await luis.repo.project(u('prj_oakbrook')))?.custom).toMatchObject({
+      permit: 'BP-26-0412',
+      job_type: 'Commercial',
+    });
+    await expect(
+      luis.repo.setRecordFields('projects', u('prj_oakbrook'), {
+        ...project!.custom,
+        permit: 'NEW',
+      }),
+    ).rejects.toThrow(/no longer used/);
+  });
+
+  test('people fields are set by people managers only, from the business’s choices', async () => {
+    const luis = await as('luis', 'abc-construction');
+    await luis.repo.setMemberFields(u('mike'), { crew: 'Framing', osha10: true });
+    expect((await luis.repo.member(u('mike')))?.custom).toEqual({ crew: 'Framing', osha10: true });
+    await expect(luis.repo.setMemberFields(u('mike'), { crew: 'Roofing' })).rejects.toThrow(
+      RuleError,
+    );
+    const mike = await as('mike', 'abc-construction');
+    await expect(mike.repo.setMemberFields(u('mike'), { crew: 'Office' })).rejects.toThrow(
+      RuleError,
+    );
+  });
+
+  test('the customization suite passes (supabase/tests/customization.sql)', async () => {
+    test.skip(!process.env.DATABASE_ADMIN_URL, 'Needs DATABASE_ADMIN_URL.');
+    const sql = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} });
+    const file = readFileSync(path.join(__dirname, '../supabase/tests/customization.sql'), 'utf8');
+    await expect(sql.unsafe(file)).rejects.toThrow(/CUSTOMIZATION PASSED/);
+    await sql.end();
+  });
+
+  test('a new business starts from its kind’s setup, as its owner', async () => {
+    test.skip(!process.env.DATABASE_ADMIN_URL, 'Needs DATABASE_ADMIN_URL to act as Supabase Auth.');
+    const sql = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} });
+    const id = randomUUID();
+    try {
+      await sql`insert into auth.users (id, email, raw_user_meta_data, email_confirmed_at)
+                values (${id}, ${`preset-${id.slice(0, 8)}.auth-test@hyphy-tools.example`},
+                        ${sql.json({ name: 'Paz Test' })}, now())`;
+      const session = { ...(await loadSession(id, 'supabase'))!, account: { email: 'x' } };
+      const key = randomUUID();
+      const made = await createBusiness(session, {
+        name: 'Paz Builders',
+        type: 'construction',
+        address: `paz-${id.slice(0, 8)}`,
+        exact: true,
+        requestKey: key,
+      });
+      // The same request again adds nothing twice.
+      await createBusiness(session, {
+        name: 'Paz Builders',
+        type: 'construction',
+        address: `paz-${id.slice(0, 8)}`,
+        exact: true,
+        requestKey: key,
+      });
+      const fields = await sql`select applies_to, key, required from custom_fields
+                               where space_id = ${made.spaceId} order by applies_to, position`;
+      expect(fields.map((row) => `${row.applies_to}:${row.key}:${row.required}`)).toEqual([
+        'projects:job_number:false',
+        'projects:foreman:false',
+        'receipts:cost_code:false',
+        'receipts:reimbursable:false',
+      ]);
+      const [settings] =
+        await sql`select settings from space_settings where space_id = ${made.spaceId}`;
+      expect(settings.settings).toEqual({ receipts: { requireProject: true } });
+      const [space] = await sql`select labels, mileage_rate from spaces where id = ${made.spaceId}`;
+      expect(space.labels).toEqual({
+        projects: { singular: 'Job', plural: 'Jobs' },
+        customer: { singular: 'Customer', plural: 'Customers' },
+      });
+      expect(space.mileage_rate).toBeNull();
+    } finally {
+      await sql`delete from spaces where kind = 'business' and slug = ${`paz-${id.slice(0, 8)}`}`;
+      await sql`delete from auth.users where id = ${id}`;
+      await sql.end();
+    }
+  });
+});
+
+/** Raw SQL as this persona, past the repository. */
+const as_ = <T>(key: string, work: Parameters<typeof asPerson<T>>[1]) => asPerson(u(key), work);

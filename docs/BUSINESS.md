@@ -43,12 +43,15 @@ Not asked: size, revenue, tax ID, billing, custom fields, vehicles. Those come l
 | Real Estate                     | Properties      | Projects, Mileage, PDF, Images, QR, Link Pages  |
 | Creative / Agency               | Projects        | Projects, PDF, Images, QR, Link Pages, Receipts |
 | Transportation / Field Services | Jobs            | Projects, Vehicles, Mileage, Receipts           |
-| Professional Services           | Projects        | Projects, PDF, Receipts, Mileage                |
+| Professional Services           | Engagements     | Projects, PDF, Receipts, Mileage                |
 | Retail                          | —               | Receipts, QR, Link Pages, Images, PDF           |
 | Something else                  | Projects        | Projects, Receipts, QR, PDF                     |
 
 One Projects module underneath; the words come from `spaces.labels` and the work style
-(`lib/platform/work.ts`). No per-industry tables.
+(`lib/platform/work.ts`). No per-industry tables. Each kind also brings a starting setup — its
+words for customers and vehicles, suggested fields (Job Number, Cost Code, Room, MLS Number…) and a
+rule or two — created with the business in the same transaction (docs/CUSTOMIZATION.md, "Presets").
+It is only a starting point, and changing the kind later never takes anything away.
 
 ### Setup, then Home
 
@@ -62,8 +65,9 @@ own role's Home. No invented activity.
 
 ### Settings
 
-Business details: name, kind, what projects are called (one / several), and the mark (a logo
-placeholder until file storage exists). **The address never changes**: links, bookmarks and
+Business settings (docs/CUSTOMIZATION.md): name, kind, words, accent color and the mark (a logo
+placeholder until file storage exists), tools, fields, receipt and mileage rules and who approves.
+**The address never changes**: links, bookmarks and
 invitations keep working, and records refer to the Space by id, so a new name shows everywhere at
 once. (Address changes with redirects can come later if there's a real need.)
 
@@ -222,7 +226,6 @@ real sessions (`lib/teams/index.ts`).
 
 ## Later
 
-- **Business customization** (Phase 2C): custom fields, richer terminology, approval settings.
 - Address changes with redirects; logo upload (with Storage); closing a business (it must have a
   plan for its records and members); ownership among several owners, if ever needed.
 - Account deletion must first transfer or close owned businesses (the one-owner rule already

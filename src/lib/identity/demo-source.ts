@@ -21,10 +21,15 @@ export const demoIdentity: IdentitySource = {
       data.people.find((item) => item.id === DEFAULT_PERSON)!;
     const memberships = data.memberships
       .filter((membership) => membership.personId === person.id && membership.status === 'active')
-      .map((membership) => ({
-        ...membership,
-        space: data.spaces.find((space) => space.id === membership.spaceId)!,
-      }))
+      .map((membership) => {
+        const space = data.spaces.find((item) => item.id === membership.spaceId)!;
+        // A business's rules are for the people who work in it; guests don't receive them (the
+        // database's `space_settings` policy does the same).
+        return {
+          ...membership,
+          space: membership.role === 'guest' && space ? { ...space, settings: undefined } : space,
+        };
+      })
       .filter((membership) => membership.space)
       .sort((a, b) => Number(b.space.kind === 'personal') - Number(a.space.kind === 'personal'));
     return { source: 'demo', person, memberships };

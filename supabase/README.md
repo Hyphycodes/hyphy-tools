@@ -6,30 +6,34 @@ or on plain Postgres (with `tests/prelude.sql` standing in for what Supabase pro
 
 ## What's here
 
-| Path                                                | What it is                                                                                                                                                                                                  |
-| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `migrations/20260925000000_platform_foundation.sql` | Profiles, Spaces, memberships and every Space-owned table; `can(space, permission)` mirroring `src/lib/platform/roles.ts`; Row Level Security on all of it                                                  |
-| `migrations/20260925100000_connected_systems.sql`   | One review shape for receipts and trips, project value and allowance, work style, pins                                                                                                                      |
-| `migrations/20260926000000_real_persistence.sql`    | Approval history, activity written by triggers, review guards, invitations, the Space directory, indexes, policy fixes found in review                                                                      |
-| `migrations/20260927000000_hosted_hardening.sql`    | Found deploying to hosted Supabase: no `anon` access to anything, internal helpers not callable, seeding mode not usable by a person, the `hyphy_app` role, guests' directory narrowed                      |
-| `migrations/20260927100000_advisor_fixes.sql`       | Supabase's database advisor: trigger functions not offered as RPCs, a fixed search path                                                                                                                     |
-| `migrations/20260927200000_no_truncate.sql`         | No TRUNCATE (which bypasses Row Level Security), TRIGGER or REFERENCES for people or the public API                                                                                                         |
-| `migrations/20260928000000_real_accounts.sql`       | Real accounts: every new Supabase Auth user gets a profile, Personal Space and owner membership, once; profile email follows Auth; Personal Spaces hold only their owner; reserved addresses                |
-| `migrations/20260929000000_business_spaces.sql`     | Businesses and teams: create_business, invitations (hashed links, confirmed-email acceptance), role changes, removal, leaving, ownership transfer, one owner always, current membership required everywhere |
-| `migrations/20260929010000_team_indexes.sql`        | Indexes for who revoked an invitation and who removed a member (advisor follow-up)                                                                                                                          |
-| `tests/teams.sql`                                   | Businesses, invitations and team management as real accounts — including everything that must fail; always rolled back                                                                                      |
-| `tests/accounts.sql`                                | The account bootstrap: once and idempotent, nobody bootstraps or edits anyone else, personas untouched; always rolled back                                                                                  |
-| `dev/dev_tools.sql`                                 | **Development only.** The development marker, Demo Mode's personas, and the guarded `dev.reset_world` / `dev.changes_since_seed`                                                                            |
-| `tests/isolation.sql`                               | RLS attack suite: real people trying what must fail (other Spaces, ids from elsewhere, self-approval, guest enumeration, `anon`)                                                                            |
-| `tests/fingerprint.sql`                             | What every persona can see, hashed — identical on every database holding the development world                                                                                                              |
-| `tests/flows.sql`                                   | The product's write paths as real people, checking what the triggers record; always rolled back                                                                                                             |
-| `tests/prelude.sql`                                 | Stand-ins for Supabase's `auth` schema and roles, so the migrations run on plain Postgres                                                                                                                   |
+| Path                                                   | What it is                                                                                                                                                                                                   |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `migrations/20260925000000_platform_foundation.sql`    | Profiles, Spaces, memberships and every Space-owned table; `can(space, permission)` mirroring `src/lib/platform/roles.ts`; Row Level Security on all of it                                                   |
+| `migrations/20260925100000_connected_systems.sql`      | One review shape for receipts and trips, project value and allowance, work style, pins                                                                                                                       |
+| `migrations/20260926000000_real_persistence.sql`       | Approval history, activity written by triggers, review guards, invitations, the Space directory, indexes, policy fixes found in review                                                                       |
+| `migrations/20260927000000_hosted_hardening.sql`       | Found deploying to hosted Supabase: no `anon` access to anything, internal helpers not callable, seeding mode not usable by a person, the `hyphy_app` role, guests' directory narrowed                       |
+| `migrations/20260927100000_advisor_fixes.sql`          | Supabase's database advisor: trigger functions not offered as RPCs, a fixed search path                                                                                                                      |
+| `migrations/20260927200000_no_truncate.sql`            | No TRUNCATE (which bypasses Row Level Security), TRIGGER or REFERENCES for people or the public API                                                                                                          |
+| `migrations/20260928000000_real_accounts.sql`          | Real accounts: every new Supabase Auth user gets a profile, Personal Space and owner membership, once; profile email follows Auth; Personal Spaces hold only their owner; reserved addresses                 |
+| `migrations/20260929000000_business_spaces.sql`        | Businesses and teams: create_business, invitations (hashed links, confirmed-email acceptance), role changes, removal, leaving, ownership transfer, one owner always, current membership required everywhere  |
+| `migrations/20260929010000_team_indexes.sql`           | Indexes for who revoked an invitation and who removed a member (advisor follow-up)                                                                                                                           |
+| `migrations/20260930000000_business_customization.sql` | Business customization: rules (`space_settings`), fields (`custom_fields`), answers on records, every answer and rule checked, who approves, filing without approval, setup activity (docs/CUSTOMIZATION.md) |
+| `migrations/20260930010000_mileage_rate_snapshot.sql`  | Each trip keeps the per-mile rate it was logged at, stamped by the database; a new rate never re-prices old trips                                                                                            |
+| `tests/customization.sql`                              | Business setup attacked from every side: other businesses, wrong answers, stopped fields, roles, approvals, rates, removed members; always rolled back                                                       |
+| `tests/teams.sql`                                      | Businesses, invitations and team management as real accounts — including everything that must fail; always rolled back                                                                                       |
+| `tests/accounts.sql`                                   | The account bootstrap: once and idempotent, nobody bootstraps or edits anyone else, personas untouched; always rolled back                                                                                   |
+| `dev/dev_tools.sql`                                    | **Development only.** The development marker, Demo Mode's personas, and the guarded `dev.reset_world` / `dev.changes_since_seed`                                                                             |
+| `tests/isolation.sql`                                  | RLS attack suite: real people trying what must fail (other Spaces, ids from elsewhere, self-approval, guest enumeration, `anon`)                                                                             |
+| `tests/fingerprint.sql`                                | What every persona can see, hashed — identical on every database holding the development world                                                                                                               |
+| `tests/flows.sql`                                      | The product's write paths as real people, checking what the triggers record; always rolled back                                                                                                              |
+| `tests/prelude.sql`                                    | Stand-ins for Supabase's `auth` schema and roles, so the migrations run on plain Postgres                                                                                                                    |
 
 ### Tables
 
 `profiles`, `spaces`, `space_members`, `projects`, `vehicles`, `receipts`, `mileage_entries`,
 `files` + `file_attachments`, `qr_codes`, `link_pages`, `activity`, `inbox_items`,
-`approval_events`, `pins`, and the `approval_queue` view. Every Space-owned row carries `space_id`
+`approval_events`, `pins`, `space_invitations`, `space_settings`, `custom_fields`, and the
+`approval_queue` view. Every Space-owned row carries `space_id`
 and its creator (`created_by`). **No Storage buckets yet** — see "Files" below.
 
 ### What Row Level Security protects
@@ -47,6 +51,13 @@ and its creator (`created_by`). **No Storage buckets yet** — see "Files" below
 - **Plans and roles** can't be changed from the app: `spaces.plan` has no update grant, and only
   owners grant owner or admin (`invite_member`).
 - **Pins** belong to one person in one Space.
+- **Business setup.** Only owners and admins change a business's rules and fields; managers,
+  members and guests can't, and guests can't read the rules or any field but projects'. Every
+  answer is checked against its field (kind, choices, references inside the business and visible to
+  the person), required answers are required when a record is submitted, a used field can't be
+  deleted or change its kind, and used choices stay. What needs no approval is filed with nobody
+  named as approver; nobody approves their own under any rule; "only owners and admins approve" is
+  enforced by `can()` itself. Each trip's per-mile rate is set by the database (docs/CUSTOMIZATION.md).
 - **Accounts.** A new Supabase Auth user gets exactly one profile, Personal Space and owner
   membership (`private.ensure_person`, callable by nobody). People edit only their own name and
   details — never an id or email. A Personal Space holds only its owner.
@@ -98,9 +109,11 @@ psql "$DATABASE_ADMIN_URL" -f supabase/tests/isolation.sql     # attack suite, r
 HYPHY_DATA=supabase HYPHY_DEMO_RESET=on npm run dev
 ```
 
-**`hyphy-tools-dev`** (hosted, `jgvrqdausbjkfsspjgce`) holds all nine migrations (`real_accounts` and
-`business_spaces` checked there with `tests/accounts.sql` and `tests/teams.sql`), the dev tools
-and the seeded world. It was checked with the same files: `tests/isolation.sql` (every attack
+**`hyphy-tools-dev`** (hosted, `jgvrqdausbjkfsspjgce`) holds all eleven migrations, with the
+migration history's versions matching the files (`real_accounts` and `business_spaces` checked there
+with `tests/accounts.sql` and `tests/teams.sql`; `business_customization` and
+`mileage_rate_snapshot` with `tests/customization.sql`, 82 checks), the dev tools and the seeded
+world. It was checked with the same files: `tests/isolation.sql` (every attack
 refused), `tests/flows.sql` (every write path as real people) and `tests/fingerprint.sql`, whose
 hash is identical to the local database's — every persona sees exactly the same rows on hosted
 Supabase as locally, and locally exactly what Demo Mode shows. To rebuild another development
@@ -129,8 +142,9 @@ Reset in the app calls the same thing, and only when `HYPHY_DEMO_RESET=on` is se
 ## Advisor notes
 
 Supabase's database advisor on `hyphy-tools-dev` has no errors. What it still reports, on purpose:
-the policy helpers, `invite_member` and `space_directory` are callable by signed-in people (they
-must be, and each is covered by `tests/isolation.sql`); and, for scale rather than correctness,
+the policy helpers, `invite_member`, `space_directory`, the team functions, `needs_approval` and
+`set_member_fields` are callable by signed-in people (they must be, and each is covered by
+`tests/isolation.sql`, `tests/teams.sql` or `tests/customization.sql`); and, for scale rather than correctness,
 policies that call `auth.uid()` per row instead of `(select auth.uid())`, and foreign keys on
 `created_by`-style columns without indexes. Worth doing before production data volumes, not now.
 

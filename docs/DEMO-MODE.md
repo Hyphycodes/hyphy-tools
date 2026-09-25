@@ -17,8 +17,15 @@ account, database or setup. It is a preview tool, not security.
   Mike and approve as Dana.
 - **Pins** live in their own small cookie (`hyphy_demo_pins`, `src/lib/data/demo/prefs.ts`) so
   they never age out with the journal. Seeded defaults apply until someone changes their own.
-- **Reset** clears the journal and the pins. The seeded world is regenerated relative to the current time, so
-  "3h ago" is always three hours ago.
+- **Business setup** — words, accent color, tools, the mileage rate, receipt and mileage rules,
+  who approves, and fields — lives in its own compressed cookie (`hyphy_demo_config`,
+  `src/lib/data/demo/config.ts`), apart from the journal so it never ages out. Every persona in the
+  browser reads it, so you can set ABC Construction up as Dana (owner), preview as Mike and meet the
+  forms she made straight away. If a setup ever grows too big for the cookie, the change is refused
+  in plain words instead of half-kept (docs/CUSTOMIZATION.md).
+- **Reset** clears the journal, the pins and the business setup, back to the seeded businesses'
+  own setup. The seeded world is regenerated relative to the current time, so "3h ago" is always
+  three hours ago.
 
 ## On real data
 
@@ -48,7 +55,7 @@ Everything Demo Mode is confined to:
 | `src/lib/identity/dev-source.ts`      | Personas on the development database             |
 | `src/lib/data/supabase/dev.ts`        | Persona lookup, change count, guarded Reset      |
 | `supabase/dev/dev_tools.sql`          | The development marker and persona table         |
-| `src/lib/data/demo/`                  | Seed, clock, journal, demo `Repository`          |
+| `src/lib/data/demo/`                  | Seed, clock, journal, setup cookie, demo source  |
 | `src/lib/demo/actions.ts`, `model.ts` | Preview As / Reset server actions and their data |
 | `src/components/demo/demo-bar.tsx`    | The dock and the Preview As sheet                |
 

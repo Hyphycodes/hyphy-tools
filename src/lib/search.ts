@@ -4,6 +4,7 @@ import type { Repository } from '@/lib/data';
 import type { Workspace } from '@/lib/identity/types';
 import type { CreateAction } from '@/lib/platform/actions';
 import type { NavModel } from '@/lib/platform/navigation';
+import { searchWords } from '@/lib/platform/custom-fields';
 import { inboxLook } from '@/lib/platform/inbox';
 import { roles } from '@/lib/platform/roles';
 import { availability, tools, toolName } from '@/lib/platform/tools';
@@ -63,20 +64,23 @@ export async function buildSearchIndex(
 ): Promise<SearchItem[]> {
   const { space } = workspace;
   const base = `/${space.slug}`;
-  const [projects, vehicles, members, files, inbox, receipts, directory] = await Promise.all([
-    repo.projects(),
-    repo.vehicles(),
-    nav.space.some((item) => item.id === 'people') ? repo.members() : Promise.resolve([]),
-    repo.files(),
-    repo.inbox(),
-    tools.some(
-      (tool) =>
-        tool.id === 'receipts' && availability(tool, space, workspace.membership).state === 'ready',
-    )
-      ? repo.receipts()
-      : Promise.resolve([]),
-    repo.directory(),
-  ]);
+  const [projects, vehicles, members, files, inbox, receipts, directory, fields] =
+    await Promise.all([
+      repo.projects(),
+      repo.vehicles(),
+      nav.space.some((item) => item.id === 'people') ? repo.members() : Promise.resolve([]),
+      repo.files(),
+      repo.inbox(),
+      tools.some(
+        (tool) =>
+          tool.id === 'receipts' &&
+          availability(tool, space, workspace.membership).state === 'ready',
+      )
+        ? repo.receipts()
+        : Promise.resolve([]),
+      repo.directory(),
+      repo.fields(),
+    ]);
   const projectWord = workProfile(space).singular;
   const nameOf = (id?: string) => directory.find((person) => person.id === id)?.firstName;
   const projectName = (id?: string) => projects.find((project) => project.id === id)?.name;
@@ -130,7 +134,8 @@ export async function buildSearchIndex(
       group: 'Projects',
       title: project.name,
       subtitle: [projectWord, project.location, project.client].filter(Boolean).join(' · '),
-      keywords: project.summary,
+      // "24-184" finds the job: the business's own numbers are how people look things up.
+      keywords: [project.summary, searchWords(fields, 'projects', project.custom)].join(' '),
       href: `${base}/projects/${project.id}`,
       boost: project.status === 'active' ? 0.3 : project.status === 'done' ? -0.3 : 0,
       visual: {
@@ -145,6 +150,7 @@ export async function buildSearchIndex(
       group: 'Vehicles',
       title: vehicle.name,
       subtitle: `${vehicle.year} ${vehicle.make} ${vehicle.model} · ${vehicle.plate}`,
+      keywords: searchWords(fields, 'vehicles', vehicle.custom),
       href: `${base}/vehicles/${vehicle.id}`,
       boost: 0.2,
       visual: {
@@ -175,7 +181,7 @@ export async function buildSearchIndex(
       ]
         .filter(Boolean)
         .join(' · '),
-      keywords: `receipt expense ${receipt.category} ${receipt.status === 'submitted' ? 'pending' : receipt.status}`,
+      keywords: `receipt expense ${receipt.category} ${receipt.status === 'submitted' ? 'pending' : receipt.status} ${searchWords(fields, 'receipts', receipt.custom)}`,
       href: `${base}/tools/receipts?receipt=${receipt.id}`,
       visual: { kind: 'tint', icon: 'receipt', bg: 'var(--color-tool-receipt)', fg: '#16150F' },
     })),

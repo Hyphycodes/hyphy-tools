@@ -6,7 +6,12 @@ import { Icon } from '@/components/ui/icon';
 import { createBusinessAction } from '@/lib/business/actions';
 import { initialBusinessState } from '@/lib/business/form';
 import { BASE_PATH } from '@/lib/base-path';
-import { BUSINESS_TYPES, businessTypes, slugify } from '@/lib/platform/business-types';
+import {
+  BUSINESS_TYPES,
+  businessTypes,
+  isBusinessType,
+  slugify,
+} from '@/lib/platform/business-types';
 
 /**
  * Create a business: a name, what kind it is, and (only if they want) its address. Seconds, not a
@@ -153,9 +158,22 @@ export function CreateBusinessForm({ host }: { host: string }) {
             );
           })}
         </div>
-        <p className="text-[12.5px] text-muted">
-          This sets starting words and tools. You can change both later.
-        </p>
+        {isBusinessType(type) && businessTypes[type].fields.length > 0 ? (
+          <p className="text-[12.5px] leading-snug text-muted" data-preset-summary>
+            Starts with{' '}
+            {businessTypes[type].projects ? `${businessTypes[type].projects!.plural} and ` : ''}a
+            few things {businessTypes[type].label.split(' /')[0].toLowerCase()} businesses usually
+            track:{' '}
+            <span className="text-ink-2">
+              {businessTypes[type].fields.map((field) => field.label).join(', ')}
+            </span>
+            . All optional to start, and yours to change in Settings.
+          </p>
+        ) : (
+          <p className="text-[12.5px] text-muted">
+            This sets starting words and tools. You can change both later.
+          </p>
+        )}
       </fieldset>
 
       <Submit pending={pending} pendingLabel="Creating business…">

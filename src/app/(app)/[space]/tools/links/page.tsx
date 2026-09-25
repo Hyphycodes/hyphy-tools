@@ -20,6 +20,15 @@ export default async function LinksPage({ params }: PageProps<'/[space]/tools/li
         base={base}
         code={code}
         brand={workspace.space.brand.color}
+        starter={
+          workspace.space.kind === 'business'
+            ? {
+                title: workspace.space.name,
+                handle: workspace.space.slug.replace(/-/g, '').slice(0, 30),
+                bio: workspace.space.descriptor,
+              }
+            : undefined
+        }
       />
     </Page>
   );

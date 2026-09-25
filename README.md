@@ -77,6 +77,8 @@ tests/                     unit (rules) and end-to-end (personas, access, flows,
 - [docs/DEMO-MODE.md](docs/DEMO-MODE.md) — how the preview works and how to remove it.
 - [docs/AUTH.md](docs/AUTH.md) — real accounts: how they work, what's tested, how to switch them on.
 - [docs/BUSINESS.md](docs/BUSINESS.md) — businesses, teams, invitations, roles and ownership.
+- [docs/CUSTOMIZATION.md](docs/CUSTOMIZATION.md) — how a business makes Hyphy its own: words, tools,
+  fields, receipt and mileage rules, approvals, presets.
 - [docs/DESIGN.md](docs/DESIGN.md) — the visual system.
 - [docs/STUDIO-INVENTORY.md](docs/STUDIO-INVENTORY.md) — what came from Hyphy Studio and what stays there.
 
@@ -88,23 +90,24 @@ paths below are relative to it.
 
 `/` → your main Space. Inside any Space (`/{space}`):
 
-| Path                                     | What                                             |
-| ---------------------------------------- | ------------------------------------------------ |
-| `/`                                      | Home: composed for your role                     |
-| `/inbox`                                 | Needs attention: approvals, documents, mentions  |
-| `/tools`                                 | Tools library                                    |
-| `/tools/receipts` `/tools/mileage`       | Trackers with approvals and CSV export           |
-| `/tools/receipts?receipt=…`              | One receipt: details, status, approve or return  |
-| `/tools/mileage?trip=…`                  | One trip: details, status, approve or return     |
-| `/tools/pdf` `/tools/qr` `/tools/images` | Utilities (ported from Hyphy Studio, extended)   |
-| `/tools/links`                           | Link page editor with live phone preview         |
-| `/projects` `/projects/[id]`             | Projects (a restaurant's are Events), with tabs  |
-| `/vehicles` `/vehicles/[id]`             | Vehicles: fuel, trips, papers, custom fields     |
-| `/people` `/people/[id]`                 | People and the role table                        |
-| `/files`                                 | Files, attached to the records they belong to    |
-| `/activity`                              | The shared activity feed                         |
-| `/settings`                              | Space profile, plan, tools on/off, custom fields |
-| `/profile`                               | One identity, every Space and role               |
+| Path                                       | What                                                      |
+| ------------------------------------------ | --------------------------------------------------------- |
+| `/`                                        | Home: composed for your role                              |
+| `/inbox`                                   | Needs attention: approvals, documents, mentions           |
+| `/tools`                                   | Tools library                                             |
+| `/tools/receipts` `/tools/mileage`         | Trackers with approvals and CSV export                    |
+| `/tools/receipts?receipt=…`                | One receipt: details, status, approve or return           |
+| `/tools/mileage?trip=…`                    | One trip: details, status, approve or return              |
+| `/tools/pdf` `/tools/qr` `/tools/images`   | Utilities (ported from Hyphy Studio, extended)            |
+| `/tools/links`                             | Link page editor with live phone preview                  |
+| `/projects` `/projects/[id]`               | Projects (a restaurant's are Events), with tabs           |
+| `/vehicles` `/vehicles/[id]`               | Vehicles: fuel, trips, papers, the business's fields      |
+| `/people` `/people/[id]`                   | People and the role table                                 |
+| `/files`                                   | Files, attached to the records they belong to             |
+| `/activity`                                | The shared activity feed                                  |
+| `/settings`                                | Business settings: summary, tools on/off, plan            |
+| `/settings/basics` … `/settings/approvals` | Words, color, fields, receipt/mileage rules, who approves |
+| `/profile`                                 | One identity, every Space and role                        |
 
 ## Deployment
 

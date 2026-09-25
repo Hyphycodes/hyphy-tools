@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { CreateButton } from '@/components/create/create-button';
+import { Facts, fieldRows } from '@/components/fields/field-facts';
+import { EditRecordFields } from '@/components/fields/record-fields';
 import { ActivityList } from '@/components/records/activity-list';
 import { FileRow, MileageRow, ReceiptRow, VehicleSwatch } from '@/components/records/rows';
 import { VehicleStatusBadge } from '@/components/records/status';
@@ -11,7 +13,8 @@ import { Page } from '@/components/ui/page';
 import { Panel, PanelHeader } from '@/components/ui/panel';
 import { thisMonth, vehicleProject } from '@/lib/insights';
 import { openPage } from '@/lib/page';
-import { formatField } from '@/lib/platform/custom-fields';
+import { formFields } from '@/lib/platform/custom-fields';
+import { vehicleWords } from '@/lib/platform/terms';
 import { formatCurrency, formatMiles, formatNumber, plural } from '@/lib/platform/format';
 import type { FieldType } from '@/lib/platform/types';
 
@@ -25,12 +28,14 @@ export default async function VehiclePage({ params }: PageProps<'/[space]/vehicl
   const { id } = await params;
   const vehicle = await repo.vehicle(id);
   if (!vehicle) notFound();
-  const [receipts, mileage, files, activity, projects] = await Promise.all([
+  const [receipts, mileage, files, activity, projects, fields, vehicles] = await Promise.all([
     repo.receipts({ vehicleId: id }),
     repo.mileage({ vehicleId: id }),
     repo.files({ attachedTo: { type: 'vehicle', id } }),
     repo.activity({ about: { type: 'vehicle', id } }),
     repo.projects(),
+    repo.fields('vehicles'),
+    repo.vehicles(),
   ]);
   const driver = vehicle.assignedTo ? people.get(vehicle.assignedTo) : undefined;
   const fuel = receipts.filter(
@@ -55,13 +60,19 @@ export default async function VehiclePage({ params }: PageProps<'/[space]/vehicl
         fills.slice(1).reduce((sum, receipt) => sum + receipt.gallons!, 0)
       : null;
   const toService = vehicle.nextServiceMiles ? vehicle.nextServiceMiles - vehicle.odometer : null;
-  const fields = workspace.space.customFields?.vehicles ?? [];
   const lookup = (type: FieldType, value: string) =>
     type === 'project'
       ? projects.find((project) => project.id === value)?.name
       : type === 'person'
         ? people.get(value)?.name
-        : undefined;
+        : type === 'vehicle'
+          ? vehicles.find((item) => item.id === value)?.name
+          : undefined;
+  const details = fieldRows(fields, 'vehicles', vehicle.custom, lookup, tz);
+  const editable = can('vehicles.manage')
+    ? formFields(fields, 'vehicles', workspace.space.modules)
+    : [];
+  const words = vehicleWords(workspace.space);
 
   return (
     <Page wide>
@@ -74,7 +85,7 @@ export default async function VehiclePage({ params }: PageProps<'/[space]/vehicl
           size={15}
           className="transition-transform group-hover:-translate-x-0.5"
         />{' '}
-        Vehicles
+        {words.plural}
       </Link>
       <header className="mb-6 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
         <div className="flex items-center gap-4">
@@ -271,24 +282,22 @@ export default async function VehiclePage({ params }: PageProps<'/[space]/vehicl
               </p>
             )}
           </Panel>
-          {fields.length > 0 && (
-            <Panel>
+          {(details.length > 0 || editable.length > 0) && (
+            <Panel aria-label="Details">
               <PanelHeader title="Details">
-                <span className="text-[11.5px] text-faint">Custom fields</span>
+                <EditRecordFields
+                  type="vehicles"
+                  id={vehicle.id}
+                  fields={editable}
+                  values={vehicle.custom}
+                  title={vehicle.name}
+                />
               </PanelHeader>
-              <dl className="row-divide px-4 pb-2">
-                {fields.map((field) => (
-                  <div
-                    key={field.id}
-                    className="flex items-center justify-between gap-4 py-2.5 text-[13.5px]"
-                  >
-                    <dt className="text-muted">{field.label}</dt>
-                    <dd className="text-right font-medium">
-                      {formatField(field, vehicle.custom?.[field.id], lookup, tz)}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
+              {details.length ? (
+                <Facts rows={details} className="px-4 pb-2" />
+              ) : (
+                <p className="px-4 pb-4 text-[13px] text-muted">Nothing filled in yet.</p>
+              )}
             </Panel>
           )}
           <Panel>

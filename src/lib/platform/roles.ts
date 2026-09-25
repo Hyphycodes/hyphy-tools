@@ -1,4 +1,5 @@
-import type { Membership, Role } from './types';
+import { isApprover } from './business-settings';
+import type { Membership, Role, Space } from './types';
 
 /**
  * What a role lets someone do inside one Space. Deliberately short: five roles, a handful of
@@ -89,13 +90,29 @@ export const roles: Record<
 
 export const ROLE_ORDER: Role[] = ['owner', 'admin', 'manager', 'member', 'guest'];
 
-/** The permissions a membership grants. The one place roles turn into capabilities. */
-export function permissionsFor(membership: Pick<Membership, 'role'>): Permission[] {
-  return [...byRole[membership.role]];
+/**
+ * The permissions a membership grants. The one place roles turn into capabilities.
+ *
+ * A Space can narrow one thing, and only for managers: whether they approve (Settings → Approvals,
+ * "Owners and admins" or "…and managers"). It never adds a capability to a role, and the database
+ * answers the same way (`public.can`).
+ */
+export function permissionsFor(
+  membership: Pick<Membership, 'role'>,
+  space?: Pick<Space, 'kind' | 'settings'>,
+): Permission[] {
+  const list = [...byRole[membership.role]];
+  if (space && membership.role === 'manager' && !isApprover(space, membership))
+    return list.filter((permission) => permission !== 'expenses.approve');
+  return list;
 }
 
-export function can(membership: Pick<Membership, 'role'>, permission: Permission) {
-  return byRole[membership.role].includes(permission);
+export function can(
+  membership: Pick<Membership, 'role'>,
+  permission: Permission,
+  space?: Pick<Space, 'kind' | 'settings'>,
+) {
+  return permissionsFor(membership, space).includes(permission);
 }
 
 /** Owners, admins and managers run the Space; members and guests use it. */

@@ -19,8 +19,11 @@ export async function loadSession(
     personId,
     `select (select to_json(p) from profiles p where p.id = ${ME}) as profile,
             (select coalesce(json_agg(x), '[]'::json) from (
-               select m.*, to_jsonb(s) as space from space_members m
+               select m.*, to_jsonb(s) || jsonb_build_object('settings', ss.settings) as space
+               from space_members m
                join spaces s on s.id = m.space_id
+               -- The business's rules; Row Level Security leaves them out for guests.
+               left join space_settings ss on ss.space_id = s.id
                where m.person_id = ${ME} and m.status = 'active') x) as memberships`,
   );
   if (!row?.profile) return null;

@@ -146,8 +146,11 @@ export function QrTool({
   initial,
   canSave,
   spaceName,
+  accent,
 }: {
   slug: string;
+  /** The business's accent, made scannable: the default ink for its new codes. */
+  accent?: string;
   initial?: {
     content: string;
     fg: string;
@@ -179,7 +182,14 @@ export function QrTool({
   });
   const [caption, setCaption] = useState('');
   const [level, setLevel] = useState<QrLevel>('M');
-  const [fg, setFg] = useState(initial?.fg.toLowerCase() ?? DEFAULT_FG);
+  const [fg, setFg] = useState(initial?.fg.toLowerCase() ?? accent?.toLowerCase() ?? DEFAULT_FG);
+  // Set the business's color once; every new code starts in it (and can still be changed).
+  const presets = accent
+    ? [
+        { fg: accent.toLowerCase(), bg: '#ffffff', name: `${spaceName} color` },
+        ...PRESETS.filter((preset) => preset.fg !== accent.toLowerCase()),
+      ]
+    : PRESETS;
   const [bg, setBg] = useState(initial?.bg.toLowerCase() ?? DEFAULT_BG);
   const [margin, setMargin] = useState(4);
   const [size, setSize] = useState(1024);
@@ -536,7 +546,7 @@ export function QrTool({
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {PRESETS.map((preset) => (
+            {presets.map((preset) => (
               <button
                 key={preset.fg + preset.bg}
                 type="button"

@@ -64,18 +64,20 @@ begin
   perform set_config('lock_timeout', '10s', true);
   lock table public.pins, public.approval_events, public.activity, public.inbox_items,
     public.file_attachments, public.qr_codes, public.link_pages, public.receipts,
-    public.mileage_entries, public.files, public.vehicles, public.projects, public.space_members,
-    public.spaces, public.profiles, dev.personas in access exclusive mode;
+    public.mileage_entries, public.files, public.vehicles, public.projects, public.custom_fields,
+    public.space_settings, public.space_members, public.spaces, public.profiles, dev.personas
+    in access exclusive mode;
   truncate table public.pins, public.approval_events, public.activity, public.inbox_items,
     public.file_attachments, public.qr_codes, public.link_pages, public.receipts,
-    public.mileage_entries, public.files, public.vehicles, public.projects, public.space_members,
-    public.spaces, public.profiles cascade;
+    public.mileage_entries, public.files, public.vehicles, public.projects, public.custom_fields,
+    public.space_settings, public.space_members, public.spaces, public.profiles cascade;
   delete from dev.personas;
   seeded := array(select (row ->> 'id')::uuid from jsonb_array_elements(world -> 'tables' -> 'auth.users') row);
   -- Identities made during the session (invitations) go; the seeded people stay.
   delete from auth.users where id <> all (seeded);
   foreach target in array array[
-    'auth.users', 'public.profiles', 'public.spaces', 'public.space_members', 'public.projects',
+    'auth.users', 'public.profiles', 'public.spaces', 'public.space_members',
+    'public.space_settings', 'public.custom_fields', 'public.projects',
     'public.vehicles', 'public.files', 'public.file_attachments', 'public.receipts',
     'public.mileage_entries', 'public.link_pages', 'public.qr_codes', 'public.activity',
     'public.inbox_items', 'public.approval_events', 'public.pins', 'dev.personas'

@@ -1,7 +1,8 @@
 import type { CreateAction, CreateActionId } from '@/lib/platform/actions';
+import type { ApprovalRule, FormRules } from '@/lib/platform/business-settings';
 import type { NavModel } from '@/lib/platform/navigation';
 import type { Permission } from '@/lib/platform/roles';
-import type { Person, Role, Space } from '@/lib/platform/types';
+import type { FieldDefinition, Person, Role, Space } from '@/lib/platform/types';
 
 /** What the client shell knows about the current Workspace. Serializable, built on the server. */
 export type ShellModel = {
@@ -50,7 +51,23 @@ export type ShellModel = {
       projectId?: string;
     }[];
   };
-  labels: { project: string; projects: string };
+  labels: {
+    project: string;
+    projects: string;
+    vehicle: string;
+    vehicles: string;
+    customer: string;
+  };
+  /**
+   * What this business asks for, for the forms this person fills in: its fields in use (only the
+   * record types they can reach) and its rules. They're simply "what ABC needs from you".
+   */
+  setup: {
+    fields: FieldDefinition[];
+    rules: FormRules;
+    /** When a receipt or trip from this person waits for approval. */
+    approval: { receipt: ApprovalRule | null; mileage: ApprovalRule | null };
+  };
 };
 
 export type { CreateAction, CreateActionId };

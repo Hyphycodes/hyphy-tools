@@ -6,7 +6,8 @@ import type { Space, WorkStyle } from './types';
  * A builder's job has a contract value, costs, trips and trucks; a restaurant's event has a date,
  * a team, files and QR codes, and no "percent complete".
  *
- * Words come from `space.labels` when a Space names things itself, else from the style.
+ * Words come from `space.labels` when a Space chose its own (`lib/platform/terms.ts`), else from
+ * the style.
  */
 export type WorkProfile = {
   style: WorkStyle;
@@ -72,6 +73,7 @@ export function workProfile(space: Pick<Space, 'workStyle' | 'labels'>): WorkPro
     ...base,
     singular: labels?.singular ?? base.singular,
     plural: labels?.plural ?? base.plural,
+    client: space.labels?.customer?.singular ?? base.client,
   };
 }
 

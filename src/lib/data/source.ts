@@ -1,6 +1,8 @@
 import type {
   ActivityEvent,
   ApprovalEvent,
+  FieldDefinition,
+  FieldValue,
   FileRecord,
   InboxItem,
   LinkPage,
@@ -8,6 +10,7 @@ import type {
   Person,
   PinTarget,
   Project,
+  RecordType,
   QrCode,
   Receipt,
   Vehicle,
@@ -43,6 +46,11 @@ export type Visible = {
   /** Everyone who belongs to this Space, for names on records. */
   directory: Person[];
   approvalEvents: ApprovalEvent[];
+  /**
+   * The business's own fields (every one, archived too), for the records this person can see:
+   * a guest gets only what their shared projects need.
+   */
+  fields: FieldDefinition[];
 };
 
 export type WritableTable =
@@ -60,6 +68,22 @@ export type Change =
   | { op: 'insert'; table: WritableTable; row: Record<string, unknown> }
   | { op: 'update'; table: WritableTable; id: string; patch: Record<string, unknown> };
 
+/** A change to the business's own fields. A field is named by its record type and key. */
+export type FieldChange =
+  | { op: 'insert'; field: FieldDefinition }
+  | {
+      op: 'update';
+      appliesTo: RecordType;
+      id: string;
+      patch: Partial<
+        Pick<
+          FieldDefinition,
+          'label' | 'type' | 'options' | 'required' | 'help' | 'showInList' | 'position'
+        >
+      > & { archivedAt?: string | null };
+    }
+  | { op: 'delete'; appliesTo: RecordType; id: string };
+
 export interface DataSource {
   readonly kind: 'demo' | 'supabase';
   load<K extends keyof Visible>(key: K): Promise<Visible[K]>;
@@ -71,6 +95,10 @@ export interface DataSource {
    */
   write(changes: Change[]): Promise<void>;
   invite(input: InviteInput): Promise<Member>;
+  /** Changes the business's fields together; the database refuses what would harm saved values. */
+  writeFields(changes: FieldChange[]): Promise<void>;
+  /** A person's answers to the business's People fields (only people managers). */
+  setMemberFields(personId: string, custom: Record<string, FieldValue>): Promise<void>;
   pins(): Promise<PinTarget[]>;
   setPins(pins: PinTarget[]): Promise<void>;
 }

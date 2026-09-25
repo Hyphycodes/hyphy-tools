@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type {
   ActivityEvent,
   ApprovalEvent,
+  FieldDefinition,
   FileRecord,
   InboxItem,
   LinkPage,
@@ -82,9 +83,11 @@ export function spaceFrom(row: Row): Space {
     brand: json<Space['brand']>(row.brand, { color: '#3240FF', ink: 'light', monogram: 'H' }),
     timezone: String(row.timezone),
     ownerId: str(row.owner_id),
-    customFields: Object.keys(json(row.custom_fields, {})).length
-      ? json(row.custom_fields, {})
-      : undefined,
+    // Joined from `space_settings`; absent for guests, whom the policy doesn't give it to.
+    settings:
+      row.settings && Object.keys(json(row.settings, {})).length
+        ? json<Space['settings']>(row.settings, {})
+        : undefined,
     businessType: (row.business_type as Space['businessType']) ?? undefined,
     setupDoneAt: iso(row.setup_done_at),
     createdAt: iso(row.created_at)!,
@@ -181,6 +184,7 @@ export function receiptFrom(row: Row): Receipt {
     projectId: str(row.project_id),
     fileId: str(row.file_id),
     notes: str(row.notes),
+    custom: customFrom(row.custom),
   });
 }
 
@@ -196,7 +200,63 @@ export function mileageFrom(row: Row): MileageEntry {
     roundTrip: row.round_trip ? true : undefined,
     vehicleId: str(row.vehicle_id),
     projectId: str(row.project_id),
+    rate: num(row.rate),
+    custom: customFrom(row.custom),
   });
+}
+
+function customFrom(value: unknown) {
+  const custom = json<Receipt['custom']>(value, {});
+  return custom && Object.keys(custom).length ? custom : undefined;
+}
+
+export function fieldFrom(row: Row): FieldDefinition {
+  const options = json<string[]>(row.options, []);
+  return clean({
+    id: String(row.key),
+    spaceId: String(row.space_id),
+    appliesTo: row.applies_to as FieldDefinition['appliesTo'],
+    label: String(row.label),
+    type: row.type as FieldDefinition['type'],
+    options: options.length ? options : undefined,
+    help: str(row.help) || undefined,
+    required: row.required ? true : undefined,
+    position: Number(row.position ?? 0),
+    showInList: row.show_in_list ? true : undefined,
+    archivedAt: iso(row.archived_at),
+    createdBy: str(row.created_by),
+    createdAt: iso(row.created_at),
+  });
+}
+
+/**
+ * A field definition (or a change to one) as `custom_fields` columns. `options` stays an array:
+ * the caller sends it as JSON (`tx.json`), never as a Postgres array.
+ */
+export function fieldColumns(
+  field: Partial<Omit<FieldDefinition, 'archivedAt'>> & { archivedAt?: string | null },
+) {
+  const map: Record<string, string> = {
+    id: 'key',
+    spaceId: 'space_id',
+    appliesTo: 'applies_to',
+    label: 'label',
+    type: 'type',
+    options: 'options',
+    help: 'help',
+    required: 'required',
+    position: 'position',
+    showInList: 'show_in_list',
+    archivedAt: 'archived_at',
+    createdBy: 'created_by',
+    createdAt: 'created_at',
+  };
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(field)) {
+    if (!map[key] || value === undefined) continue;
+    out[map[key]] = key === 'options' ? (value ?? []) : value;
+  }
+  return out;
 }
 
 export function fileFrom(row: Row): FileRecord {
@@ -358,6 +418,7 @@ export const columns = {
     projectId: 'project_id',
     fileId: 'file_id',
     notes: 'notes',
+    custom: 'custom',
     reviewedBy: 'reviewed_by',
     reviewedAt: 'reviewed_at',
     returnReason: 'return_reason',
@@ -377,6 +438,7 @@ export const columns = {
     roundTrip: 'round_trip',
     vehicleId: 'vehicle_id',
     projectId: 'project_id',
+    custom: 'custom',
     status: 'status',
     reviewedBy: 'reviewed_by',
     reviewedAt: 'reviewed_at',
@@ -447,7 +509,6 @@ export const columns = {
     modules: 'modules',
     labels: 'labels',
     brand: 'brand',
-    customFields: 'custom_fields',
     timezone: 'timezone',
     ownerId: 'owner_id',
     workStyle: 'work_style',

@@ -4,8 +4,15 @@ import { createReceipt, resubmitReceipt } from '@/app/(app)/[space]/actions';
 import { Button } from '@/components/ui/button';
 import { Field, Input, Select, Textarea } from '@/components/ui/form';
 import { Icon } from '@/components/ui/icon';
+import {
+  answerProblems,
+  answersOf,
+  FieldInputs,
+  firstProblem,
+} from '@/components/fields/field-inputs';
 import { useWorkspace } from '@/components/shell/workspace-context';
 import { formatCurrency } from '@/lib/platform/format';
+import { PERSONAL_PAYMENT } from '@/lib/platform/payments';
 import type { ReceiptCategory } from '@/lib/platform/types';
 import { useSubmit, type FormProps } from './create-sheets';
 import {
@@ -40,19 +47,27 @@ type Photo = { kind: 'file'; url: string; name: string; pdf: boolean } | { kind:
 export function ReceiptForm({ request, onDone, formId }: FormProps) {
   const workspace = useWorkspace();
   const id = useId();
-  const { pending, error, submit } = useSubmit(onDone);
+  const { pending, error, submit, fail } = useSubmit(onDone);
   const mine = workspace.options.vehicles.find(
     (vehicle) => vehicle.assignedTo === workspace.person.id,
   );
   const attached = request.attachTo;
+  // What this business asks of a receipt: its rules and its own fields.
+  const rules = workspace.setup.rules.receipts;
+  const fields = workspace.setup.fields.filter((field) => field.appliesTo === 'receipts');
   // Fixing a returned receipt (or finishing a draft) starts from what was saved.
   const editing = request.edit?.kind === 'receipt' ? request.edit.record : undefined;
   const [photo, setPhoto] = useState<Photo | null>(null);
   const [category, setCategory] = useState<ReceiptCategory>(
     editing?.category ??
       (request.preset?.category as ReceiptCategory) ??
+      rules.defaultCategory ??
       (mine ? 'fuel' : 'materials'),
   );
+  const [answers, setAnswers] = useState(() =>
+    answersOf(fields, editing?.custom, workspace.space.timezone),
+  );
+  const [problems, setProblems] = useState<Record<string, string>>({});
   const [vendor, setVendor] = useState(editing?.vendor ?? '');
   const [total, setTotal] = useState(editing?.total ? String(editing.total) : '');
   const [date, setDate] = useState(() =>
@@ -93,11 +108,32 @@ export function ReceiptForm({ request, onDone, formId }: FormProps) {
   );
 
   const business = workspace.space.kind === 'business';
-  const needsApproval = business && !workspace.can('expenses.approve');
+  // Approvers file straight through; others wait unless this business doesn't ask (or not below
+  // an amount).
+  const approval = workspace.setup.approval.receipt;
+  const needsApproval =
+    Boolean(approval) &&
+    (approval!.mode === 'always' ||
+      (approval!.mode === 'over' && Number(total || 0) > (approval!.over ?? 0)));
   const payments = [
     ...(vehicle?.fuelCardLast4 ? [`Fuel card ••${vehicle.fuelCardLast4}`] : []),
-    ...(business ? ['Company card', 'Personal card (reimburse me)'] : ['Card', 'Cash']),
+    ...(business
+      ? ['Company card', ...(rules.personalPayment ? [PERSONAL_PAYMENT] : [])]
+      : ['Card', 'Cash']),
   ];
+  const showVehicle = rules.vehicle !== 'off' && workspace.options.vehicles.length > 0;
+  const showProject = rules.project !== 'off' && workspace.options.projects.length > 0;
+  /** What the business requires before this can be sent, found before the server has to say it. */
+  const missing = () => {
+    const found = answerProblems(fields, 'receipts', answers);
+    setProblems(found);
+    if (!vendor.trim()) return 'Add where it was from.';
+    if (showProject && rules.project === 'required' && !projectId)
+      return `Choose the ${workspace.labels.project.toLowerCase()} this receipt is for.`;
+    if (showVehicle && rules.vehicle === 'required' && !vehicleId)
+      return `Choose the ${workspace.labels.vehicle.toLowerCase()} this receipt is for.`;
+    return firstProblem(fields, found);
+  };
   if (payment && !payments.includes(payment)) payments.unshift(payment);
 
   function fillSample() {
@@ -122,13 +158,18 @@ export function ReceiptForm({ request, onDone, formId }: FormProps) {
     projectId,
     paymentMethod: payment || payments[0],
     notes,
+    custom: answers,
   });
 
   return (
     <form
       id={formId}
+      // The business's requirements are said in Hyphy's words, not the browser's bubble.
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
+        const problem = missing();
+        if (problem) return fail(problem);
         submit(
           () =>
             editing
@@ -315,31 +356,19 @@ export function ReceiptForm({ request, onDone, formId }: FormProps) {
       </Section>
 
       <Section title="Where it goes">
-        {workspace.options.vehicles.length > 0 && (
-          <Field label="Vehicle" htmlFor={`${id}-vehicle`} optional>
-            <Select
-              id={`${id}-vehicle`}
-              value={vehicleId}
-              onChange={(event) => setVehicleId(event.target.value)}
-            >
-              <option value="">No vehicle</option>
-              {workspace.options.vehicles.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                  {item.assignedTo === workspace.person.id ? ' (yours)' : ''}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        )}
-        {workspace.options.projects.length > 0 && (
-          <Field label={workspace.labels.project} htmlFor={`${id}-project`} optional>
+        {showProject && (
+          <Field
+            label={workspace.labels.project}
+            htmlFor={`${id}-project`}
+            optional={rules.project !== 'required'}
+          >
             <Select
               id={`${id}-project`}
               value={projectId}
+              required={rules.project === 'required'}
               onChange={(event) => setProjectId(event.target.value)}
             >
-              <option value="">None</option>
+              <option value="">{rules.project === 'required' ? 'Choose one' : 'None'}</option>
               {workspace.options.projects
                 .filter((project) => project.status !== 'done')
                 .map((project) => (
@@ -350,6 +379,39 @@ export function ReceiptForm({ request, onDone, formId }: FormProps) {
             </Select>
           </Field>
         )}
+        {showVehicle && (
+          <Field
+            label={workspace.labels.vehicle}
+            htmlFor={`${id}-vehicle`}
+            optional={rules.vehicle !== 'required'}
+          >
+            <Select
+              id={`${id}-vehicle`}
+              value={vehicleId}
+              required={rules.vehicle === 'required'}
+              onChange={(event) => setVehicleId(event.target.value)}
+            >
+              <option value="">
+                {rules.vehicle === 'required'
+                  ? 'Choose one'
+                  : `No ${workspace.labels.vehicle.toLowerCase()}`}
+              </option>
+              {workspace.options.vehicles.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                  {item.assignedTo === workspace.person.id ? ' (yours)' : ''}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
+        <FieldInputs
+          fields={fields}
+          answers={answers}
+          errors={problems}
+          idPrefix={id}
+          onChange={(key, value) => setAnswers((current) => ({ ...current, [key]: value }))}
+        />
         <Field label="Paid with" htmlFor={`${id}-payment`}>
           <Select
             id={`${id}-payment`}
@@ -377,9 +439,11 @@ export function ReceiptForm({ request, onDone, formId }: FormProps) {
         note={
           needsApproval
             ? 'Goes to your managers for approval'
-            : business
-              ? 'Filed as approved'
-              : undefined
+            : business && approval
+              ? 'Filed right away — no approval needed'
+              : business
+                ? 'Filed as approved'
+                : undefined
         }
       >
         {!editing && (

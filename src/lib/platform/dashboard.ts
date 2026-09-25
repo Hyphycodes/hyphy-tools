@@ -66,7 +66,7 @@ const rules: Rule[] = [
   {
     id: 'approvals',
     area: 'main',
-    when: (space, m) => operator(space, m) && can(m, 'expenses.approve'),
+    when: (space, m) => operator(space, m) && can(m, 'expenses.approve', space),
   },
   { id: 'attention', area: 'main', when: operator },
   { id: 'exceptions', area: 'main', when: operator },

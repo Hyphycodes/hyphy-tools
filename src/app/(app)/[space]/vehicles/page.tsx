@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { CreateButton } from '@/components/create/create-button';
+import { listLine } from '@/components/fields/field-facts';
 import { VehicleSwatch } from '@/components/records/rows';
 import { VehicleStatusBadge } from '@/components/records/status';
 import { Avatar } from '@/components/ui/avatar';
@@ -9,39 +10,55 @@ import { Page, PageHeader } from '@/components/ui/page';
 import { Panel } from '@/components/ui/panel';
 import { openPage } from '@/lib/page';
 import { daysUntil, formatCurrency, formatNumber, startOfMonth } from '@/lib/platform/format';
+import { vehicleWords } from '@/lib/platform/terms';
+import type { FieldType } from '@/lib/platform/types';
 
 export const metadata = { title: 'Vehicles' };
 
 export default async function VehiclesPage({ params }: PageProps<'/[space]/vehicles'>) {
   const { workspace, repo, base, people, tz, can } = await openPage(params, 'vehicles');
-  const [vehicles, receipts, mileage, files] = await Promise.all([
+  const [vehicles, receipts, mileage, files, fields, projects] = await Promise.all([
     repo.vehicles(),
     repo.receipts(),
     repo.mileage(),
     repo.files(),
+    repo.fields('vehicles'),
+    repo.projects(),
   ]);
+  const words = vehicleWords(workspace.space);
+  const lookup = (type: FieldType, id: string) =>
+    type === 'person'
+      ? people.get(id)?.name
+      : type === 'project'
+        ? projects.find((project) => project.id === id)?.name
+        : type === 'vehicle'
+          ? vehicles.find((vehicle) => vehicle.id === id)?.name
+          : undefined;
   const since = startOfMonth(tz);
   const month = (iso: string) => new Date(iso).getTime() >= since;
 
   return (
     <Page wide>
       <PageHeader
-        title="Vehicles"
+        title={words.plural}
         description={
           can('vehicles.view_all')
-            ? `Who has which vehicle, what it’s costing and what’s coming due in ${workspace.space.name}.`
-            : 'The vehicle assigned to you.'
+            ? `Who has which ${words.singular.toLowerCase()}, what it’s costing and what’s coming due in ${workspace.space.name}.`
+            : `The ${words.singular.toLowerCase()} assigned to you.`
         }
         actions={
-          <CreateButton request="vehicle" variant="primary" icon="plus">
-            Add vehicle
-          </CreateButton>
+          can('vehicles.manage') ? (
+            <CreateButton request="vehicle" variant="primary" icon="plus">
+              Add {words.singular.toLowerCase()}
+            </CreateButton>
+          ) : undefined
         }
       />
       {vehicles.length === 0 ? (
         <Panel>
-          <EmptyState icon="truck" title="No vehicle assigned to you">
-            When a manager assigns you a vehicle, its fuel, miles and papers show up here.
+          <EmptyState icon="truck" title={`No ${words.singular.toLowerCase()} assigned to you`}>
+            When a manager assigns you a {words.singular.toLowerCase()}, its fuel, miles and papers
+            show up here.
           </EmptyState>
         </Panel>
       ) : (
@@ -81,6 +98,11 @@ export default async function VehiclesPage({ params }: PageProps<'/[space]/vehic
                       {vehicle.year} {vehicle.make} {vehicle.model}
                     </p>
                     <p className="mono-num mt-1 text-[11.5px] text-faint">{vehicle.plate}</p>
+                    {listLine(fields, 'vehicles', vehicle.custom, lookup, tz).length > 0 && (
+                      <p className="mt-1 truncate text-[12.5px] font-medium text-ink-2">
+                        {listLine(fields, 'vehicles', vehicle.custom, lookup, tz).join(' · ')}
+                      </p>
+                    )}
                   </div>
                   <VehicleStatusBadge status={vehicle.status} />
                 </div>

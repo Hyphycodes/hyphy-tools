@@ -63,6 +63,18 @@ export function SubmissionTimeline({
                 icon: 'check',
               },
     );
+  // Filed under the business's rules with nobody's approval, because none was needed.
+  if (
+    record.status === 'approved' &&
+    !record.reviewedBy &&
+    !events.some((event) => event.action === 'approved')
+  )
+    steps.push({
+      label: 'Filed — no approval needed',
+      detail: 'This business doesn’t ask for approval here',
+      done: true,
+      icon: 'check',
+    });
   if (record.status === 'submitted')
     steps.push({
       label: 'Waiting for a manager',

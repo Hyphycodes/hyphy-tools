@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { listLine } from '@/components/fields/field-facts';
 import { CreateButton } from '@/components/create/create-button';
 import { ProjectStatusBadge } from '@/components/records/status';
 import { AvatarStack } from '@/components/ui/avatar';
@@ -19,7 +20,7 @@ import {
   formatDateLong,
 } from '@/lib/platform/format';
 import { keyDate, workProfile } from '@/lib/platform/work';
-import type { Person, ProjectStatus } from '@/lib/platform/types';
+import type { FieldType, Person, ProjectStatus } from '@/lib/platform/types';
 
 export const metadata = { title: 'Projects' };
 
@@ -37,13 +38,24 @@ export default async function ProjectsPage({
 }: PageProps<'/[space]/projects'>) {
   const { workspace, repo, base, people, tz, can } = await openPage(params, 'projects');
   const view = String((await searchParams).status ?? 'open');
-  const [projects, receipts, mileage, files, pins] = await Promise.all([
+  const [projects, receipts, mileage, files, pins, fields, vehicles] = await Promise.all([
     repo.projects(),
     repo.receipts(),
     repo.mileage(),
     repo.files(),
     repo.pins(),
+    repo.fields('projects'),
+    repo.vehicles(),
   ]);
+  // The one or two answers the business chose to see on every card ("24-184 · Residential").
+  const lookup = (type: FieldType, id: string) =>
+    type === 'person'
+      ? people.get(id)?.name
+      : type === 'project'
+        ? projects.find((project) => project.id === id)?.name
+        : type === 'vehicle'
+          ? vehicles.find((vehicle) => vehicle.id === id)?.name
+          : undefined;
   // Tracked the same way the project page counts it: receipts plus personal-vehicle miles.
   const tracked = (projectId: string) =>
     projectMoney(
@@ -190,6 +202,11 @@ export default async function ProjectsPage({
                     <Icon name="map-pin" size={13} /> {project.location}
                     {project.client && <span className="truncate">· {project.client}</span>}
                   </p>
+                  {listLine(fields, 'projects', project.custom, lookup, tz).length > 0 && (
+                    <p className="mt-1 truncate text-[12.5px] font-medium text-ink-2">
+                      {listLine(fields, 'projects', project.custom, lookup, tz).join(' · ')}
+                    </p>
+                  )}
                   {profile.progress && project.progress !== undefined ? (
                     <div className="mt-4 flex items-center gap-2.5">
                       <Progress

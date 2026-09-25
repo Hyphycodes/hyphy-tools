@@ -1,6 +1,6 @@
 import { createClock } from '../clock';
 import { abc } from './abc';
-import { memberships, people, pins, spaces } from './core';
+import { fields, memberships, people, pins, spaces } from './core';
 import { hyphy } from './hyphy';
 import { personal } from './personal';
 import { saltAndEmber } from './salt-and-ember';
@@ -42,6 +42,7 @@ export function seed(now = Date.now()): Dataset {
     activity: [],
     inbox: [],
     approvalEvents: [],
+    fields: fields(clock),
     pins: pins(),
   };
   for (const slice of slices.map((make) => make(clock))) {
@@ -49,6 +50,12 @@ export function seed(now = Date.now()): Dataset {
       (data[table] as unknown[]).push(...rows);
     }
   }
+  // Each business trip carries the rate it was logged at (as the database stamps it).
+  const bySpace = new Map(data.spaces.map((space) => [space.id, space]));
+  data.mileage = data.mileage.map((entry) => {
+    const space = bySpace.get(entry.spaceId);
+    return space?.kind === 'business' ? { ...entry, rate: space.mileageRate ?? 0 } : entry;
+  });
   data.approvalEvents = historyOf(data, clock);
   cached = { minute, data };
   return data;

@@ -1,4 +1,4 @@
-import type { Membership, Person, Pin, Space } from '@/lib/platform/types';
+import type { FieldDefinition, Membership, Person, Pin, Space } from '@/lib/platform/types';
 import type { Clock } from '../clock';
 import { DEMO_TZ } from '../clock';
 
@@ -121,17 +121,6 @@ export function spaces(t: Clock): Space[] {
       timezone: DEMO_TZ,
       createdAt: t.ago(200),
       setupDoneAt: t.ago(200),
-      customFields: {
-        projects: [
-          {
-            id: 'engagement',
-            label: 'Engagement',
-            type: 'select',
-            options: ['Internal', 'Website', 'System'],
-          },
-          { id: 'kickoff_doc', label: 'Brief', type: 'file' },
-        ],
-      },
     },
     {
       id: 'sp_abc',
@@ -158,27 +147,6 @@ export function spaces(t: Clock): Space[] {
       timezone: DEMO_TZ,
       createdAt: t.ago(160),
       setupDoneAt: t.ago(160),
-      customFields: {
-        projects: [
-          { id: 'permit', label: 'Permit #', type: 'text' },
-          { id: 'next_inspection', label: 'Next inspection', type: 'date' },
-          {
-            id: 'job_type',
-            label: 'Job type',
-            type: 'select',
-            options: ['Residential', 'Commercial'],
-          },
-        ],
-        vehicles: [
-          { id: 'registration', label: 'Registration renews', type: 'date' },
-          { id: 'hitch', label: 'Trailer hitch', type: 'boolean' },
-          { id: 'home_site', label: 'Usual job site', type: 'project' },
-        ],
-        people: [
-          { id: 'crew', label: 'Crew', type: 'select', options: ['Framing', 'Finish', 'Office'] },
-          { id: 'osha10', label: 'OSHA 10', type: 'boolean' },
-        ],
-      },
     },
     {
       id: 'sp_se',
@@ -195,19 +163,72 @@ export function spaces(t: Clock): Space[] {
       timezone: DEMO_TZ,
       createdAt: t.ago(140),
       setupDoneAt: t.ago(140),
-      customFields: {
-        projects: [
-          { id: 'guests', label: 'Guests', type: 'number' },
-          { id: 'deposit', label: 'Deposit', type: 'currency' },
-          {
-            id: 'room',
-            label: 'Room',
-            type: 'select',
-            options: ['Dining room', 'Private room', 'Bar & patio'],
-          },
-        ],
-      },
     },
+  ];
+}
+
+/**
+ * Fields each business added before Phase 2C, kept exactly as they were: the same keys, so the
+ * values already on projects, vehicles and people still find them.
+ */
+export function fields(t: Clock): FieldDefinition[] {
+  const at = (spaceId: string, days: number, createdBy: string) => ({
+    spaceId,
+    createdBy,
+    createdAt: t.ago(days),
+  });
+  const list = (
+    spaceId: string,
+    appliesTo: FieldDefinition['appliesTo'],
+    createdBy: string,
+    days: number,
+    items: Omit<FieldDefinition, 'spaceId' | 'appliesTo' | 'position'>[],
+  ): FieldDefinition[] =>
+    items.map((item, position) => ({
+      ...at(spaceId, days, createdBy),
+      ...item,
+      appliesTo,
+      position,
+    }));
+  return [
+    ...list('sp_hyphy', 'projects', 'jerry', 190, [
+      {
+        id: 'engagement',
+        label: 'Engagement',
+        type: 'select',
+        options: ['Internal', 'Website', 'System'],
+      },
+      { id: 'kickoff_doc', label: 'Brief', type: 'file' },
+    ]),
+    ...list('sp_abc', 'projects', 'dana', 150, [
+      { id: 'permit', label: 'Permit #', type: 'text' },
+      { id: 'next_inspection', label: 'Next inspection', type: 'date' },
+      {
+        id: 'job_type',
+        label: 'Job type',
+        type: 'select',
+        options: ['Residential', 'Commercial'],
+      },
+    ]),
+    ...list('sp_abc', 'vehicles', 'luis', 140, [
+      { id: 'registration', label: 'Registration renews', type: 'date' },
+      { id: 'hitch', label: 'Trailer hitch', type: 'boolean' },
+      { id: 'home_site', label: 'Usual job site', type: 'project' },
+    ]),
+    ...list('sp_abc', 'people', 'luis', 140, [
+      { id: 'crew', label: 'Crew', type: 'select', options: ['Framing', 'Finish', 'Office'] },
+      { id: 'osha10', label: 'OSHA 10', type: 'boolean' },
+    ]),
+    ...list('sp_se', 'projects', 'rosa', 130, [
+      { id: 'guests', label: 'Guests', type: 'number' },
+      { id: 'deposit', label: 'Deposit', type: 'currency' },
+      {
+        id: 'room',
+        label: 'Room',
+        type: 'select',
+        options: ['Dining room', 'Private room', 'Bar & patio'],
+      },
+    ]),
   ];
 }
 
