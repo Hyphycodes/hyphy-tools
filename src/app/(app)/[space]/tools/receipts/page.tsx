@@ -21,7 +21,7 @@ import { categoryLabel, monthSummary } from '@/lib/insights';
 import { openPage } from '@/lib/page';
 import { formatCurrency, formatDateLong, formatNumber } from '@/lib/platform/format';
 import { getTool } from '@/lib/platform/tools';
-import type { ActivityEvent, ApprovalStatus, Person, Receipt } from '@/lib/platform/types';
+import type { ApprovalEvent, ApprovalStatus, Person, Receipt } from '@/lib/platform/types';
 
 export const metadata = { title: 'Receipts' };
 
@@ -75,9 +75,7 @@ export default async function ReceiptsPage({
 
   const selected =
     typeof query.receipt === 'string' ? await repo.receipt(query.receipt) : undefined;
-  const history = selected
-    ? await repo.activity({ about: { type: 'receipt', id: selected.id } })
-    : [];
+  const history = selected ? await repo.approvalHistory(selected.id) : [];
   // Who is waiting on a decision, and for how much — an approver's real queue.
   const waitingBy = [
     ...pending
@@ -374,7 +372,7 @@ function ReceiptDetail({
   viewerId: string;
   relations: ReturnType<typeof relationsOf>;
   canOpenPeople: boolean;
-  history: ActivityEvent[];
+  history: ApprovalEvent[];
 }) {
   const reviewer = receipt.reviewedBy ? people.get(receipt.reviewedBy) : undefined;
   const rows: [string, ReactNode][] = [

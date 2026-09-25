@@ -341,6 +341,21 @@ export type InboxItem = {
   submission?: import('./approvals').Submission;
 };
 
+/**
+ * One step in a submission's history. Kept as its own record, never rebuilt from the current
+ * status, so the story (sent, returned with a reason, fixed, approved) survives every change.
+ */
+export type ApprovalEvent = {
+  id: string;
+  spaceId: string;
+  submissionType: 'receipt' | 'mileage';
+  submissionId: string;
+  action: 'submitted' | 'returned' | 'resubmitted' | 'approved';
+  actorId: string;
+  reason?: string;
+  at: ISODate;
+};
+
 /* ---------- personal preferences ---------- */
 
 /** Something a person keeps within reach in one Space. Theirs alone; nobody else sees it. */

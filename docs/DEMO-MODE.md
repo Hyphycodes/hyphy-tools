@@ -20,6 +20,24 @@ account, database or setup. It is a preview tool, not security.
 - **Reset** clears the journal and the pins. The seeded world is regenerated relative to the current time, so
   "3h ago" is always three hours ago.
 
+## On real data
+
+With `HYPHY_DATA=supabase` Demo Mode keeps Preview As and Reset, but the world is the shared
+development database instead of the seed plus a journal:
+
+- **Who you are.** The cookie still holds a persona key (`mike`). The server looks it up in the
+  development-only `dev.personas` table, then reads and writes _as that person_ under Row Level
+  Security (`src/lib/identity/dev-source.ts`, `src/lib/data/supabase/dev.ts`). The browser never
+  sends an id or a role, no password or key reaches it, and an unknown key gets the default person.
+  The lookup refuses to run unless the database carries the development marker
+  (`supabase/dev/dev_tools.sql`), which production never has.
+- **Your changes** are real rows, seen by everyone using that database, and survive refreshes,
+  other browsers and restarts. The count on Reset is what's changed since the last seed.
+- **Pins** are rows in `pins`, per person per Space.
+- **Reset** re-seeds the whole development database, for everyone. The server refuses unless
+  `HYPHY_DEMO_RESET=on` is set **and** the database is marked as development; without the flag
+  the button isn't shown.
+
 ## Where it lives
 
 Everything Demo Mode is confined to:
@@ -27,6 +45,9 @@ Everything Demo Mode is confined to:
 | File                                  | Role                                             |
 | ------------------------------------- | ------------------------------------------------ |
 | `src/lib/identity/demo-source.ts`     | The demo `IdentitySource` (reads the cookie)     |
+| `src/lib/identity/dev-source.ts`      | Personas on the development database             |
+| `src/lib/data/supabase/dev.ts`        | Persona lookup, change count, guarded Reset      |
+| `supabase/dev/dev_tools.sql`          | The development marker and persona table         |
 | `src/lib/data/demo/`                  | Seed, clock, journal, demo `Repository`          |
 | `src/lib/demo/actions.ts`, `model.ts` | Preview As / Reset server actions and their data |
 | `src/components/demo/demo-bar.tsx`    | The dock and the Preview As sheet                |
@@ -39,10 +60,11 @@ from the same demo model and disappear with it.
 
 ## Removing it
 
-1. Implement the Supabase identity source and repository (see AUTH.md) and set
-   `HYPHY_IDENTITY=supabase`, `HYPHY_DATA=supabase`.
-2. Delete `src/lib/demo/`, `src/components/demo/`, `src/lib/identity/demo-source.ts` and
-   `src/lib/data/demo/` (keep the seed as fixtures for tests or a staging database if useful).
+1. Implement the Supabase identity source (see AUTH.md) and set `HYPHY_IDENTITY=supabase`,
+   `HYPHY_DATA=supabase`.
+2. Delete `src/lib/demo/`, `src/components/demo/`, `src/lib/identity/demo-source.ts`,
+   `src/lib/identity/dev-source.ts`, `src/lib/data/supabase/dev.ts` and `src/lib/data/demo/`
+   (keep the seed and `world.ts` as fixtures for tests and the development database).
 3. Remove the `demo` prop from `AppShell` and the `demoModel` call in the Space layout.
 
 Pages, components, server actions and the registries don't change.

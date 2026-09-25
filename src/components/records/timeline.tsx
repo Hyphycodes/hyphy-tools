@@ -1,85 +1,68 @@
 import { cn } from '@/components/ui/cn';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { formatRelative } from '@/lib/platform/format';
-import type { ActivityEvent, Person, Review } from '@/lib/platform/types';
+import type { ApprovalEvent, Person, Review } from '@/lib/platform/types';
 
 type Step = { label: string; detail?: string; done: boolean; tone?: 'caution'; icon: IconName };
 
 /**
- * A submission's story, from its own activity: sent, returned with a note, fixed and sent again,
- * approved. The same component tells it for a receipt and a trip.
+ * A submission's story, from its persisted history: sent, returned with a note, fixed and sent
+ * again, approved — who and when at each step. The same component tells it for a receipt and a
+ * trip.
  */
 export function SubmissionTimeline({
   record,
   events,
   people,
   timezone,
-  approvedNote = 'Counted on its project and vehicle',
 }: {
   record: Review & { createdBy: string; createdAt: string };
-  /** Activity about this record, any order. */
-  events: ActivityEvent[];
+  /** The submission's persisted history (repository.approvalHistory), oldest first. */
+  events: ApprovalEvent[];
   people: Map<string, Person>;
   timezone: string;
-  approvedNote?: string;
 }) {
   const name = (id?: string) => (id ? people.get(id)?.firstName : undefined) ?? 'someone';
-  const steps: Step[] = [
-    {
+  const steps: Step[] = [];
+  if (!events.length || record.status === 'draft')
+    steps.push({
       label:
         record.status === 'draft' ? 'Saved as a draft' : `Submitted by ${name(record.createdBy)}`,
       detail: formatRelative(record.createdAt, timezone),
       done: true,
       icon: 'check',
-    },
-  ];
-  const story = [...events]
-    .filter((event) => ['returned', 'resubmitted', 'approved'].includes(event.verb))
-    .sort((a, b) => a.at.localeCompare(b.at));
-  for (const event of story)
+    });
+  for (const event of events)
     steps.push(
-      event.verb === 'returned'
+      event.action === 'submitted'
         ? {
-            label: `Returned by ${name(event.actorId)}`,
-            detail: event.detail ?? formatRelative(event.at, timezone),
+            label: `Submitted by ${name(event.actorId)}`,
+            detail: formatRelative(event.at, timezone),
             done: true,
-            tone: 'caution',
-            icon: 'arrow-left',
+            icon: 'check',
           }
-        : event.verb === 'resubmitted'
+        : event.action === 'returned'
           ? {
-              label: `Fixed and sent again by ${name(event.actorId)}`,
-              detail: formatRelative(event.at, timezone),
+              label: `Returned by ${name(event.actorId)}`,
+              detail: event.reason ? `“${event.reason}”` : formatRelative(event.at, timezone),
               done: true,
-              icon: 'arrow-up-right',
+              tone: 'caution',
+              icon: 'arrow-left',
             }
-          : {
-              label: `Approved by ${name(event.actorId)}`,
-              detail: formatRelative(event.at, timezone),
-              done: true,
-              icon: 'check',
-            },
+          : event.action === 'resubmitted'
+            ? {
+                label: `Fixed and sent again by ${name(event.actorId)}`,
+                detail: formatRelative(event.at, timezone),
+                done: true,
+                icon: 'arrow-up-right',
+              }
+            : {
+                label: `Approved by ${name(event.actorId)}`,
+                detail: formatRelative(event.at, timezone),
+                done: true,
+                icon: 'check',
+              },
     );
-  const last = story.at(-1)?.verb;
-  if (record.status === 'approved' && last !== 'approved')
-    steps.push({
-      label: `Approved${record.reviewedBy ? ` by ${name(record.reviewedBy)}` : ''}`,
-      detail: record.reviewedAt ? formatRelative(record.reviewedAt, timezone) : approvedNote,
-      done: true,
-      icon: 'check',
-    });
-  if (record.status === 'returned' && last !== 'returned')
-    steps.push({
-      label: `Returned${record.reviewedBy ? ` by ${name(record.reviewedBy)}` : ''}`,
-      detail: record.returnReason
-        ? `“${record.returnReason}”`
-        : record.reviewedAt
-          ? formatRelative(record.reviewedAt, timezone)
-          : undefined,
-      done: true,
-      tone: 'caution',
-      icon: 'arrow-left',
-    });
   if (record.status === 'submitted')
     steps.push({
       label: 'Waiting for a manager',

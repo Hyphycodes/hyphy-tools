@@ -4,6 +4,8 @@ const port = Number(process.env.PORT ?? 3107);
 
 export default defineConfig({
   testDir: './tests',
+  // The database suite has its own config (playwright.data.config.ts).
+  testIgnore: 'data.spec.ts',
   fullyParallel: false,
   workers: 1,
   timeout: 45_000,

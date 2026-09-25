@@ -2,6 +2,7 @@
 import { revalidatePath } from 'next/cache';
 import { getRepository } from '@/lib/data';
 import {
+  DataUnavailableError,
   RuleError,
   type FileInput,
   type MileageInput,
@@ -50,7 +51,11 @@ async function run(slug: string, work: () => Promise<ActionResult>): Promise<Act
   } catch (error) {
     if (error instanceof PermissionError)
       return { ok: false, error: 'Your role in this Space can’t do that.' };
-    if (error instanceof InputError || error instanceof RuleError)
+    if (
+      error instanceof InputError ||
+      error instanceof RuleError ||
+      error instanceof DataUnavailableError
+    )
       return { ok: false, error: error.message };
     console.error(error);
     return { ok: false, error: 'Something went wrong. Try again.' };

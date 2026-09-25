@@ -49,9 +49,7 @@ export default async function MileagePage({
   const me = workspace.person.id;
   const selected =
     typeof query.trip === 'string' ? entries.find((entry) => entry.id === query.trip) : undefined;
-  const history = selected
-    ? await repo.activity({ about: { type: 'mileage', id: selected.id } })
-    : [];
+  const history = selected ? await repo.approvalHistory(selected.id) : [];
   const tripHref = (id?: string) => `${base}/tools/mileage${id ? `?trip=${id}` : ''}`;
   const context = (entry: MileageEntry) =>
     business
@@ -321,7 +319,6 @@ export default async function MileagePage({
                 events={history}
                 people={people}
                 timezone={tz}
-                approvedNote="Counted on its project"
               />
             )}
           </div>

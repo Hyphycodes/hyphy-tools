@@ -1,6 +1,7 @@
 import type { Submission, SubmissionKind, SubmissionRef } from '@/lib/platform/approvals';
 import type {
   ActivityEvent,
+  ApprovalEvent,
   ApprovalStatus,
   AttachmentRef,
   FileRecord,
@@ -33,6 +34,13 @@ export type Member = Membership & { person: Person };
 
 /** A change the rules refuse ("that one was already decided"), in words the person can act on. */
 export class RuleError extends Error {}
+
+/** The data couldn't be reached. Nothing was changed; trying again is safe. */
+export class DataUnavailableError extends Error {
+  constructor(cause?: unknown) {
+    super('We couldn’t reach Hyphy’s data. Nothing was saved — try again in a moment.', { cause });
+  }
+}
 
 export type RecordFilter = {
   projectId?: string;
@@ -132,6 +140,8 @@ export interface Repository {
 
   /** Receipts and trips as one list, in the shared approval shape. Same visibility as each. */
   submissions(filter?: RecordFilter): Promise<Submission[]>;
+  /** A submission's history, oldest first: sent, returned with a reason, fixed, approved. */
+  approvalHistory(submissionId: string): Promise<ApprovalEvent[]>;
 
   activity(filter?: ActivityFilter): Promise<ActivityEvent[]>;
   /**

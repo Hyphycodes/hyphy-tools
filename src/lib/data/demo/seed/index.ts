@@ -5,6 +5,7 @@ import { hyphy } from './hyphy';
 import { personal } from './personal';
 import { saltAndEmber } from './salt-and-ember';
 import type { Dataset, SeedSlice } from './types';
+import type { ApprovalEvent } from '@/lib/platform/types';
 
 export { people, perspectives, personalSpaceId } from './core';
 export type { Perspective } from './core';
@@ -40,6 +41,7 @@ export function seed(now = Date.now()): Dataset {
     linkPages: [],
     activity: [],
     inbox: [],
+    approvalEvents: [],
     pins: pins(),
   };
   for (const slice of slices.map((make) => make(clock))) {
@@ -47,6 +49,54 @@ export function seed(now = Date.now()): Dataset {
       (data[table] as unknown[]).push(...rows);
     }
   }
+  data.approvalEvents = historyOf(data, clock);
   cached = { minute, data };
   return data;
+}
+
+/**
+ * The approval history the seeded receipts and trips would have: each was submitted when it was
+ * created, then approved or returned (with its reason) by its reviewer.
+ */
+function historyOf(data: Dataset, clock: ReturnType<typeof createClock>): ApprovalEvent[] {
+  const events: ApprovalEvent[] = [];
+  const later = (iso: string, hours: number) =>
+    new Date(
+      Math.min(new Date(iso).getTime() + hours * 3_600_000, clock.now - 60_000),
+    ).toISOString();
+  const rows = [
+    ...data.receipts.map((row) => ({ row, type: 'receipt' as const })),
+    ...data.mileage.map((row) => ({ row, type: 'mileage' as const })),
+  ];
+  for (const { row, type } of rows) {
+    if (row.status === 'draft') continue;
+    const base = { spaceId: row.spaceId, submissionType: type, submissionId: row.id };
+    events.push({
+      ...base,
+      id: `ae_${row.id}_s`,
+      action: 'submitted',
+      actorId: row.createdBy,
+      at: row.createdAt,
+    });
+    const by = row.reviewedBy;
+    if (!by || by === row.createdBy) continue;
+    if (row.status === 'returned')
+      events.push({
+        ...base,
+        id: `ae_${row.id}_r`,
+        action: 'returned',
+        actorId: by,
+        reason: row.returnReason,
+        at: row.reviewedAt ?? later(row.createdAt, 2),
+      });
+    if (row.status === 'approved')
+      events.push({
+        ...base,
+        id: `ae_${row.id}_a`,
+        action: 'approved',
+        actorId: by,
+        at: row.reviewedAt ?? later(row.createdAt, 2),
+      });
+  }
+  return events;
 }

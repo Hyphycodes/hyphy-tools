@@ -49,6 +49,25 @@ export function applyJournal(base: Dataset, ops: JournalOp[]): Dataset {
   }
   return data;
 
+  function history(
+    row: Record<string, unknown>,
+    table: 'receipts' | 'mileage',
+    action: 'submitted' | 'returned' | 'resubmitted' | 'approved',
+    actorId: string,
+    at: string,
+  ) {
+    data.approvalEvents.push({
+      id: `ae_${row.id}_${action}_${at}`,
+      spaceId: String(row.spaceId),
+      submissionType: table === 'receipts' ? 'receipt' : 'mileage',
+      submissionId: String(row.id),
+      action,
+      actorId,
+      reason: action === 'returned' ? (row.returnReason as string) || undefined : undefined,
+      at,
+    });
+  }
+
   function derive(
     op: JournalOp,
     current?: Record<string, unknown>,
@@ -60,13 +79,11 @@ export function applyJournal(base: Dataset, ops: JournalOp[]): Dataset {
     const business = space?.kind === 'business';
     const activity = (entry: Omit<Dataset['activity'][number], 'id' | 'spaceId' | 'at'>) =>
       data.activity.push({ id: `ac_${id}`, spaceId: space?.id ?? '', at: op.at, ...entry });
-    const resolveInbox = (subjectId: string) => {
-      data.inbox = data.inbox.map((item) =>
-        item.subject.id === subjectId && item.kind !== 'mention'
-          ? { ...item, status: 'done' }
-          : item,
-      );
-    };
+    if (op.k === 'add' && (op.t === 'receipts' || op.t === 'mileage') && row.status !== 'draft') {
+      history(row, op.t, 'submitted', op.by, op.at);
+      if (row.status === 'approved' && row.reviewedBy && row.reviewedBy !== row.createdBy)
+        history(row, op.t, 'approved', row.reviewedBy, op.at);
+    }
 
     if (op.k === 'add') {
       switch (op.t) {
@@ -173,8 +190,21 @@ export function applyJournal(base: Dataset, ops: JournalOp[]): Dataset {
       const amount =
         op.t === 'receipts' ? moneyFormat.format(Number(row.total)) : `${row.miles} mi`;
       const was = before?.status;
+      if (status !== was) {
+        const action =
+          (was === 'returned' || was === 'draft') && op.by === row.createdBy
+            ? was === 'returned'
+              ? 'resubmitted'
+              : 'submitted'
+            : status === 'approved' || status === 'returned'
+              ? status
+              : undefined;
+        if (action) history(row, op.t, action, op.by, op.at);
+      }
       // The submitter fixed a returned item (or finished a draft) and sent it again.
-      if ((was === 'returned' || was === 'draft') && op.by === row.createdBy)
+      if (status === was) {
+        // A change that isn't a decision (setting a return aside) writes nothing.
+      } else if ((was === 'returned' || was === 'draft') && op.by === row.createdBy)
         activity({
           actorId: op.by,
           verb: was === 'returned' ? 'resubmitted' : 'submitted',
@@ -203,8 +233,6 @@ export function applyJournal(base: Dataset, ops: JournalOp[]): Dataset {
         verb: 'updated',
         object: { type: 'space', id: row.id, label: 'the tools in this Space' },
       });
-    if (op.t === 'inbox' && status === 'done' && row.subject)
-      resolveInbox((row.subject as unknown as { id: string }).id);
   }
 
   function projectRef(projectId: string) {

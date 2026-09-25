@@ -35,8 +35,11 @@ app/(app)/[space]/…      pages (server components) and actions.ts (server acti
         │  requireWorkspace(slug) → Workspace { person, space, membership, permissions }
         │  getRepository(workspace) → Repository (scoped to that Space and person)
         ▼
-lib/identity             IdentitySource: demo-source.ts (now) | supabase-source.ts (later)
-lib/data                 Repository:     demo/repository.ts (now) | supabase repository (later)
+lib/identity             IdentitySource: demo-source.ts | dev-source.ts (personas on the dev
+                         database) | supabase-source.ts (real sign-in, later)
+lib/data                 Repository = core.ts (shared rules) over a DataSource:
+                           demo/source.ts      seed + journal, visibility in code (demo/visibility.ts)
+                           supabase/source.ts  the database, queried as the person; RLS decides
 lib/platform             pure rules shared by server and client: roles, plans, registries
 components/*             UI; client components read the Workspace through useWorkspace()
 ```
@@ -47,8 +50,16 @@ components/*             UI; client components read the Workspace through useWor
   `ShellModel` built from the Workspace, exposed as `useWorkspace()` — the `currentUser`,
   `currentSpace` and membership abstraction.
 - **Data.** `Repository` (`lib/data/repository.ts`) is the only way to read or write. Its contract:
-  results only contain this Space's records that this person may see. The demo repository applies
-  those rules in code; `supabase/migrations` applies the same rules as Row Level Security.
+  results only contain this Space's records that this person may see. Everything above the rows —
+  approvals, the derived inbox, names, filters — lives once in `core.ts`; a `DataSource` supplies
+  the visible rows and applies changes. `HYPHY_DATA` picks the source (`lib/data/index.ts`). The
+  demo source applies the visibility rules in code; the Supabase source runs every query in a
+  transaction as the person, so `supabase/migrations`' Row Level Security applies them.
+  `tests/data.spec.ts` checks both give every persona identical rows.
+- **Performance.** One repository per Workspace per request (React `cache`). The Supabase source
+  reads each kind of row once per request, scoped to the Space, and batches everything a render
+  asks for in the same tick into one transaction with pipelined queries: a page is 3–4
+  transactions, no per-row queries. Set `HYPHY_DB_DEBUG=1` to log statements.
 - **Changes.** Every server action in `actions.ts` resolves the Workspace from the URL, calls
   `requirePermission`, validates input, checks that referenced projects and vehicles are visible,
   and writes through the repository. The UI hides what a role can't do; the server refuses it.
@@ -119,15 +130,17 @@ the live records, so a rename follows everywhere.
 (`ActivityList`) with different filters: dashboard, project, vehicle, person, `/activity`.
 `InboxItem` is "needs attention": either for an audience (everyone with a permission, e.g.
 `expenses.approve`) or a recipient. In the demo, events for your own changes are derived when the
-journal is applied; in production the database writes them with triggers
-(`log_submission()` in the migration), so the interface doesn't change.
+journal is applied; on the database, triggers write them as the person acting (`log_submission`,
+`log_review`, `log_record`, `log_file`, …), along with each submission's approval history in
+`approval_events` (submitted, returned with its reason, resubmitted, approved — actor and time).
 
 ## Files
 
 Files attach to records (`attachedTo: [{ type: 'project' | 'vehicle' | 'person' | 'receipt', id }]`)
 and carry an access level (`team`, `managers`, `private`, `shared`). A certificate of insurance can
 belong to a subcontractor and two projects at once. The file panel answers "Who can open it?" in
-plain words. In the preview, uploads record name, type and size; bytes stay on the device.
+plain words. Uploads record name, type, size and attachments (on the database, as real rows); the
+bytes stay on the device — there is no Storage bucket yet, and Download is disabled.
 
 ## Custom fields (architecture only)
 
@@ -149,11 +162,12 @@ with the same result shape (`SearchItem` in `lib/search.ts`).
 | Works for real                                                                                                                                  | Simulated in the preview                             |
 | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
 | PDF merge and page extract with page thumbnails (pdf-lib + PDF.js), QR PNG/SVG for links, Wi-Fi and email, image resize/convert (all on-device) | Identity (Demo Mode instead of sign-in)              |
-| Every create flow, approvals, inbox actions, turning tools on/off                                                                               | Storage: files record metadata only                  |
+| Every create flow, approvals, inbox actions, turning tools on/off — persisted in Postgres with `HYPHY_DATA=supabase`                            | Storage: files record metadata only                  |
 | Role-scoped reads everywhere, server-side permission checks on every change                                                                     | Receipt auto-reading (sample receipt shows the flow) |
 | Mileage CSV export, link page editing, saving QR codes                                                                                          | Link page publishing, email invitations, billing     |
 
-Changes persist per browser in the Demo Mode journal until Reset (see DEMO-MODE.md).
+With `HYPHY_DATA=demo`, changes persist per browser in the Demo Mode journal until Reset; with
+`HYPHY_DATA=supabase`, in the development database (see DEMO-MODE.md and supabase/README.md).
 
 ## PWA readiness
 

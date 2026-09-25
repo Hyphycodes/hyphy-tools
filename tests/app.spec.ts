@@ -1,7 +1,18 @@
 import { expect, test, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import postgres from 'postgres';
 import { BASE_PATH } from '../src/lib/base-path';
+import { demoUuid } from '../src/lib/data/supabase/rows';
+import { applyWorld } from '../src/lib/data/supabase/world';
 
-/* The product, end to end, through Demo Mode. */
+/*
+ * The product, end to end, through Demo Mode. The same suite runs on both backends:
+ *   npm test                                   the seed + journal (HYPHY_DATA=demo)
+ *   HYPHY_DATA=supabase DATABASE_URL=… npm test  the development database, re-seeded per test
+ */
+const onDatabase = process.env.HYPHY_DATA === 'supabase';
+
+/** A seeded record's id on the backend under test. */
+const id = (key: string) => (onDatabase ? demoUuid(key) : key);
 
 async function previewAs(context: BrowserContext, person: string, baseURL: string) {
   await context.addCookies([{ name: 'hyphy_preview_as', value: person, url: baseURL }]);
@@ -33,6 +44,12 @@ async function noHorizontalScroll(page: Page) {
 
 test.beforeEach(async ({ context, baseURL }) => {
   await context.clearCookies();
+  // Fresh cookies are a fresh demo; on the database, put the seeded world back.
+  if (onDatabase) {
+    const sql = postgres(process.env.DATABASE_URL!, { max: 1, onnotice: () => {} });
+    await applyWorld(sql);
+    await sql.end();
+  }
   await previewAs(context, 'jerry', baseURL!);
 });
 
@@ -122,7 +139,7 @@ test('pages outside your role are refused', async ({ page, context, baseURL }) =
   for (const path of [
     '/abc-construction/people',
     '/abc-construction/vehicles',
-    '/abc-construction/projects/prj_elmhurst',
+    `/abc-construction/projects/${id('prj_elmhurst')}`,
     '/hyphy',
   ]) {
     await visit(page, path);
@@ -158,7 +175,7 @@ test('everyone agrees on what Mike is working on', async ({ page, context, baseU
   await expect(page.getByText('You’re on Oak Brook Remodel.')).toBeVisible();
   await expect(page.getByRole('heading', { level: 2, name: 'Oak Brook Remodel' })).toBeVisible();
   await previewAs(context, 'dana', baseURL!);
-  await visit(page, '/abc-construction/people/mike');
+  await visit(page, `/abc-construction/people/${id('mike')}`);
   const current = page.getByText('Current project').locator('..');
   await expect(current).toContainText('Oak Brook Remodel');
 });
@@ -217,7 +234,7 @@ test('command search finds records and navigates', async ({ page, context, baseU
   await page.getByRole('combobox', { name: 'Search' }).fill('truck 24');
   await expect(page.getByRole('option', { name: /Truck 24/ }).first()).toBeVisible();
   await page.keyboard.press('Enter');
-  await expect(page).toHaveURL(/\/vehicles\/veh_t24$/);
+  await expect(page).toHaveURL(new RegExp(`/vehicles/${id('veh_t24')}$`));
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Truck 24');
 });
 
@@ -383,7 +400,7 @@ test('People shows what each person is on and what waits on the approver', async
   await expect(page.getByRole('button', { name: 'Approve', exact: true })).toHaveCount(4);
   await expect(page.getByRole('link', { name: 'View pending submissions' })).toHaveAttribute(
     'href',
-    `${BASE_PATH}/abc-construction/inbox?from=mike`,
+    `${BASE_PATH}/abc-construction/inbox?from=${id('mike')}`,
   );
 });
 
@@ -402,7 +419,10 @@ async function reset(page: Page) {
     .getByRole('button', { name: /Reset demo/ })
     .filter({ visible: true })
     .click();
-  await page.waitForLoadState('networkidle');
+  // Done when the change count is gone — on the database, the next test mustn't race the reseed.
+  await expect(
+    page.getByRole('button', { name: 'Reset demo', exact: true }).filter({ visible: true }),
+  ).toBeVisible();
 }
 
 test('returning with a reason reaches the person, who fixes and resubmits it', async ({
@@ -452,7 +472,7 @@ test('a project gathers its money, trucks and records, each linked to the others
   baseURL,
 }) => {
   await previewAs(context, 'dana', baseURL!);
-  await visit(page, '/abc-construction/projects/prj_oakbrook');
+  await visit(page, `/abc-construction/projects/${id('prj_oakbrook')}`);
   const money = page.getByRole('region', { name: 'Money' });
   await expect(money.getByText('Contract value')).toBeVisible();
   await expect(money.getByText('$148,000')).toBeVisible();
@@ -464,7 +484,7 @@ test('a project gathers its money, trucks and records, each linked to the others
 
   // An event has a day and no percent complete.
   await previewAs(context, 'rosa', baseURL!);
-  await visit(page, '/salt-and-ember/projects/prj_se_keller');
+  await visit(page, `/salt-and-ember/projects/${id('prj_se_keller')}`);
   await expect(page.getByText('How far along')).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Money' })).toContainText('Booking');
 });
@@ -529,7 +549,7 @@ test.describe('phones', () => {
   for (const [person, path] of [
     ['mike', '/abc-construction'],
     ['mike', '/abc-construction/tools/receipts'],
-    ['dana', '/abc-construction/projects/prj_oakbrook'],
+    ['dana', `/abc-construction/projects/${id('prj_oakbrook')}`],
     ['jerry', '/personal/tools'],
     ['chris', '/abc-construction/files'],
   ]) {
@@ -577,21 +597,21 @@ test.describe('phones', () => {
     await expect(page.getByRole('region', { name: 'From Mike Rodriguez' })).toHaveCount(0);
     await noHorizontalScroll(page);
 
-    await visit(page, '/abc-construction/tools/receipts?receipt=rc_abc_01');
+    await visit(page, `/abc-construction/tools/receipts?receipt=${id('rc_abc_01')}`);
     const receipt = page.getByRole('dialog', { name: 'Shell' });
     await expect(receipt.getByText(/Approved by Dana/)).toBeVisible();
     const links = receipt.getByRole('list', { name: 'Belongs to' });
     await links.getByRole('link', { name: 'Mike Rodriguez' }).click();
-    await expect(page).toHaveURL(/\/people\/mike$/);
+    await expect(page).toHaveURL(new RegExp(`/people/${id('mike')}$`));
     await expect(page.getByRole('heading', { level: 1, name: 'Mike Rodriguez' })).toBeVisible();
     await page
       .getByRole('link', { name: /^Truck 24/ })
       .first()
       .click();
-    await expect(page).toHaveURL(/\/vehicles\/veh_t24$/);
+    await expect(page).toHaveURL(new RegExp(`/vehicles/${id('veh_t24')}$`));
     await expect(page.getByRole('heading', { level: 1, name: 'Truck 24' })).toBeVisible();
     await page.getByRole('link', { name: /Oak Brook Remodel.*From its latest trips/ }).click();
-    await expect(page).toHaveURL(/\/projects\/prj_oakbrook$/);
+    await expect(page).toHaveURL(new RegExp(`/projects/${id('prj_oakbrook')}$`));
     await noHorizontalScroll(page);
     await reset(page);
   });

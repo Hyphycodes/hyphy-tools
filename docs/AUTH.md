@@ -1,53 +1,57 @@
 # From Demo Mode to real accounts
 
-Phase 1 ships without sign-in. This is the plan for replacing Demo Mode with Supabase Auth and a
-real database without rebuilding the product. Hyphy Studio already runs Supabase Auth
+Phase 1.9 made the data real: with `HYPHY_DATA=supabase` every read and write goes to the Hyphy
+Tools database under Row Level Security. What's left is real identity — sign-up, sign-in and
+sessions — to replace Demo Mode's development personas. Hyphy Studio already runs Supabase Auth
 (passwordless email links, `@supabase/ssr`, a session-refreshing `proxy.ts`); reuse those patterns.
 
-## What stays the same
+## Where things stand
 
-Pages, server actions, components and the registries consume `Session`, `Workspace` and
-`Repository`. None of them know where identity or data come from. The swap happens in two files:
+| Piece                                             | State                                                                    |
+| ------------------------------------------------- | ------------------------------------------------------------------------ |
+| Schema, policies, triggers (`supabase/`)          | Done; tested for isolation and parity (`tests/data.spec.ts`)             |
+| Repository on the database (`lib/data/supabase/`) | Done; runs as the person, RLS decides                                    |
+| Identity                                          | Development personas (`lib/identity/dev-source.ts`) — not for production |
+| Sign-up / sign-in                                 | Not built                                                                |
+| File bytes (Storage)                              | Not built; metadata only                                                 |
+| Invitation email                                  | Not built; `invite_member` creates the invited membership                |
+| Billing                                           | Not built                                                                |
 
-- `src/lib/identity/index.ts` picks the identity source (`HYPHY_IDENTITY`).
-- `src/lib/data/index.ts` picks the repository (`HYPHY_DATA`).
+## How identity reaches the database
 
-## Steps
+`asPerson(personId, …)` (`src/lib/data/supabase/db.ts`) opens a transaction, switches to the
+`authenticated` role and sets the JWT claims to that person — what Supabase's API does for a
+signed-in request — so `auth.uid()` is that person and every policy applies. The only question is
+where `personId` comes from:
 
-1. **Project.** Create a dedicated Supabase project for Hyphy Tools (never Studio's). Add
-   `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` and `SUPABASE_SECRET_KEY` to
-   the Hyphy Tools Vercel project only.
-2. **Schema.** Review and apply `supabase/migrations/20260925000000_platform_foundation.sql`
-   locally, run `supabase/tests/rls-smoke.sql`, then apply to the project. Add a private Storage
-   bucket `space-files` with policies that call `can_see_file()`.
-3. **Clients.** `npm i @supabase/supabase-js @supabase/ssr`; add `src/lib/supabase/server.ts`
-   (request-scoped client with cookies) and `src/proxy.ts` that refreshes sessions on app routes —
-   both as in Hyphy Studio.
-4. **Identity source.** Implement `supabaseIdentity.getSession()` in
-   `src/lib/identity/supabase-source.ts`: `auth.getUser()` (verified, not decoded), then the profile
-   and active memberships joined with spaces. Map rows to `Person` / `SpaceMembership`.
-5. **Sign-in.** Add `/sign-in` (email link) and `/auth/confirm`. When `getSession()` is null, the
-   Space layout redirects to `/sign-in?next=…`. New users get a profile and, through the
-   `handle_new_profile` trigger, a personal Space.
-6. **Repository.** Add `src/lib/data/supabase/repository.ts` implementing `Repository` with the
-   user's client. Queries filter by `space_id`; RLS does the per-person scoping, so the demo
-   repository's visibility code is not repeated. Writes that must also create activity or inbox
-   items rely on the database triggers.
-7. **Invitations.** `invite()` inserts an `invited` membership and sends an email (Resend, as in
-   Studio). Accepting flips it to `active`.
-8. **Switch.** Set `HYPHY_IDENTITY=supabase` and `HYPHY_DATA=supabase`, then remove Demo Mode
-   (DEMO-MODE.md).
-9. **Billing (later).** Plans map to Stripe prices only when paid plans launch. The webhook
-   updates `spaces.plan`; nothing else reads billing. Studio's membership code shows the pattern:
-   webhook-verified state only, never a checkout-success URL.
+- **Now (development):** Demo Mode's persona key → `dev.personas`, on the server, only on a
+  database marked as the development world.
+- **Production:** a verified Supabase Auth session. Nothing else changes.
+
+The browser never supplies an id or a role, and the service-role key is never used by the app.
+
+## Steps to real sign-in
+
+1. **Production project.** A separate Supabase project for production (the dev project keeps its
+   `dev` schema; production never gets `supabase/dev/`). Apply the migrations with
+   `supabase db push`. Set `DATABASE_URL` (pooler), `NEXT_PUBLIC_SUPABASE_URL` and
+   `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` on the Hyphy Tools Vercel project only.
+2. **Clients.** `npm i @supabase/supabase-js @supabase/ssr`; add `src/lib/supabase/server.ts`
+   (request-scoped client with cookies) and `src/proxy.ts` refreshing sessions — as in Studio.
+3. **Identity source.** In `src/lib/identity/supabase-source.ts`: `auth.getUser()` (verified with
+   Supabase, never just decoded), then `loadSession(user.id, 'supabase')` from
+   `src/lib/data/supabase/session.ts` — the same query the dev personas use.
+4. **Sign-in.** `/sign-in` (email link) and `/auth/confirm`. A null session redirects to
+   `/sign-in?next=…`. `handle_new_profile` gives every new person a personal Space.
+5. **Invitations.** Send the email when `invite_member` runs; accepting flips the membership to
+   `active` and links the placeholder identity to the real auth user.
+6. **Storage.** A private `space-files` bucket with policies calling `can_see_file()`; upload
+   through signed URLs; turn Download on.
+7. **Switch.** `HYPHY_IDENTITY=supabase`, `HYPHY_DATA=supabase`; remove Demo Mode (DEMO-MODE.md).
+8. **Billing (later).** A Stripe webhook updates `spaces.plan`; nothing else reads billing.
 
 ## Tests to add with it
 
 - Unauthenticated requests to any `/{space}` route redirect to sign-in.
-- A member can't read another member's receipts through the API, only through approval roles.
-- A guest can't read a project they weren't given, or any money.
-- An admin can't grant owner or admin; an owner can.
-- Turning a module off hides it and refuses its server actions.
-
-The unit and end-to-end suites in `tests/` keep running against Demo Mode and continue to
-describe the intended behavior.
+- A forged or expired session cookie gets no data.
+- The isolation suite in `tests/data.spec.ts` runs again with sessions from real sign-ins.

@@ -44,23 +44,25 @@ export function DemoBar({ demo }: { demo: DemoModel }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [open]);
 
-  const reset = (className: string, label?: boolean) => (
-    <form action={resetDemo}>
-      <input type="hidden" name="back" value={pathname} />
-      <button
-        type="submit"
-        title={demo.changes ? `Undo your ${demo.changes} demo changes` : 'Demo data is fresh'}
-        aria-label={`Reset demo${demo.changes ? ` (${demo.changes} changes)` : ''}`}
-        className={className}
-      >
-        <Icon name="refresh" size={13} />
-        {label && <span>Reset</span>}
-        {demo.changes > 0 && (
-          <span className="mono-num text-[10.5px] text-tool-receipt">{demo.changes}</span>
-        )}
-      </button>
-    </form>
-  );
+  // On a shared database Reset is off unless the server allows it (HYPHY_DEMO_RESET=on).
+  const reset = (className: string, label?: boolean) =>
+    demo.canReset && (
+      <form action={resetDemo}>
+        <input type="hidden" name="back" value={pathname} />
+        <button
+          type="submit"
+          title={demo.changes ? `Undo your ${demo.changes} demo changes` : 'Demo data is fresh'}
+          aria-label={`Reset demo${demo.changes ? ` (${demo.changes} changes)` : ''}`}
+          className={className}
+        >
+          <Icon name="refresh" size={13} />
+          {label && <span>Reset</span>}
+          {demo.changes > 0 && (
+            <span className="mono-num text-[10.5px] text-tool-receipt">{demo.changes}</span>
+          )}
+        </button>
+      </form>
+    );
 
   return (
     <>

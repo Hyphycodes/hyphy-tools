@@ -1,9 +1,12 @@
 'use server';
+import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { dataBackend } from '@/lib/data';
 import { clearJournal } from '@/lib/data/demo/journal';
 import { clearPins } from '@/lib/data/demo/prefs';
 import { seed } from '@/lib/data/demo/seed';
+import { resetWorld } from '@/lib/data/supabase/dev';
 import { PREVIEW_COOKIE } from '@/lib/identity/demo-source';
 
 /**
@@ -33,9 +36,18 @@ export async function previewAs(formData: FormData) {
 
 export async function resetDemo(formData: FormData) {
   assertDemo();
-  // Everything the visitor changed goes: records, decisions and their own pins.
-  await clearJournal();
-  await clearPins();
+  if (dataBackend() === 'supabase') {
+    // The shared development database goes back to its seeded story. `resetWorld` refuses unless
+    // the server allows it (HYPHY_DEMO_RESET=on) and the database is marked as development.
+    await resetWorld();
+  } else {
+    // Everything this browser changed goes: records, decisions and their own pins.
+    await clearJournal();
+    await clearPins();
+  }
+  // Every page was showing the old world. (Clearing cookies refreshes them; a database reset
+  // changes no cookie, so say so explicitly.)
+  revalidatePath('/', 'layout');
   const back = String(formData.get('back') ?? '/');
   redirect(back.startsWith('/') && !back.startsWith('//') ? back : '/');
 }

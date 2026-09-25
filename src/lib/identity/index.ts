@@ -2,7 +2,9 @@ import 'server-only';
 import { notFound } from 'next/navigation';
 import { cache } from 'react';
 import { can, permissionsFor, type Permission } from '@/lib/platform/roles';
+import { dataBackend } from '@/lib/data';
 import { demoIdentity } from './demo-source';
+import { devIdentity } from './dev-source';
 import { supabaseIdentity } from './supabase-source';
 import type { IdentitySource, Session, Workspace } from './types';
 
@@ -11,9 +13,14 @@ export type { Session, SpaceMembership, Workspace } from './types';
 /**
  * The one switch between Demo Mode and real sign-in. Everything downstream consumes `Session`
  * and `Workspace`, so swapping the source changes who you are, not how the product works.
+ *
+ * - HYPHY_IDENTITY=supabase: a verified Supabase Auth session (not built yet — docs/AUTH.md).
+ * - Demo Mode on real data (HYPHY_DATA=supabase): development personas, resolved on the server.
+ * - Demo Mode on the seed: the preview cookie picks a seeded person.
  */
 function source(): IdentitySource {
-  return process.env.HYPHY_IDENTITY === 'supabase' ? supabaseIdentity : demoIdentity;
+  if (process.env.HYPHY_IDENTITY === 'supabase') return supabaseIdentity;
+  return dataBackend() === 'supabase' ? devIdentity : demoIdentity;
 }
 
 export const getSession = cache(async (): Promise<Session | null> => source().getSession());

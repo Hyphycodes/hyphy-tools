@@ -16,11 +16,11 @@ export function SpaceMark({
   size = 'md',
   className,
 }: {
-  space: Pick<Space, 'brand' | 'name' | 'id' | 'kind'>;
+  space: Pick<Space, 'brand' | 'name' | 'id' | 'kind' | 'slug'>;
   size?: keyof typeof spaceSizes;
   className?: string;
 }) {
-  const spark = space.id === 'sp_hyphy';
+  const spark = space.slug === 'hyphy';
   return (
     <span
       aria-hidden="true"

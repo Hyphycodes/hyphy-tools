@@ -234,7 +234,7 @@ export async function buildSearchIndex(
           color: item.space.brand.color,
           ink: item.space.brand.ink,
           round: item.space.kind === 'personal',
-          spark: item.space.id === 'sp_hyphy',
+          spark: item.space.slug === 'hyphy',
         },
       })),
     ...(demo?.people.flatMap((entry) =>

@@ -1,5 +1,6 @@
 import type {
   ActivityEvent,
+  ApprovalEvent,
   FileRecord,
   InboxItem,
   LinkPage,
@@ -28,10 +29,13 @@ export type Dataset = {
   linkPages: LinkPage[];
   activity: ActivityEvent[];
   inbox: InboxItem[];
+  approvalEvents: ApprovalEvent[];
   /** Default pins; a visitor's own choices are kept beside the journal (see prefs.ts). */
   pins: Pin[];
 };
 
 export type TableName = keyof Dataset;
 
-export type SeedSlice = Partial<Omit<Dataset, 'people' | 'spaces' | 'memberships' | 'pins'>>;
+export type SeedSlice = Partial<
+  Omit<Dataset, 'people' | 'spaces' | 'memberships' | 'pins' | 'approvalEvents'>
+>;

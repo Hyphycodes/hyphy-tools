@@ -52,9 +52,9 @@ export async function buildShellModel(workspace: Workspace, repo: Repository): P
     .sort((a, b) => rank(a.id) - rank(b.id))
     .map((tool) => ({ ...tool, pinned: pinned.includes(tool.id) }));
   const shop =
-    space.id === 'sp_abc'
+    space.slug === 'abc-construction'
       ? ['Shop, Oak Brook']
-      : space.id === 'sp_hyphy'
+      : space.slug === 'hyphy'
         ? ['Studio, West Town']
         : ['Home'];
   return {
