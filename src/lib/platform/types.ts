@@ -50,6 +50,13 @@ export type ModuleId =
 /** What a Space calls a module, e.g. a restaurant's "Projects" are "Events". */
 export type ModuleLabel = { singular: string; plural: string };
 
+/**
+ * How a Space's work is shaped. One Projects module underneath; the words and what a project
+ * page emphasises follow the business (see `lib/platform/work.ts`). A builder runs jobs with a
+ * contract and costs, a restaurant runs events on a date, a studio runs engagements.
+ */
+export type WorkStyle = 'jobs' | 'events' | 'engagements';
+
 export type Space = {
   id: string;
   /** URL segment. Personal Spaces all use `personal`; the viewer's own one is resolved. */
@@ -61,6 +68,9 @@ export type Space = {
   plan: PlanId;
   modules: ModuleId[];
   labels?: Partial<Record<ModuleId, ModuleLabel>>;
+  workStyle?: WorkStyle;
+  /** Paid back per mile driven in someone's own car. Counts toward a project's tracked costs. */
+  mileageRate?: number;
   brand: { color: string; ink: 'light' | 'dark'; monogram: string };
   timezone: string;
   /** Owner of a personal Space. */
@@ -136,9 +146,15 @@ export type Project = Owned & {
   teamIds: string[];
   startDate: ISODate;
   dueDate?: ISODate;
-  /** 0–100, set by the team. */
-  progress: number;
-  budget?: number;
+  /** 0–100, set by the team. Only where "how far along" means something (not events). */
+  progress?: number;
+  /** What the customer is paying: a signed contract, a booked event. Absent where it isn't known. */
+  value?: number;
+  /**
+   * An internal target for the costs tracked in Hyphy (fuel, trips, purchases). Only set when
+   * the business decided on one; it is never the project's value or its full cost.
+   */
+  costAllowance?: number;
   color: string;
   custom?: Record<string, FieldValue>;
 };
@@ -162,37 +178,54 @@ export type Vehicle = Owned & {
   custom?: Record<string, FieldValue>;
 };
 
-export type ApprovalStatus = 'draft' | 'submitted' | 'approved' | 'rejected';
+export type ApprovalStatus = 'draft' | 'submitted' | 'approved' | 'returned';
+
+/**
+ * What every submission carries so it's reviewed the same way, whatever it is (see
+ * `lib/platform/approvals.ts`). Receipts and trips today; form entries and expenses later.
+ */
+export type Review = {
+  status: ApprovalStatus;
+  /** Who approved or returned it last, and when. */
+  reviewedBy?: string;
+  reviewedAt?: ISODate;
+  /** The reviewer's note when it went back. Kept after a resubmission, as its history. */
+  returnReason?: string;
+  /** When the submitter fixed a returned item and sent it again. */
+  resubmittedAt?: ISODate;
+  /** When the submitter read a return and chose to leave it (it stays returned). */
+  returnSeenAt?: ISODate;
+};
 
 export type ReceiptCategory = 'fuel' | 'materials' | 'meals' | 'supplies' | 'equipment' | 'other';
 
-export type Receipt = Owned & {
-  vendor: string;
-  category: ReceiptCategory;
-  total: number;
-  date: ISODate;
-  status: ApprovalStatus;
-  paymentMethod?: string;
-  gallons?: number;
-  odometer?: number;
-  vehicleId?: string;
-  projectId?: string;
-  fileId?: string;
-  notes?: string;
-  reviewedBy?: string;
-};
+export type Receipt = Owned &
+  Review & {
+    vendor: string;
+    category: ReceiptCategory;
+    total: number;
+    date: ISODate;
+    paymentMethod?: string;
+    gallons?: number;
+    odometer?: number;
+    vehicleId?: string;
+    projectId?: string;
+    fileId?: string;
+    notes?: string;
+  };
 
-export type MileageEntry = Owned & {
-  date: ISODate;
-  from: string;
-  to: string;
-  miles: number;
-  purpose: string;
-  roundTrip?: boolean;
-  vehicleId?: string;
-  projectId?: string;
-  status: ApprovalStatus;
-};
+export type MileageEntry = Owned &
+  Review & {
+    date: ISODate;
+    from: string;
+    to: string;
+    miles: number;
+    purpose: string;
+    roundTrip?: boolean;
+    /** Empty means the person's own vehicle, which the business pays back per mile. */
+    vehicleId?: string;
+    projectId?: string;
+  };
 
 export type FileKind = 'pdf' | 'image' | 'doc' | 'sheet' | 'archive';
 
@@ -220,6 +253,10 @@ export type QrCode = Owned & {
   fg: string;
   bg: string;
   placement?: string;
+  /** The project or event it was made for (a job-site sign, an RSVP card). */
+  projectId?: string;
+  /** Set when the code opens one of this Space's link pages. */
+  linkPageId?: string;
 };
 
 export type LinkItem = { id: string; label: string; url: string };
@@ -247,7 +284,8 @@ export type ActivityVerb =
   | 'uploaded'
   | 'submitted'
   | 'approved'
-  | 'rejected'
+  | 'returned'
+  | 'resubmitted'
   | 'logged'
   | 'assigned'
   | 'joined'
@@ -270,14 +308,18 @@ export type ActivityEvent = {
   at: ISODate;
 };
 
+/**
+ * `approval`, `returned` and `incomplete` are never stored: the repository derives them from the
+ * submissions themselves, so a decision can't leave a stale item behind. The rest are
+ * notifications written when something happens.
+ */
 export type InboxKind =
-  | 'receipt-approval'
-  | 'mileage-review'
+  | 'approval'
+  | 'returned'
+  | 'incomplete'
   | 'document-uploaded'
   | 'access-request'
   | 'document-expiring'
-  | 'unassigned-receipt'
-  | 'receipt-returned'
   | 'mention';
 
 export type InboxItem = {
@@ -295,4 +337,13 @@ export type InboxItem = {
   fromId?: string;
   priority: 'normal' | 'high';
   status: 'open' | 'done';
+  /** For approvals and returns: the submission itself, so the item can show and act on it. */
+  submission?: import('./approvals').Submission;
 };
+
+/* ---------- personal preferences ---------- */
+
+/** Something a person keeps within reach in one Space. Theirs alone; nobody else sees it. */
+export type PinTarget = { type: 'tool' | 'project'; id: string };
+
+export type Pin = PinTarget & { spaceId: string; personId: string };

@@ -1,7 +1,24 @@
 import { expect, test } from '@playwright/test';
 import { applyJournal } from '@/lib/data/demo/journal-apply';
 import { seed } from '@/lib/data/demo/seed';
-import { currentProjectFor } from '@/lib/insights';
+import {
+  currentProjectFor,
+  exceptionsFor,
+  projectMoney,
+  toolUsage,
+  vehicleProject,
+  vehiclesOn,
+  weekSummary,
+} from '@/lib/insights';
+import {
+  awaitingFix,
+  canResubmit,
+  describeCount,
+  groupBySubmitter,
+  mileageSubmission,
+  receiptSubmission,
+} from '@/lib/platform/approvals';
+import { workProfile } from '@/lib/platform/work';
 import { createActionsFor, groupActions } from '@/lib/platform/actions';
 import { validateField } from '@/lib/platform/custom-fields';
 import { dashboardFor } from '@/lib/platform/dashboard';
@@ -142,17 +159,21 @@ test.describe('navigation and dashboards compose from the same rules', () => {
   });
   test('each role gets its own dashboard', () => {
     const owner = dashboardFor(space('abc-construction'), { role: 'owner' });
-    expect(owner.top).toEqual(['pulse']);
-    expect(owner.main).toEqual(['attention', 'projects', 'activity']);
-    expect(owner.side).toEqual(['team', 'money', 'fleet']);
+    expect(owner.top).toEqual(['pulse', 'pinned-projects']);
+    // Decisions and exceptions come before the full picture.
+    expect(owner.main).toEqual(['approvals', 'attention', 'exceptions', 'projects', 'activity']);
+    expect(owner.side).toEqual(['week', 'team', 'money', 'fleet']);
     // A restaurant has no vehicles, so its codes take that place.
     expect(dashboardFor(space('salt-and-ember'), { role: 'owner' }).side).toContain('codes');
-    expect(dashboardFor(space('abc-construction'), { role: 'manager' }).top).toEqual(['pulse']);
-    expect(dashboardFor(space('abc-construction'), { role: 'member' }).main).toEqual([
-      'my-day',
-      'notices',
-      'my-submissions',
+    expect(dashboardFor(space('abc-construction'), { role: 'manager' }).top).toEqual([
+      'pulse',
+      'pinned-projects',
     ]);
+    // Employees: what came back to fix leads; no owner analytics.
+    const member = dashboardFor(space('abc-construction'), { role: 'member' });
+    expect(member.main).toEqual(['to-fix', 'my-day', 'notices', 'my-submissions']);
+    expect([...member.top, ...member.main, ...member.side]).not.toContain('week');
+    expect([...member.top, ...member.main, ...member.side]).not.toContain('exceptions');
     const guest = dashboardFor(space('abc-construction'), { role: 'guest' });
     expect(guest.top).toEqual([]);
     expect(guest.main).toEqual(['shared-projects', 'shared-files']);
@@ -204,38 +225,96 @@ test.describe('demo data', () => {
 });
 
 test.describe('Demo Mode journal', () => {
-  test('a submitted receipt creates activity and an approval, and approving clears it', () => {
-    const at = '2026-09-24T18:00:00.000Z';
-    const row = {
-      id: 'rc_test',
-      spaceId: 'sp_abc',
-      createdBy: 'mike',
-      createdAt: at,
-      vendor: 'Shell',
-      category: 'fuel',
-      total: 40,
-      date: at,
-      status: 'submitted',
-      projectId: 'prj_oakbrook',
-    };
+  const at = '2026-09-24T18:00:00.000Z';
+  const row = {
+    id: 'rc_test',
+    spaceId: 'sp_abc',
+    createdBy: 'mike',
+    createdAt: at,
+    vendor: 'Shell',
+    category: 'fuel',
+    total: 40,
+    date: at,
+    status: 'submitted',
+    projectId: 'prj_oakbrook',
+  };
+  test('a submission writes activity, and its approval lives on the record, not in a copy', () => {
     const added = applyJournal(data, [{ k: 'add', t: 'receipts', row, by: 'mike', at }]);
-    expect(
-      added.activity.some((event) => event.object.id === 'rc_test' && event.verb === 'submitted'),
-    ).toBe(true);
-    expect(added.inbox.find((item) => item.subject.id === 'rc_test')?.status).toBe('open');
+    const logged = added.activity.find((event) => event.object.id === 'rc_test');
+    expect(logged?.verb).toBe('submitted');
+    expect(logged?.context?.id).toBe('prj_oakbrook');
+    // No inbox row to fall out of sync: the queue is read from the submissions.
+    expect(added.inbox.some((item) => item.subject.id === 'rc_test')).toBe(false);
     const approved = applyJournal(data, [
       { k: 'add', t: 'receipts', row, by: 'mike', at },
       {
         k: 'set',
         t: 'receipts',
         id: 'rc_test',
-        patch: { status: 'approved', reviewedBy: 'dana' },
+        patch: { status: 'approved', reviewedBy: 'dana', reviewedAt: at },
         by: 'dana',
         at,
       },
     ]);
     expect(approved.receipts.find((receipt) => receipt.id === 'rc_test')?.status).toBe('approved');
-    expect(approved.inbox.find((item) => item.subject.id === 'rc_test')?.status).toBe('done');
+    expect(
+      approved.activity.some((event) => event.object.id === 'rc_test' && event.verb === 'approved'),
+    ).toBe(true);
+  });
+  test('a return carries its reason; fixing it resubmits and says so', () => {
+    const reason = 'Please use Truck 24 instead of Personal Vehicle.';
+    const ops = [
+      { k: 'add' as const, t: 'receipts' as const, row, by: 'mike', at },
+      {
+        k: 'set' as const,
+        t: 'receipts' as const,
+        id: 'rc_test',
+        patch: { status: 'returned', reviewedBy: 'dana', returnReason: reason },
+        by: 'dana',
+        at: '2026-09-24T19:00:00.000Z',
+      },
+    ];
+    const returned = applyJournal(data, ops);
+    const record = returned.receipts.find((receipt) => receipt.id === 'rc_test')!;
+    expect(record.status).toBe('returned');
+    expect(record.returnReason).toBe(reason);
+    expect(awaitingFix(record, 'mike')).toBe(true);
+    expect(canResubmit(receiptSubmission(record), 'mike')).toBe(true);
+    expect(canResubmit(receiptSubmission(record), 'dana')).toBe(false);
+    const line = returned.activity.find(
+      (event) => event.verb === 'returned' && event.object.id === 'rc_test',
+    );
+    expect(line?.detail).toContain(reason);
+
+    const fixed = applyJournal(data, [
+      ...ops,
+      {
+        k: 'set',
+        t: 'receipts',
+        id: 'rc_test',
+        patch: {
+          status: 'submitted',
+          vehicleId: 'veh_t24',
+          resubmittedAt: '2026-09-24T20:00:00.000Z',
+        },
+        by: 'mike',
+        at: '2026-09-24T20:00:00.000Z',
+      },
+    ]);
+    const again = fixed.receipts.find((receipt) => receipt.id === 'rc_test')!;
+    expect(again.status).toBe('submitted');
+    expect(awaitingFix(again, 'mike')).toBe(false);
+    expect(receiptSubmission(again).flags).toContain('resubmitted');
+    expect(
+      fixed.activity.some((event) => event.verb === 'resubmitted' && event.object.id === 'rc_test'),
+    ).toBe(true);
+  });
+  test('journals written before "returned" still read correctly', () => {
+    const legacy = applyJournal(data, [
+      { k: 'add', t: 'receipts', row, by: 'mike', at },
+      { k: 'set', t: 'receipts', id: 'rc_test', patch: { status: 'rejected' }, by: 'dana', at },
+    ]);
+    expect(legacy.receipts.find((receipt) => receipt.id === 'rc_test')?.status).toBe('returned');
   });
   test('the seed itself is never mutated', () => {
     const before = data.receipts.length;
@@ -301,5 +380,162 @@ test.describe('tools', () => {
     expect(validateField({ id: 'r', label: 'Permit', type: 'text', required: true }, '')).toBe(
       'Permit is required.',
     );
+  });
+});
+
+test.describe('approvals are one system', () => {
+  const trip = data.mileage.find((entry) => entry.id === 'mi_abc_08')!;
+  test('Mike’s returned trip carries Dana’s reason and waits on him alone', () => {
+    expect(trip.status).toBe('returned');
+    expect(trip.returnReason).toBe('Please use Truck 24 instead of Personal Vehicle.');
+    expect(awaitingFix(trip, 'mike')).toBe(true);
+    expect(awaitingFix(trip, 'dana')).toBe(false);
+  });
+  test('a trip in a personal vehicle is flagged when a company vehicle is assigned', () => {
+    expect(mileageSubmission(trip, 'veh_t24').flags).toContain('own-vehicle');
+    expect(mileageSubmission(trip).flags).not.toContain('own-vehicle');
+  });
+  test('receipts with nowhere to go are flagged for the approver', () => {
+    const caseys = data.receipts.find((receipt) => receipt.id === 'rc_abc_04')!;
+    expect(receiptSubmission(caseys).flags).toContain('unassigned');
+  });
+  test('pending work groups by who sent it, biggest queue first', () => {
+    const pending = [
+      ...data.receipts
+        .filter((r) => r.spaceId === 'sp_abc' && r.status === 'submitted')
+        .map((r) => receiptSubmission(r)),
+      ...data.mileage
+        .filter((m) => m.spaceId === 'sp_abc' && m.status === 'submitted')
+        .map((m) => mileageSubmission(m)),
+    ];
+    const groups = groupBySubmitter(pending);
+    expect(groups[0].personId).toBe('mike');
+    expect(describeCount(groups[0].items)).toBe('2 receipts and 2 trips');
+  });
+  test('every returned item in the demo says why', () => {
+    for (const row of [...data.receipts, ...data.mileage].filter(
+      (item) => item.status === 'returned',
+    ))
+      expect(row.returnReason, row.id).toBeTruthy();
+  });
+});
+
+test.describe('connected records', () => {
+  const abc = (rows: { spaceId: string }[]) => rows.filter((row) => row.spaceId === 'sp_abc');
+  test('a project’s value, tracked costs and allowance are three different things', () => {
+    const oak = data.projects.find((project) => project.id === 'prj_oakbrook')!;
+    const money = projectMoney(
+      oak,
+      data.receipts.filter((receipt) => receipt.projectId === oak.id),
+      data.mileage.filter((entry) => entry.projectId === oak.id),
+      space('abc-construction').mileageRate,
+    );
+    expect(money.value).toBe(148000);
+    expect(money.allowance).toBe(2500);
+    expect(money.tracked).toBeCloseTo(672.59, 2);
+    expect(money.pending).toBeCloseTo(71.42, 2);
+    // Personal-vehicle miles are a cost; company-truck miles are not (fuel receipts cover them).
+    const oak1845 = data.projects.find((project) => project.id === 'prj_oak1845')!;
+    const other = projectMoney(
+      oak1845,
+      data.receipts.filter((receipt) => receipt.projectId === oak1845.id),
+      data.mileage.filter((entry) => entry.projectId === oak1845.id),
+      0.7,
+    );
+    expect(other.lines.find((line) => line.label === 'Mileage paid back')?.total).toBeCloseTo(
+      5.04,
+      2,
+    );
+    expect(other.allowance).toBeUndefined();
+  });
+  test('a truck knows its project, and a project knows its trucks', () => {
+    const truck = data.vehicles.find((vehicle) => vehicle.id === 'veh_t24')!;
+    expect(
+      vehicleProject(truck, abc(data.projects) as typeof data.projects, data.receipts, data.mileage)
+        ?.id,
+    ).toBe('prj_oakbrook');
+    const on = vehiclesOn('prj_oakbrook', data.vehicles, data.receipts, data.mileage);
+    expect(on[0].vehicle.id).toBe('veh_t24');
+  });
+  test('owners see exceptions, not every transaction', () => {
+    const people = new Map(data.people.map((person) => [person.id, person]));
+    const rules = exceptionsFor(
+      {
+        receipts: abc(data.receipts) as typeof data.receipts,
+        mileage: abc(data.mileage) as typeof data.mileage,
+        files: abc(data.files) as typeof data.files,
+        projects: abc(data.projects) as typeof data.projects,
+        vehicles: abc(data.vehicles) as typeof data.vehicles,
+        people,
+      },
+      { rate: 0.7, now: Date.UTC(2026, 8, 24, 18) },
+    ).map((item) => item.rule);
+    expect(rules).toContain('unassigned');
+    expect(rules).toContain('expiring');
+    expect(rules).toContain('returned');
+  });
+  test('the weekly summary is written from the records', () => {
+    const now = Date.UTC(2026, 8, 24, 18);
+    const week = weekSummary(
+      {
+        receipts: abc(data.receipts) as typeof data.receipts,
+        mileage: abc(data.mileage) as typeof data.mileage,
+        projects: abc(data.projects) as typeof data.projects,
+        activity: abc(data.activity) as typeof data.activity,
+      },
+      0.7,
+      now,
+    );
+    expect(week.receipts).toBeGreaterThan(0);
+    expect(week.activeProjects).toBe(3);
+    expect(week.busiest?.project.id).toBe('prj_oakbrook');
+  });
+  test('Home learns what someone uses from what they made', () => {
+    const usage = toolUsage('jerry', {
+      receipts: data.receipts.filter((row) => row.spaceId === personal.id),
+      mileage: data.mileage.filter((row) => row.spaceId === personal.id),
+      files: data.files.filter((row) => row.spaceId === personal.id),
+      qrCodes: data.qrCodes.filter((row) => row.spaceId === personal.id),
+      linkPages: data.linkPages.filter((row) => row.spaceId === personal.id),
+    });
+    expect(usage.get('mileage')!.last > usage.get('images')!.last).toBe(true);
+    expect(usage.get('pdf')?.recent).toBe(1);
+  });
+  test('default pins point at things that exist', () => {
+    for (const pin of data.pins)
+      if (pin.type === 'project')
+        expect(
+          data.projects.some((project) => project.id === pin.id && project.spaceId === pin.spaceId),
+        ).toBe(true);
+      else expect(getTool(pin.id)).toBeDefined();
+  });
+});
+
+test.describe('work styles', () => {
+  test('one Projects module, words and emphasis by the business', () => {
+    const events = workProfile(space('salt-and-ember'));
+    expect(events).toMatchObject({
+      singular: 'Event',
+      plural: 'Events',
+      progress: false,
+      value: 'Booking',
+    });
+    const jobs = workProfile(space('abc-construction'));
+    expect(jobs).toMatchObject({
+      plural: 'Projects',
+      progress: true,
+      value: 'Contract value',
+      field: true,
+    });
+    expect(workProfile(space('hyphy')).style).toBe('engagements');
+  });
+  test('events carry no percent complete', () => {
+    for (const project of data.projects.filter((item) => item.spaceId === 'sp_se'))
+      expect(project.progress).toBeUndefined();
+  });
+  test('no project shows an allowance larger than its value', () => {
+    for (const project of data.projects)
+      if (project.costAllowance && project.value)
+        expect(project.costAllowance).toBeLessThan(project.value);
   });
 });

@@ -64,13 +64,21 @@ export function CreateSheets({
       open={Boolean(request && form)}
       onClose={onClose}
       title={
-        form === 'project'
-          ? `New ${project.toLowerCase()}`
-          : form === 'receipt'
-            ? action!.label
-            : (copy?.title ?? '')
+        request?.edit
+          ? 'Fix and resubmit'
+          : form === 'project'
+            ? `New ${project.toLowerCase()}`
+            : form === 'receipt'
+              ? action!.label
+              : (copy?.title ?? '')
       }
-      description={copy?.description}
+      description={
+        request?.edit
+          ? request.edit.record.status === 'draft'
+            ? 'Finish it and send it.'
+            : 'Change what was asked, then send it back.'
+          : copy?.description
+      }
       width={form === 'person' ? 'md' : 'md'}
       leading={
         action && (

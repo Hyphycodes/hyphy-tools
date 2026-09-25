@@ -14,6 +14,11 @@ needs no Supabase project or credentials.
 - Row Level Security reproduces the visibility rules in `src/lib/data/demo/repository.ts`
   (members see their own submissions, guests only shared projects, and so on).
 
+`migrations/20260925100000_connected_systems.sql` follows it: one review shape for receipts and
+trips (return reason, resubmission), an `approval_queue` view instead of approval inbox rows,
+project `value` and `cost_allowance`, Space `work_style` and `mileage_rate`, QR codes linked to a
+project or link page, and a `pins` table.
+
 Before applying:
 
 1. Create a dedicated Supabase project for Hyphy Tools. Never apply this to Hyphy Studio's
@@ -31,6 +36,7 @@ creates an owner, a member and a guest and checks what each can see and do:
 createdb hyphy_tools_check
 psql -d hyphy_tools_check -f supabase/tests/prelude.sql
 psql -d hyphy_tools_check -f supabase/migrations/20260925000000_platform_foundation.sql
+psql -d hyphy_tools_check -f supabase/migrations/20260925100000_connected_systems.sql
 psql -d hyphy_tools_check -f supabase/tests/rls-smoke.sql
 ```
 

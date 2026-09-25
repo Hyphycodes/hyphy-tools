@@ -56,6 +56,7 @@ export function ToolLink({
     icon: NavItem['icon'];
     color: string;
     ink: 'dark' | 'light';
+    pinned?: boolean;
   };
   onNavigate?: () => void;
 }) {
@@ -79,7 +80,8 @@ export function ToolLink({
       >
         <Icon name={tool.icon} size={12} strokeWidth={2.1} />
       </span>
-      <span className="truncate">{tool.label}</span>
+      <span className="flex-1 truncate">{tool.label}</span>
+      {tool.pinned && <Icon name="pin" size={12} className="shrink-0 text-faint" />}
     </Link>
   );
 }

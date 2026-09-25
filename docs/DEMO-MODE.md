@@ -15,7 +15,9 @@ account, database or setup. It is a preview tool, not security.
   to a per-browser journal (`hyphy_demo_journal.*` cookies, capped at ~7 KB — the oldest changes
   drop off first). They're visible to every persona in _your_ browser only, so you can submit as
   Mike and approve as Dana.
-- **Reset** clears the journal. The seeded world is regenerated relative to the current time, so
+- **Pins** live in their own small cookie (`hyphy_demo_pins`, `src/lib/data/demo/prefs.ts`) so
+  they never age out with the journal. Seeded defaults apply until someone changes their own.
+- **Reset** clears the journal and the pins. The seeded world is regenerated relative to the current time, so
   "3h ago" is always three hours ago.
 
 ## Where it lives

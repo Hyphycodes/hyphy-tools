@@ -78,6 +78,41 @@ Nothing about tools, actions or navigation is scattered across pages.
   `currentProjectFor()` in `lib/insights.ts` decides what someone is working on, so the
   dashboard, their profile and new receipts and trips always agree.
 
+## Connected records (Phase 1.75)
+
+Capture once, connect everywhere: a record carries ids (`createdBy`, `projectId`, `vehicleId`,
+`attachedTo`, `linkPageId`), never copies of names, so a trip Mike logs on Oak Brook in Truck 24
+shows up on his profile, the project, the truck, Mileage, Dana's queue and the weekly summary
+without anyone filing it twice. The repository resolves labels on activity and inbox items from
+the live records, so a rename follows everywhere.
+
+- **Approvals** — `lib/platform/approvals.ts`. Every submission carries one `Review` shape
+  (`status`, `reviewedBy`, `reviewedAt`, `returnReason`, `resubmittedAt`). `Submission` normalizes
+  receipts and trips (future kinds — form entries, expense reports — add a `submissionKinds`
+  entry). Lifecycle: draft → submitted → approved, or returned with an optional reason → edited
+  and resubmitted by the submitter. Batch approval exists; bulk return deliberately doesn't. The
+  server refuses deciding your own submission or one already decided (`RuleError`).
+- **Inbox** — approvals, returned items and unfinished drafts are **derived** from the records
+  (`repo.inbox()`), not stored, so a decision can't leave a stale row. Stored items are
+  notifications (documents, access requests, mentions). `lib/platform/inbox.ts` gives look and
+  grouping (To fix, Approvals, Documents, People, Mentions). `?from=personId` filters the queue.
+- **Work styles** — `space.workStyle` (`jobs`, `events`, `engagements`) and `lib/platform/work.ts`:
+  one Projects module; the profile decides words (Events, Room, Host), schedule (due vs. on a
+  day), whether progress means anything, and what the customer's money is called.
+- **Project money** — `value` (contract/booking), optional `costAllowance` (an internal target,
+  only where the business set one), and tracked costs computed by `projectMoney()` in
+  `lib/insights.ts`: receipts plus personal-vehicle miles × `space.mileageRate`. Never shown as
+  the job's full cost.
+- **Pins** — `repo.pins()` / `setPinned()`: a person's tools and projects in one Space. Home,
+  the sidebar and project lists read them.
+- **Owner views** — `exceptionsFor()` (plain rules: unassigned receipts, personal-vehicle trips by
+  someone with a truck, expiring documents, allowances ≥85%, returns waiting) and
+  `weekSummary()` (a preview card; nothing is emailed). `toolUsage()` orders Personal Home by
+  what someone actually made.
+- **Relationship chips** — `components/records/relations.tsx` is the one way a record shows what
+  it belongs to (person, vehicle, project, category), in detail views; list rows say the same in
+  their second line.
+
 ## Activity and Inbox
 
 `ActivityEvent` (actor, verb, object, context, detail) is one feed rendered by one component

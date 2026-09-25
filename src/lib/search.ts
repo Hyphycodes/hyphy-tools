@@ -4,9 +4,10 @@ import type { Repository } from '@/lib/data';
 import type { Workspace } from '@/lib/identity/types';
 import type { CreateAction } from '@/lib/platform/actions';
 import type { NavModel } from '@/lib/platform/navigation';
-import type { InboxKind } from '@/lib/platform/types';
+import { inboxLook } from '@/lib/platform/inbox';
 import { roles } from '@/lib/platform/roles';
 import { availability, tools, toolName } from '@/lib/platform/tools';
+import { workProfile } from '@/lib/platform/work';
 import type { DemoModel } from '@/lib/demo/model';
 
 export type SearchItem = {
@@ -49,48 +50,6 @@ export type SearchItem = {
       };
 };
 
-/** Inbox items look the way they do in the Inbox: the tool or the kind of thing they're about. */
-const inboxVisual: Record<InboxKind, SearchItem['visual']> = {
-  'receipt-approval': {
-    kind: 'tint',
-    icon: 'receipt',
-    bg: 'var(--color-tool-receipt)',
-    fg: '#16150F',
-  },
-  'unassigned-receipt': {
-    kind: 'tint',
-    icon: 'receipt',
-    bg: 'var(--color-caution-soft)',
-    fg: 'var(--color-caution)',
-  },
-  'mileage-review': { kind: 'tint', icon: 'route', bg: 'var(--color-tool-miles)', fg: '#16150F' },
-  'receipt-returned': {
-    kind: 'tint',
-    icon: 'arrow-left',
-    bg: 'var(--color-critical-soft)',
-    fg: 'var(--color-critical)',
-  },
-  'document-uploaded': {
-    kind: 'tint',
-    icon: 'file-text',
-    bg: 'var(--color-tool-files)',
-    fg: '#16150F',
-  },
-  'document-expiring': {
-    kind: 'tint',
-    icon: 'clock',
-    bg: 'var(--color-caution-soft)',
-    fg: 'var(--color-caution)',
-  },
-  'access-request': {
-    kind: 'tint',
-    icon: 'user-plus',
-    bg: 'var(--color-signal-soft)',
-    fg: 'var(--color-signal-ink)',
-  },
-  mention: { kind: 'tint', icon: 'message', bg: 'var(--color-well)', fg: 'var(--color-ink-2)' },
-};
-
 /**
  * What the command bar can find in this Space — only what this person can already see, because
  * it's built from the same scoped repository. Production search would query instead of listing.
@@ -118,7 +77,7 @@ export async function buildSearchIndex(
       : Promise.resolve([]),
     repo.directory(),
   ]);
-  const projectWord = space.labels?.projects?.singular ?? 'Project';
+  const projectWord = workProfile(space).singular;
   const nameOf = (id?: string) => directory.find((person) => person.id === id)?.firstName;
   const projectName = (id?: string) => projects.find((project) => project.id === id)?.name;
 
@@ -131,7 +90,7 @@ export async function buildSearchIndex(
       keywords: 'inbox approve attention',
       href: `${base}/inbox`,
       boost: item.priority === 'high' ? 0.4 : 0,
-      visual: inboxVisual[item.kind],
+      visual: (({ icon, bg, fg }) => ({ kind: 'tint' as const, icon, bg, fg }))(inboxLook(item)),
     })),
     ...actions.map<SearchItem>((action) => ({
       id: `action-${action.id}`,

@@ -16,7 +16,13 @@ export default async function QrPage({ params, searchParams }: PageProps<'/[spac
   const query = await searchParams;
   const selectedId = query.code;
   const content = typeof query.content === 'string' ? query.content.slice(0, 1000) : undefined;
-  const codes = await repo.qrCodes();
+  const label = typeof query.label === 'string' ? query.label.slice(0, 60) : '';
+  const [codes, projects] = await Promise.all([
+    repo.qrCodes(),
+    workspace.space.kind === 'business' ? repo.projects() : Promise.resolve([]),
+  ]);
+  // Arriving from a project ("Create QR") files the code to it.
+  const fromProject = projects.find((project) => project.id === query.project);
   const selected = codes.find((code) => code.id === selectedId);
   const tool = getTool('qr')!;
 
@@ -31,7 +37,7 @@ export default async function QrPage({ params, searchParams }: PageProps<'/[spac
         }
       />
       <QrTool
-        key={selected?.id ?? content ?? 'new'}
+        key={selected?.id ?? `${content ?? 'new'}-${fromProject?.id ?? ''}`}
         slug={workspace.space.slug}
         spaceName={workspace.space.kind === 'personal' ? 'Personal' : workspace.space.name}
         canSave={can('tools.use')}
@@ -43,6 +49,7 @@ export default async function QrPage({ params, searchParams }: PageProps<'/[spac
                 bg: selected.bg,
                 label: selected.label,
                 placement: selected.placement,
+                projectId: selected.projectId,
               }
             : {
                 content:
@@ -50,7 +57,8 @@ export default async function QrPage({ params, searchParams }: PageProps<'/[spac
                   (workspace.space.kind === 'personal' ? 'https://hyphy.example/jerry' : ''),
                 fg: '#0f0f0e',
                 bg: '#ffffff',
-                label: '',
+                label,
+                projectId: fromProject?.id,
               }
         }
       />
@@ -79,7 +87,8 @@ export default async function QrPage({ params, searchParams }: PageProps<'/[spac
                   </span>
                   <span className="block truncate text-[12px] text-muted">
                     {[
-                      code.placement,
+                      projects.find((project) => project.id === code.projectId)?.name ??
+                        code.placement,
                       people.get(code.createdBy)?.firstName,
                       formatRelative(code.createdAt, tz),
                     ]

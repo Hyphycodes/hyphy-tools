@@ -6,6 +6,7 @@ import { cn } from '@/components/ui/cn';
 import { Field, Input, Segmented, Select, Textarea } from '@/components/ui/form';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { useToast } from '@/components/ui/toast';
+import { AttachPicker } from './attach-picker';
 import {
   captionBand,
   kindOf,
@@ -147,7 +148,15 @@ export function QrTool({
   spaceName,
 }: {
   slug: string;
-  initial?: { content: string; fg: string; bg: string; label: string; placement?: string };
+  initial?: {
+    content: string;
+    fg: string;
+    bg: string;
+    label: string;
+    placement?: string;
+    projectId?: string;
+    linkPageId?: string;
+  };
   canSave: boolean;
   spaceName: string;
 }) {
@@ -179,6 +188,8 @@ export function QrTool({
   const [message, setMessage] = useState('');
   const [saved, setSaved] = useState(false);
   const [saving, startSaving] = useTransition();
+  // A code made from a project (a job-site sign, an RSVP card) is saved with that project.
+  const [projectId, setProjectId] = useState(initial?.projectId ?? '');
 
   const value = (
     kind === 'wifi'
@@ -245,11 +256,21 @@ export function QrTool({
         fg,
         bg,
         placement,
+        projectId,
+        linkPageId: initial?.linkPageId,
       });
       if (result.ok) setSaved(true);
       toast(
         result.ok
-          ? { title: `${name} saved`, description: `Find it under Saved in ${spaceName}` }
+          ? {
+              title: `${name} saved`,
+              description: projectId
+                ? 'Saved here and on its project'
+                : `Find it under Saved in ${spaceName}`,
+              ...(projectId
+                ? { href: `/${spaceSlug}/projects/${projectId}?tab=codes`, action: 'Open project' }
+                : {}),
+            }
           : { title: result.error, icon: 'alert' },
       );
     });
@@ -357,6 +378,14 @@ export function QrTool({
                   className="!bg-white/85"
                 />
               </div>
+              <AttachPicker
+                value={projectId}
+                onChange={(next) => {
+                  setProjectId(next);
+                  touched();
+                }}
+                className="mt-2.5"
+              />
               <Button
                 className="mt-2.5 w-full !bg-white/85 hover:!bg-white"
                 disabled={code.state !== 'ready' || saving || saved}

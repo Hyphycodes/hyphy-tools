@@ -11,7 +11,8 @@ import { fieldTypes } from '@/lib/platform/custom-fields';
 import { formatDate } from '@/lib/platform/format';
 import { planFor, plans } from '@/lib/platform/plans';
 import { ROLE_ORDER, roles } from '@/lib/platform/roles';
-import { tools } from '@/lib/platform/tools';
+import { toolName, tools } from '@/lib/platform/tools';
+import { workProfile } from '@/lib/platform/work';
 import { ModuleToggles, type ToggleRow } from './module-toggles';
 
 export const metadata = { title: 'Settings' };
@@ -30,7 +31,7 @@ export default async function SettingsPage({ params }: PageProps<'/[space]/setti
       const inPlan = plan.includes.includes(tool.module!);
       return {
         module: tool.module!,
-        name: (tool.module && space.labels?.[tool.module]?.plural) || tool.name,
+        name: toolName(tool, space),
         tagline: tool.tagline,
         color: tool.color,
         ink: tool.ink,
@@ -141,7 +142,7 @@ export default async function SettingsPage({ params }: PageProps<'/[space]/setti
               {customFields.map(([module, list]) => (
                 <div key={module}>
                   <p className="label mb-2">
-                    {space.labels?.[module as 'projects']?.plural ?? module}
+                    {module === 'projects' ? workProfile(space).plural : module}
                   </p>
                   <ul className="grid gap-1.5">
                     {list!.map((field) => (

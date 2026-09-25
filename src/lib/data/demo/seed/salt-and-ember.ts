@@ -20,7 +20,6 @@ export function saltAndEmber(t: Clock): SeedSlice {
         leadId: 'marcus',
         teamIds: ['marcus', 'omar', 'nia', 'jerry'],
         startDate: t.ahead(5),
-        progress: 70,
         color: '#7FB3C8',
         custom: { guests: 80, room: 'Bar & patio' },
       },
@@ -37,8 +36,8 @@ export function saltAndEmber(t: Clock): SeedSlice {
         leadId: 'marcus',
         teamIds: ['marcus', 'rosa', 'omar'],
         startDate: t.ahead(9),
-        progress: 35,
-        budget: 4800,
+        // What the Kellers booked; the deposit is a detail the restaurant tracks itself.
+        value: 4800,
         color: '#D9A441',
         custom: { guests: 24, deposit: 1200, room: 'Private room' },
       },
@@ -55,7 +54,6 @@ export function saltAndEmber(t: Clock): SeedSlice {
         leadId: 'rosa',
         teamIds: ['rosa', 'omar', 'jerry', 'marcus'],
         startDate: t.ahead(12),
-        progress: 64,
         color: '#E0492F',
         custom: { room: 'Dining room' },
       },
@@ -72,7 +70,6 @@ export function saltAndEmber(t: Clock): SeedSlice {
         leadId: 'rosa',
         teamIds: ['rosa', 'marcus'],
         startDate: t.ahead(23),
-        progress: 15,
         color: '#8E6BBF',
         custom: { guests: 40, room: 'Dining room' },
       },
@@ -90,7 +87,6 @@ export function saltAndEmber(t: Clock): SeedSlice {
         teamIds: ['marcus', 'nia'],
         startDate: t.ago(118),
         dueDate: t.ago(3),
-        progress: 100,
         color: '#9CA3AF',
         custom: { room: 'Bar & patio' },
       },
@@ -288,6 +284,7 @@ export function saltAndEmber(t: Clock): SeedSlice {
         fg: '#2A120E',
         bg: '#FFF7EF',
         placement: 'Every table',
+        projectId: 'prj_se_fall',
       },
       {
         id: 'qr_se_02',
@@ -321,6 +318,7 @@ export function saltAndEmber(t: Clock): SeedSlice {
         fg: '#E0492F',
         bg: '#FFFFFF',
         placement: 'Instagram story',
+        projectId: 'prj_se_oyster',
       },
       {
         id: 'qr_se_05',
@@ -449,19 +447,6 @@ export function saltAndEmber(t: Clock): SeedSlice {
     ],
 
     inbox: [
-      {
-        id: 'in_se_01',
-        spaceId: S,
-        kind: 'receipt-approval',
-        title: 'Receipt needs approval',
-        detail: 'Mariano’s · $32.14 · paid with a personal card',
-        at: t.ago(0, 1, 40),
-        subject: { type: 'receipt', id: 'rc_se_01', label: 'Mariano’s receipt' },
-        audience: 'expenses.approve',
-        fromId: 'omar',
-        priority: 'normal',
-        status: 'open',
-      },
       {
         id: 'in_se_02',
         spaceId: S,

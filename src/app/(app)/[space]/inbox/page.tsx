@@ -1,29 +1,44 @@
 import Link from 'next/link';
-import { InboxList, inboxKinds } from '@/components/records/inbox-list';
+import { ApprovalQueue } from '@/components/records/approval-queue';
+import { InboxList } from '@/components/records/inbox-list';
 import { cn } from '@/components/ui/cn';
 import { Icon } from '@/components/ui/icon';
 import { Page, PageHeader } from '@/components/ui/page';
 import { Panel } from '@/components/ui/panel';
 import { Chips } from '@/components/ui/tabs';
 import { openPage } from '@/lib/page';
+import type { Submission } from '@/lib/platform/approvals';
 import { formatCurrency, plural } from '@/lib/platform/format';
+import { inboxGroups, inboxLook, type InboxGroup } from '@/lib/platform/inbox';
 import { roles } from '@/lib/platform/roles';
 import type { InboxItem } from '@/lib/platform/types';
 
 export const metadata = { title: 'Inbox' };
 
-const groups = ['Approvals', 'Documents', 'People', 'Mentions', 'Updates'] as const;
+const groups = inboxGroups;
+/** `to fix` → `to-fix`, for URLs. */
+const slugOf = (group: string) => group.toLowerCase().replace(/\s+/g, '-');
 
-/** Needs Attention: approvals, documents, requests and mentions — only the ones for this person. */
+/**
+ * Needs Attention: the owner's work queue and everyone's to-do list. Approvals, things sent back
+ * to fix, documents, requests and mentions — only the ones for this person.
+ */
 export default async function InboxPage({ params, searchParams }: PageProps<'/[space]/inbox'>) {
-  const { workspace, repo, base, directory, can } = await openPage(params);
-  const view = String((await searchParams).view ?? 'open').toLowerCase();
-  const [all, receipts] = await Promise.all([
+  const { workspace, repo, base, directory, can, people } = await openPage(params);
+  const query = await searchParams;
+  const view = String(query.view ?? 'open').toLowerCase();
+  // "View pending submissions" from a person's page lands here, filtered to them.
+  const from = typeof query.from === 'string' ? query.from : undefined;
+  const me = workspace.person.id;
+  const [everything, receipts, mine, myTrips] = await Promise.all([
     repo.inbox({ includeDone: true }),
     repo.receipts({ status: 'submitted' }),
+    repo.receipts({ createdBy: me }),
+    repo.mileage({ createdBy: me }),
   ]);
+  const all = from ? everything.filter((item) => item.fromId === from) : everything;
   const open = all.filter((item) => item.status === 'open');
-  const groupOf = (item: InboxItem) => inboxKinds[item.kind].label;
+  const groupOf = (item: InboxItem): InboxGroup => inboxLook(item).group;
   const counts = new Map(
     groups.map((group) => [group, open.filter((item) => groupOf(item) === group).length]),
   );
@@ -32,28 +47,36 @@ export default async function InboxPage({ params, searchParams }: PageProps<'/[s
       ? all.filter((item) => item.status === 'done')
       : view === 'open'
         ? open
-        : open.filter((item) => groupOf(item).toLowerCase() === view);
+        : open.filter((item) => slugOf(groupOf(item)) === view);
   const business = workspace.space.kind === 'business';
   const canApprove = can('expenses.approve');
 
-  // Grouped so the eye lands on one kind of decision at a time; anything urgent leads.
+  // Grouped so the eye lands on one kind of decision at a time: what you must fix, then what
+  // waits on your decision, then anything urgent, then the rest.
+  const rank = (section: { group: InboxGroup; items: InboxItem[] }) =>
+    section.group === 'To fix'
+      ? 0
+      : section.group === 'Approvals'
+        ? 1
+        : section.items.some((item) => item.priority === 'high')
+          ? 2
+          : 3;
   const sections =
     view === 'open' || view === 'done'
       ? groups
           .map((group) => ({ group, items: shown.filter((item) => groupOf(item) === group) }))
           .filter((section) => section.items.length)
-          .sort(
-            (a, b) =>
-              Number(b.items.some((item) => item.priority === 'high')) -
-              Number(a.items.some((item) => item.priority === 'high')),
-          )
+          .sort((a, b) => rank(a) - rank(b))
       : [
           {
-            group: groups.find((group) => group.toLowerCase() === view) ?? 'Approvals',
+            group: groups.find((group) => slugOf(group) === view) ?? 'Approvals',
             items: shown,
           },
         ];
-  const waiting = receipts.reduce((sum, receipt) => sum + receipt.total, 0);
+  const waiting = receipts
+    .filter((receipt) => !from || receipt.createdBy === from)
+    .reduce((sum, receipt) => sum + receipt.total, 0);
+  const sender = from ? people.get(from) : undefined;
   const summary = (group: string, items: InboxItem[]) =>
     group === 'Approvals' && canApprove && waiting
       ? `${plural(items.length, 'item')} · ${formatCurrency(waiting)} in receipts`
@@ -64,24 +87,29 @@ export default async function InboxPage({ params, searchParams }: PageProps<'/[s
       <PageHeader
         title="Inbox"
         description={
-          open.length
-            ? business
-              ? `${plural(open.length, 'thing')} ${open.length === 1 ? 'needs' : 'need'} you in ${workspace.space.name}. Approve, answer or clear them here.`
-              : 'Reminders about your own things: documents running out, receipts missing details.'
-            : 'Nothing needs you right now.'
+          sender
+            ? `What ${sender.firstName} sent that ${open.length === 1 ? 'needs' : 'need'} you.`
+            : open.length
+              ? business
+                ? `${plural(open.length, 'thing')} ${open.length === 1 ? 'needs' : 'need'} you in ${workspace.space.name}. Approve, answer or clear them here.`
+                : 'Reminders about your own things: documents running out, receipts missing details.'
+              : 'Nothing needs you right now.'
         }
       />
       <div className="mb-4">
         <Chips
-          active={view}
+          active={sender && view === 'open' ? 'from' : view}
           items={[
+            ...(sender
+              ? [{ id: 'from', label: `From ${sender.firstName} ✕`, href: `${base}/inbox` }]
+              : []),
             { id: 'open', label: 'Needs attention', href: `${base}/inbox`, count: open.length },
             ...groups
               .filter((group) => counts.get(group))
               .map((group) => ({
-                id: group.toLowerCase(),
+                id: slugOf(group),
                 label: group,
-                href: `${base}/inbox?view=${group.toLowerCase()}`,
+                href: `${base}/inbox?view=${slugOf(group)}`,
                 count: counts.get(group),
               })),
             { id: 'done', label: 'Done', href: `${base}/inbox?view=done` },
@@ -99,14 +127,25 @@ export default async function InboxPage({ params, searchParams }: PageProps<'/[s
                   {summary(section.group, section.items)}
                 </span>
               </header>
-              <InboxList
-                items={section.items}
-                people={directory}
-                base={base}
-                slug={workspace.space.slug}
-                canApprove={canApprove}
-                timezone={workspace.space.timezone}
-              />
+              {section.group === 'Approvals' && canApprove && view !== 'done' ? (
+                <ApprovalQueue
+                  items={section.items as (InboxItem & { submission: Submission })[]}
+                  people={directory}
+                  base={base}
+                  slug={workspace.space.slug}
+                  timezone={workspace.space.timezone}
+                />
+              ) : (
+                <InboxList
+                  items={section.items}
+                  people={directory}
+                  base={base}
+                  slug={workspace.space.slug}
+                  canApprove={canApprove}
+                  timezone={workspace.space.timezone}
+                  records={{ receipts: mine, mileage: myTrips }}
+                />
+              )}
             </Panel>
           ))}
         </div>

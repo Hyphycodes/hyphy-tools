@@ -270,13 +270,15 @@
   }
 }
 
-/* An inbox item you just acted on: tinted with the outcome, then it slides away. */
-[data-inbox-item][data-leaving] {
+/* An item you just decided: tinted with the outcome, then it slides away. */
+[data-inbox-item][data-leaving],
+[data-submission][data-leaving] {
   pointer-events: none;
   animation: inbox-leave 0.55s var(--ease-out) forwards;
 }
-[data-inbox-item][data-leaving='rejected'] {
-  --leave-tint: var(--color-critical-soft);
+[data-inbox-item][data-leaving='returned'],
+[data-submission][data-leaving='returned'] {
+  --leave-tint: var(--color-caution-soft);
 }
 @keyframes inbox-leave {
   0% {

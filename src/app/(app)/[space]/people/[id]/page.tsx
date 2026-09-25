@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ActivityList } from '@/components/records/activity-list';
-import { ReviewButtons } from '@/components/records/inbox-actions';
+import { ApproveAll, ReviewActions } from '@/components/records/review';
 import {
   FileRow,
   MileageRow,
@@ -15,15 +15,18 @@ import { EmptyState } from '@/components/ui/empty';
 import { Icon } from '@/components/ui/icon';
 import { Page } from '@/components/ui/page';
 import { Panel, PanelHeader } from '@/components/ui/panel';
-import { currentProjectFor } from '@/lib/insights';
+import { currentProjectFor, thisMonth } from '@/lib/insights';
+import { describeCount, tripTitle } from '@/lib/platform/approvals';
 import { openPage } from '@/lib/page';
 import { formatField } from '@/lib/platform/custom-fields';
+import { buttonClass } from '@/components/ui/button';
+import { cn } from '@/components/ui/cn';
 import {
   formatCurrency,
   formatDate,
   formatMiles,
   formatNumber,
-  startOfMonth,
+  plural,
 } from '@/lib/platform/format';
 import { roles } from '@/lib/platform/roles';
 
@@ -57,15 +60,29 @@ export default async function PersonPage({ params }: PageProps<'/[space]/people/
   const fields = workspace.space.customFields?.people ?? [];
   // A manager's operational read on this person: what's waiting on them, and this month's totals.
   const approver = can('expenses.approve') && !self;
-  const waiting = [...receipts, ...mileage].filter((item) => item.status === 'submitted').length;
-  const since = startOfMonth(tz);
-  const counted = (item: { status: string; date: string }) =>
-    (item.status === 'approved' || item.status === 'submitted') &&
-    new Date(item.date).getTime() >= since;
-  const monthSpend = receipts.filter(counted).reduce((sum, item) => sum + item.total, 0);
-  const monthMiles =
-    Math.round(mileage.filter(counted).reduce((sum, item) => sum + item.miles, 0) * 10) / 10;
+  const waitingReceipts = receipts.filter((item) => item.status === 'submitted');
+  const waitingTrips = mileage.filter((item) => item.status === 'submitted');
+  const waiting = waitingReceipts.length + waitingTrips.length;
+  const returned = [...receipts, ...mileage].filter((item) => item.status === 'returned');
+  const counted = (item: { status: string }) =>
+    item.status === 'approved' || item.status === 'submitted';
+  const monthReceipts = thisMonth(receipts, tz).filter(counted);
+  const monthTrips = thisMonth(mileage, tz).filter(counted);
+  const monthSpend = monthReceipts.reduce((sum, item) => sum + item.total, 0);
+  const monthMiles = Math.round(monthTrips.reduce((sum, item) => sum + item.miles, 0) * 10) / 10;
   const role = roles[member.role];
+  const refs = [
+    ...waitingReceipts.map((item) => ({ kind: 'receipt' as const, id: item.id })),
+    ...waitingTrips.map((item) => ({ kind: 'mileage' as const, id: item.id })),
+  ];
+  const place = (projectId?: string, vehicleId?: string, trip = false) =>
+    [
+      vehicles.find((vehicle) => vehicle.id === vehicleId)?.name ??
+        (trip ? 'Personal vehicle' : undefined),
+      projects.find((project) => project.id === projectId)?.name,
+    ]
+      .filter(Boolean)
+      .join(' · ') || undefined;
 
   return (
     <Page wide>
@@ -100,6 +117,7 @@ export default async function PersonPage({ params }: PageProps<'/[space]/people/
           <p className="text-[15px] text-muted">
             {member.title} · {workspace.space.name}
           </p>
+          <p className="mt-1 text-[13px] text-faint">{role.summary}</p>
         </div>
         {(can('people.manage') || self) && (
           <dl className="grid gap-1 text-[13px] sm:text-right">
@@ -111,44 +129,130 @@ export default async function PersonPage({ params }: PageProps<'/[space]/people/
         )}
       </header>
 
-      <div className="mb-5 grid gap-3 sm:grid-cols-3">
-        <Panel className="p-4">
-          <p className="label mb-2">Role</p>
-          <p className="text-[15px] font-semibold">{role.label}</p>
-          <p className="mt-0.5 text-[13px] text-muted">{role.summary}</p>
+      {/* An operational read, not an HR file: where they are, what they drive, what's moving. */}
+      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Panel className="min-w-0 p-4">
+          <p className="label mb-2">Current project</p>
+          {current ? (
+            <Link href={`${base}/projects/${current.id}`} className="group block min-w-0">
+              <span className="flex items-center gap-2">
+                <span
+                  className="size-2.5 shrink-0 rounded-[3px]"
+                  style={{ background: current.color }}
+                  aria-hidden="true"
+                />
+                <span className="truncate text-[15px] font-semibold group-hover:underline">
+                  {current.name}
+                </span>
+              </span>
+              <span className="mt-0.5 block truncate text-[12.5px] text-muted">
+                {current.location}
+              </span>
+            </Link>
+          ) : (
+            <p className="text-[14px] text-muted">None right now</p>
+          )}
         </Panel>
-        <Panel className="p-4">
+        <Panel className="min-w-0 p-4">
           <p className="label mb-2">Assigned vehicle</p>
           {vehicle ? (
-            <Link href={`${base}/vehicles/${vehicle.id}`} className="flex items-center gap-3">
+            <Link
+              href={`${base}/vehicles/${vehicle.id}`}
+              className="group flex min-w-0 items-center gap-2.5"
+            >
               <VehicleSwatch vehicle={vehicle} />
-              <span>
-                <span className="block text-[15px] font-semibold hover:underline">
+              <span className="min-w-0">
+                <span className="block truncate text-[15px] font-semibold group-hover:underline">
                   {vehicle.name}
                 </span>
-                <span className="block text-[12.5px] text-muted">
+                <span className="block truncate text-[12.5px] text-muted">
                   {formatNumber(vehicle.odometer)} mi
                 </span>
               </span>
             </Link>
           ) : (
-            <p className="text-[14px] text-muted">None</p>
+            <p className="text-[14px] text-muted">None · uses a personal vehicle</p>
           )}
         </Panel>
-        <Panel className="p-4">
-          <p className="label mb-2">Current project</p>
-          {current ? (
-            <Link href={`${base}/projects/${current.id}`} className="block">
-              <span className="block text-[15px] font-semibold hover:underline">
-                {current.name}
-              </span>
-              <span className="block truncate text-[12.5px] text-muted">{current.location}</span>
-            </Link>
-          ) : (
-            <p className="text-[14px] text-muted">None</p>
-          )}
-        </Panel>
+        {seeMoney && (
+          <Panel className="min-w-0 p-4">
+            <p className="label mb-2">This month</p>
+            <p className="text-[20px] leading-none font-semibold tracking-[-0.02em]">
+              {formatMiles(monthMiles)}
+            </p>
+            <p className="mt-1.5 truncate text-[12.5px] text-muted">
+              {plural(monthTrips.length, 'trip')} · {formatCurrency(monthSpend, { cents: false })}{' '}
+              in receipts
+            </p>
+          </Panel>
+        )}
+        {seeMoney && (
+          <Panel className="min-w-0 p-4">
+            <p className="label mb-2">{approver ? 'Waiting on you' : 'Waiting'}</p>
+            <p
+              className={cn(
+                'text-[20px] leading-none font-semibold tracking-[-0.02em]',
+                waiting > 0 && approver && 'text-signal-ink',
+              )}
+            >
+              {waiting ? plural(waiting, 'item') : 'Nothing'}
+            </p>
+            <p className="mt-1.5 truncate text-[12.5px] text-muted">
+              {returned.length
+                ? `${returned.length} returned for a fix`
+                : waitingReceipts.length
+                  ? `${formatCurrency(waitingReceipts.reduce((sum, item) => sum + item.total, 0))} in receipts`
+                  : 'All caught up'}
+            </p>
+          </Panel>
+        )}
       </div>
+
+      {approver && waiting > 0 && (
+        <Panel
+          className="mb-5 flex flex-wrap items-center gap-3 p-4"
+          aria-label="Pending submissions"
+        >
+          <p className="min-w-0 flex-1 text-[14px]">
+            <span className="font-semibold">
+              {member.person.firstName} sent{' '}
+              {describeCount([
+                ...waitingReceipts.map(() => ({ kind: 'receipt' as const })),
+                ...waitingTrips.map(() => ({ kind: 'mileage' as const })),
+              ])}
+            </span>{' '}
+            <span className="text-muted">
+              that {waiting === 1 ? 'needs' : 'need'} your decision.
+            </span>
+          </p>
+          <Link
+            href={`${base}/inbox?from=${id}`}
+            className={buttonClass({ size: 'sm', variant: 'ghost' })}
+          >
+            View pending submissions
+          </Link>
+          {waiting > 1 && (
+            <ApproveAll
+              slug={workspace.space.slug}
+              refs={refs}
+              label={`Approve all ${waiting}`}
+              summary={[
+                waitingReceipts.length
+                  ? formatCurrency(waitingReceipts.reduce((sum, item) => sum + item.total, 0))
+                  : undefined,
+                waitingTrips.length
+                  ? formatMiles(
+                      Math.round(waitingTrips.reduce((sum, item) => sum + item.miles, 0) * 10) / 10,
+                    )
+                  : undefined,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+              variant="primary"
+            />
+          )}
+        </Panel>
+      )}
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="grid min-w-0 content-start gap-5">
@@ -171,12 +275,11 @@ export default async function PersonPage({ params }: PageProps<'/[space]/people/
           </Panel>
           {seeMoney && (receipts.length > 0 || mileage.length > 0) && (
             <Panel>
-              <PanelHeader title="Submissions" count={receipts.length + mileage.length}>
+              <PanelHeader title="Recent submissions" count={receipts.length + mileage.length}>
                 <span className="mr-auto -ml-1 truncate text-[12.5px] text-muted">
                   {[
                     waiting ? `${waiting} waiting${approver ? ' on you' : ''}` : undefined,
-                    monthSpend ? `${formatCurrency(monthSpend)} this month` : undefined,
-                    monthMiles ? `${formatMiles(monthMiles)}` : undefined,
+                    returned.length ? `${returned.length} returned` : undefined,
                   ]
                     .filter(Boolean)
                     .join(' · ')}
@@ -186,7 +289,7 @@ export default async function PersonPage({ params }: PageProps<'/[space]/people/
                 {[
                   ...receipts.map((receipt) => ({
                     at: receipt.date,
-                    waiting: receipt.status === 'submitted',
+                    waiting: receipt.status === 'submitted' || receipt.status === 'returned',
                     node: (
                       <ReceiptRow
                         key={receipt.id}
@@ -195,14 +298,19 @@ export default async function PersonPage({ params }: PageProps<'/[space]/people/
                         timezone={tz}
                         kind="business"
                         showPerson={false}
+                        context={place(receipt.projectId, receipt.vehicleId)}
                         href={`${base}/tools/receipts?receipt=${receipt.id}`}
                         actions={
                           approver && receipt.status === 'submitted' ? (
-                            <ReviewButtons
+                            <ReviewActions
                               slug={workspace.space.slug}
-                              table="receipts"
-                              id={receipt.id}
-                              label={receipt.vendor}
+                              subject={{
+                                kind: 'receipt',
+                                id: receipt.id,
+                                title: receipt.vendor,
+                                amount: formatCurrency(receipt.total),
+                              }}
+                              from={member.person}
                             />
                           ) : undefined
                         }
@@ -211,7 +319,7 @@ export default async function PersonPage({ params }: PageProps<'/[space]/people/
                   })),
                   ...mileage.map((entry) => ({
                     at: entry.date,
-                    waiting: entry.status === 'submitted',
+                    waiting: entry.status === 'submitted' || entry.status === 'returned',
                     node: (
                       <MileageRow
                         key={entry.id}
@@ -220,13 +328,19 @@ export default async function PersonPage({ params }: PageProps<'/[space]/people/
                         timezone={tz}
                         kind="business"
                         showPerson={false}
+                        context={place(entry.projectId, entry.vehicleId, true)}
+                        href={`${base}/tools/mileage?trip=${entry.id}`}
                         actions={
                           approver && entry.status === 'submitted' ? (
-                            <ReviewButtons
+                            <ReviewActions
                               slug={workspace.space.slug}
-                              table="mileage"
-                              id={entry.id}
-                              label={`${formatMiles(entry.miles)} · ${entry.to}`}
+                              subject={{
+                                kind: 'mileage',
+                                id: entry.id,
+                                title: tripTitle(entry),
+                                amount: formatMiles(entry.miles),
+                              }}
+                              from={member.person}
                             />
                           ) : undefined
                         }
@@ -235,11 +349,7 @@ export default async function PersonPage({ params }: PageProps<'/[space]/people/
                   })),
                 ]
                   // What's waiting on a decision comes first, then the newest.
-                  .sort(
-                    (a, b) =>
-                      Number(approver && b.waiting) - Number(approver && a.waiting) ||
-                      b.at.localeCompare(a.at),
-                  )
+                  .sort((a, b) => Number(b.waiting) - Number(a.waiting) || b.at.localeCompare(a.at))
                   .slice(0, 8)
                   .map((item) => item.node)}
               </div>

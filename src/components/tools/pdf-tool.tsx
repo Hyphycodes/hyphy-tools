@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useEffect, useId, useRef, useState, useTransition, type DragEvent } from 'react';
 import { addFiles } from '@/app/(app)/[space]/actions';
 import { Button } from '@/components/ui/button';
@@ -6,6 +7,8 @@ import { cn } from '@/components/ui/cn';
 import { Input, Segmented } from '@/components/ui/form';
 import { Icon } from '@/components/ui/icon';
 import { useToast } from '@/components/ui/toast';
+import { useWorkspace } from '@/components/shell/workspace-context';
+import { AttachPicker } from './attach-picker';
 import { formatBytes, plural } from '@/lib/platform/format';
 import { formatRange, parseRange } from '@/lib/tools/pdf';
 import type { PdfPreview } from '@/lib/tools/pdf-preview';
@@ -72,7 +75,9 @@ export function PdfTool({ slug, canSave }: { slug: string; canSave: boolean }) {
   const [message, setMessage] = useState('');
   const [result, setResult] = useState<Result | null>(null);
   const [saving, startSaving] = useTransition();
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [projectId, setProjectId] = useState('');
+  const workspace = useWorkspace();
   const nextId = useRef(0);
   const resultUrl = useRef<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -91,7 +96,7 @@ export function PdfTool({ slug, canSave }: { slug: string; canSave: boolean }) {
     if (resultUrl.current) URL.revokeObjectURL(resultUrl.current);
     resultUrl.current = null;
     setResult(null);
-    setSaved(false);
+    setSaved(null);
     setMessage('');
   }
 
@@ -278,11 +283,19 @@ export function PdfTool({ slug, canSave }: { slug: string; canSave: boolean }) {
           { name: result.name, size: result.size, kind: 'pdf', pages: result.pages, source: 'pdf' },
         ],
         folder: 'Made with PDF',
+        attachTo: projectId ? { type: 'project', id: projectId } : null,
       });
-      if (response.ok) setSaved(true);
+      if (response.ok) setSaved(response.id ?? '');
       toast(
         response.ok
-          ? { title: result.name, description: 'Saved to Files' }
+          ? {
+              title: result.name,
+              description: projectId
+                ? `Saved to Files · ${workspace.options.projects.find((item) => item.id === projectId)?.name}`
+                : 'Saved to Files',
+              href: workspace.href(`/files?file=${response.id}`),
+              action: 'Open',
+            }
           : { title: response.error, icon: 'alert' },
       );
     });
@@ -650,12 +663,23 @@ export function PdfTool({ slug, canSave }: { slug: string; canSave: boolean }) {
                 >
                   <Icon name="download" size={16} /> Download PDF
                 </a>
-                {canSave && (
-                  <Button onClick={saveToFiles} disabled={saving || saved}>
-                    <Icon name={saved ? 'check' : 'files'} size={16} />
-                    {saving ? 'Saving…' : saved ? 'Saved to Files' : 'Save to Files'}
-                  </Button>
-                )}
+                {canSave &&
+                  (saved !== null ? (
+                    <Link
+                      href={workspace.href(`/files?file=${saved}`)}
+                      className="inline-flex h-11 items-center justify-center gap-2 rounded-[11px] bg-positive-soft px-4 text-[15px] font-medium text-positive lg:h-10 lg:text-[14px]"
+                    >
+                      <Icon name="check" size={16} /> Saved to Files · Open
+                    </Link>
+                  ) : (
+                    <>
+                      <AttachPicker value={projectId} onChange={setProjectId} />
+                      <Button onClick={saveToFiles} disabled={saving}>
+                        <Icon name="files" size={16} />
+                        {saving ? 'Saving…' : 'Save to Files'}
+                      </Button>
+                    </>
+                  ))}
               </div>
             </div>
           ) : (

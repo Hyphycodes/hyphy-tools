@@ -1,4 +1,4 @@
-import type { Membership, Person, Space } from '@/lib/platform/types';
+import type { Membership, Person, Pin, Space } from '@/lib/platform/types';
 import type { Clock } from '../clock';
 import { DEMO_TZ } from '../clock';
 
@@ -114,6 +114,8 @@ export function spaces(t: Clock): Space[] {
         'links',
         'images',
       ],
+      workStyle: 'engagements',
+      mileageRate: 0.7,
       brand: { color: '#3240FF', ink: 'light', monogram: 'H' },
       timezone: DEMO_TZ,
       createdAt: t.ago(200),
@@ -147,6 +149,8 @@ export function spaces(t: Clock): Space[] {
         'qr',
         'images',
       ],
+      workStyle: 'jobs',
+      mileageRate: 0.7,
       brand: { color: '#F2A516', ink: 'dark', monogram: 'AB' },
       timezone: DEMO_TZ,
       createdAt: t.ago(160),
@@ -154,7 +158,6 @@ export function spaces(t: Clock): Space[] {
         projects: [
           { id: 'permit', label: 'Permit #', type: 'text' },
           { id: 'next_inspection', label: 'Next inspection', type: 'date' },
-          { id: 'contract', label: 'Contract value', type: 'currency' },
           {
             id: 'job_type',
             label: 'Job type',
@@ -181,7 +184,8 @@ export function spaces(t: Clock): Space[] {
       descriptor: 'Restaurant & bar · West Loop, Chicago',
       plan: 'business',
       modules: ['projects', 'people', 'files', 'receipts', 'pdf', 'qr', 'links', 'images'],
-      labels: { projects: { singular: 'Event', plural: 'Events' } },
+      // Same Projects module; the work style calls them Events and drops "percent complete".
+      workStyle: 'events',
       brand: { color: '#E0492F', ink: 'light', monogram: 'SE' },
       timezone: DEMO_TZ,
       createdAt: t.ago(140),
@@ -322,3 +326,21 @@ export const perspectives: Perspective[] = [
   },
   { id: 'rosa-se', personId: 'rosa', spaceSlug: 'salt-and-ember', note: 'Restaurant owner' },
 ];
+
+/** What a few people keep within reach before they've changed anything themselves. */
+export function pins(): Pin[] {
+  const pin = (spaceId: string, personId: string, type: Pin['type'], id: string): Pin => ({
+    spaceId,
+    personId,
+    type,
+    id,
+  });
+  return [
+    pin(personalSpaceId('jerry'), 'jerry', 'tool', 'pdf'),
+    pin(personalSpaceId('jerry'), 'jerry', 'tool', 'receipts'),
+    pin('sp_hyphy', 'jerry', 'project', 'prj_hy_tools'),
+    pin('sp_abc', 'dana', 'project', 'prj_oakbrook'),
+    pin('sp_abc', 'dana', 'project', 'prj_oak1845'),
+    pin('sp_se', 'rosa', 'project', 'prj_se_keller'),
+  ];
+}

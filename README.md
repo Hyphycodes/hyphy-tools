@@ -90,6 +90,7 @@ paths below are relative to it.
 | `/tools`                                 | Tools library                                    |
 | `/tools/receipts` `/tools/mileage`       | Trackers with approvals and CSV export           |
 | `/tools/receipts?receipt=…`              | One receipt: details, status, approve or return  |
+| `/tools/mileage?trip=…`                  | One trip: details, status, approve or return     |
 | `/tools/pdf` `/tools/qr` `/tools/images` | Utilities (ported from Hyphy Studio, extended)   |
 | `/tools/links`                           | Link page editor with live phone preview         |
 | `/projects` `/projects/[id]`             | Projects (a restaurant's are Events), with tabs  |

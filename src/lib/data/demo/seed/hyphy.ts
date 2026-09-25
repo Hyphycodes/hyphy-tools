@@ -435,32 +435,6 @@ export function hyphy(t: Clock): SeedSlice {
 
     inbox: [
       {
-        id: 'in_hy_01',
-        spaceId: S,
-        kind: 'receipt-approval',
-        title: 'Receipt needs approval',
-        detail: 'Lensrentals · $86.00 · Salt & Ember menus',
-        at: t.ago(0, 4),
-        subject: { type: 'receipt', id: 'rc_hy_01', label: 'Lensrentals receipt' },
-        audience: 'expenses.approve',
-        fromId: 'ava',
-        priority: 'normal',
-        status: 'open',
-      },
-      {
-        id: 'in_hy_02',
-        spaceId: S,
-        kind: 'mileage-review',
-        title: 'Mileage submitted',
-        detail: '6.1 mi round trip · menu shoot',
-        at: t.ago(0, 3),
-        subject: { type: 'mileage', id: 'mi_hy_02', label: 'Studio → Salt & Ember' },
-        audience: 'expenses.approve',
-        fromId: 'ava',
-        priority: 'normal',
-        status: 'open',
-      },
-      {
         id: 'in_hy_03',
         spaceId: S,
         kind: 'access-request',

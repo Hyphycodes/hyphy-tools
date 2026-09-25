@@ -1,12 +1,16 @@
 import Link from 'next/link';
 import { CreateButton } from '@/components/create/create-button';
-import { FileRow, FileThumb } from '@/components/records/rows';
+import { Relations, type Relation } from '@/components/records/relations';
+import { FileRow, FileThumb, sourceName } from '@/components/records/rows';
+import { ToolGlyph } from '@/components/ui/marks';
+import { getTool } from '@/lib/platform/tools';
+import { workProfile } from '@/lib/platform/work';
 import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/components/ui/cn';
 import { EmptyState } from '@/components/ui/empty';
 import { inputClass } from '@/components/ui/form';
-import { Icon, type IconName } from '@/components/ui/icon';
+import { Icon } from '@/components/ui/icon';
 import { Page, PageHeader } from '@/components/ui/page';
 import { Panel } from '@/components/ui/panel';
 import { Chips } from '@/components/ui/tabs';
@@ -16,16 +20,9 @@ import type { AttachmentRef, FileRecord } from '@/lib/platform/types';
 
 export const metadata = { title: 'Files' };
 
-const refIcon: Record<AttachmentRef['type'], IconName> = {
-  project: 'projects',
-  vehicle: 'truck',
-  person: 'user',
-  receipt: 'receipt',
-};
-
 /** Files are attached to the work they belong to, so the list can answer "whose is this?" */
 export default async function FilesPage({ params, searchParams }: PageProps<'/[space]/files'>) {
-  const { workspace, repo, base, people, tz } = await openPage(params, 'files');
+  const { workspace, repo, base, people, tz, can } = await openPage(params, 'files');
   const query = await searchParams;
   const view = String(query.view ?? 'all');
   const folder = typeof query.folder === 'string' ? query.folder : undefined;
@@ -45,14 +42,6 @@ export default async function FilesPage({ params, searchParams }: PageProps<'/[s
         : ref.type === 'person'
           ? people.get(ref.id)?.name
           : 'Receipt';
-  const href = (ref: AttachmentRef) =>
-    ref.type === 'project'
-      ? `${base}/projects/${ref.id}`
-      : ref.type === 'vehicle'
-        ? `${base}/vehicles/${ref.id}`
-        : ref.type === 'person'
-          ? `${base}/people/${ref.id}`
-          : `${base}/tools/receipts`;
   const visibleRef = (ref: AttachmentRef) => Boolean(name(ref));
   const personal = workspace.space.kind === 'personal';
 
@@ -64,7 +53,7 @@ export default async function FilesPage({ params, searchParams }: PageProps<'/[s
     { id: 'expiring', label: 'Expiring soon', match: (file) => expiring.includes(file) },
     {
       id: 'projects',
-      label: workspace.space.labels?.projects?.plural ?? 'Projects',
+      label: workProfile(workspace.space).plural,
       match: (file) => on(file, 'project'),
     },
     { id: 'vehicles', label: 'Vehicles', match: (file) => on(file, 'vehicle') },
@@ -245,6 +234,67 @@ export default async function FilesPage({ params, searchParams }: PageProps<'/[s
                   </p>
                 )}
                 <dl className="mt-4 grid gap-3 text-[13px]">
+                  {selected.source && (
+                    <div>
+                      <dt className="label mb-1.5">Where it came from</dt>
+                      <dd>
+                        <Link
+                          href={`${base}/tools/${selected.source}`}
+                          className="inline-flex items-center gap-2 font-medium text-ink hover:underline"
+                        >
+                          <ToolGlyph tool={getTool(selected.source)!} size="sm" />
+                          Made with the {sourceName[selected.source] ?? selected.source} tool
+                        </Link>
+                      </dd>
+                    </div>
+                  )}
+                  <div>
+                    <dt className="label mb-1.5">Belongs to</dt>
+                    <dd>
+                      {selected.attachedTo.filter(visibleRef).length ? (
+                        <Relations
+                          base={base}
+                          label="Belongs to"
+                          items={selected.attachedTo
+                            .filter(visibleRef)
+                            .flatMap((ref): Relation[] => {
+                              if (ref.type === 'project') {
+                                const project = projects.find((item) => item.id === ref.id)!;
+                                return [
+                                  {
+                                    type: 'project' as const,
+                                    id: ref.id,
+                                    label: project.name,
+                                    color: project.color,
+                                  },
+                                ];
+                              }
+                              if (ref.type === 'vehicle')
+                                return [
+                                  { type: 'vehicle' as const, id: ref.id, label: name(ref)! },
+                                ];
+                              if (ref.type === 'person') {
+                                const person = people.get(ref.id)!;
+                                return [
+                                  {
+                                    type: 'person' as const,
+                                    id: ref.id,
+                                    label: person.name,
+                                    person,
+                                  },
+                                ];
+                              }
+                              return [];
+                            })}
+                          canOpen={{
+                            person: can('people.view') && workspace.space.kind === 'business',
+                          }}
+                        />
+                      ) : (
+                        <span className="text-muted">Nothing — it lives in {selected.folder}</span>
+                      )}
+                    </dd>
+                  </div>
                   <div>
                     <dt className="label mb-1.5">Added by</dt>
                     <dd className="flex items-center gap-2">
@@ -252,30 +302,7 @@ export default async function FilesPage({ params, searchParams }: PageProps<'/[s
                         <Avatar person={people.get(selected.createdBy)!} size="sm" />
                       )}
                       {people.get(selected.createdBy)?.name} ·{' '}
-                      {formatRelative(selected.createdAt, tz)}
-                      {selected.source && (
-                        <span className="text-muted">
-                          · made with {selected.source === 'pdf' ? 'PDF' : 'Image Resize'}
-                        </span>
-                      )}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="label mb-1.5">Attached to</dt>
-                    <dd className="flex flex-wrap gap-1.5">
-                      {selected.attachedTo.filter(visibleRef).length ? (
-                        selected.attachedTo.filter(visibleRef).map((ref) => (
-                          <Link
-                            key={`${ref.type}-${ref.id}`}
-                            href={href(ref)}
-                            className="inline-flex items-center gap-1.5 rounded-full bg-well px-2.5 py-1 hover:bg-ink/10"
-                          >
-                            <Icon name={refIcon[ref.type]} size={13} /> {name(ref)}
-                          </Link>
-                        ))
-                      ) : (
-                        <span className="text-muted">Nothing — it lives in {selected.folder}</span>
-                      )}
+                      {formatRelative(selected.createdAt, tz)} · {selected.folder}
                     </dd>
                   </div>
                   <div>

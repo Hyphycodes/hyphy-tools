@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useEffect, useId, useRef, useState, useTransition, type DragEvent } from 'react';
 import { addFiles } from '@/app/(app)/[space]/actions';
 import { Button } from '@/components/ui/button';
@@ -6,6 +7,8 @@ import { cn } from '@/components/ui/cn';
 import { Field, Input, Select } from '@/components/ui/form';
 import { Icon } from '@/components/ui/icon';
 import { useToast } from '@/components/ui/toast';
+import { useWorkspace } from '@/components/shell/workspace-context';
+import { AttachPicker } from './attach-picker';
 import { formatBytes } from '@/lib/platform/format';
 
 /*
@@ -163,6 +166,9 @@ async function samplePhoto(): Promise<File> {
 export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean }) {
   const toast = useToast();
   const [saving, startSaving] = useTransition();
+  const [projectId, setProjectId] = useState('');
+  const [savedIds, setSavedIds] = useState<string | null>(null);
+  const workspace = useWorkspace();
   const id = useId();
   const [items, setItems] = useState<Item[]>([]);
   const [maxWidth, setMaxWidth] = useState('1920');
@@ -199,6 +205,7 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
     );
 
   async function convertAll(queue: Item[] = items) {
+    setSavedIds(null);
     const token = ++run.current;
     setApplied(settings);
     const parsed = Number.parseInt(maxWidth, 10);
@@ -346,6 +353,7 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
     setItems([]);
     setBusy(false);
     setMessage('');
+    setSavedIds(null);
   }
 
   const hasFiles = (event: DragEvent) => Array.from(event.dataTransfer.types).includes('Files');
@@ -371,6 +379,7 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
     startSaving(async () => {
       const response = await addFiles(slug, {
         folder: 'Made with Image Resize',
+        attachTo: projectId ? { type: 'project', id: projectId } : null,
         files: finished.map((item) => ({
           name: item.result!.name,
           size: item.result!.size,
@@ -378,10 +387,15 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
           source: 'images',
         })),
       });
+      if (response.ok) setSavedIds(response.id ?? '');
       toast(
         response.ok
           ? {
               title: `${finished.length} ${finished.length === 1 ? 'image' : 'images'} saved to Files`,
+              href: workspace.href(
+                finished.length === 1 ? `/files?file=${response.id}` : '/files?view=made',
+              ),
+              action: 'Open',
             }
           : { title: response.error, icon: 'alert' },
       );
@@ -717,11 +731,25 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
           </>
         )}
         {canSave && finished.length > 0 && !busy && (
-          <div className="border-t border-line px-4 py-3">
-            <Button onClick={saveResults} disabled={saving} className="w-full">
-              <Icon name="files" size={16} />{' '}
-              {saving ? 'Saving…' : `Save ${finished.length} to Files`}
-            </Button>
+          <div className="grid gap-2 border-t border-line px-4 py-3">
+            {savedIds !== null ? (
+              <Link
+                href={workspace.href(
+                  finished.length === 1 ? `/files?file=${savedIds}` : '/files?view=made',
+                )}
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-[11px] bg-positive-soft text-[15px] font-medium text-positive lg:h-9 lg:text-[13.5px]"
+              >
+                <Icon name="check" size={16} /> Saved to Files · Open
+              </Link>
+            ) : (
+              <>
+                <AttachPicker value={projectId} onChange={setProjectId} className="!bg-subtle" />
+                <Button onClick={saveResults} disabled={saving} className="w-full">
+                  <Icon name="files" size={16} />{' '}
+                  {saving ? 'Saving…' : `Save ${finished.length} to Files`}
+                </Button>
+              </>
+            )}
           </div>
         )}
         <p className="px-4 pb-4 text-[12px] text-faint">

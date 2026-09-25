@@ -1,6 +1,6 @@
 import { createClock } from '../clock';
 import { abc } from './abc';
-import { memberships, people, spaces } from './core';
+import { memberships, people, pins, spaces } from './core';
 import { hyphy } from './hyphy';
 import { personal } from './personal';
 import { saltAndEmber } from './salt-and-ember';
@@ -40,6 +40,7 @@ export function seed(now = Date.now()): Dataset {
     linkPages: [],
     activity: [],
     inbox: [],
+    pins: pins(),
   };
   for (const slice of slices.map((make) => make(clock))) {
     for (const [table, rows] of Object.entries(slice) as [keyof SeedSlice, unknown[]][]) {

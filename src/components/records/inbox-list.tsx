@@ -1,68 +1,24 @@
 import Link from 'next/link';
+import type { EditTarget } from '@/components/create/create-context';
 import { Avatar } from '@/components/ui/avatar';
 import { cn } from '@/components/ui/cn';
-import { Icon, type IconName } from '@/components/ui/icon';
+import { Icon } from '@/components/ui/icon';
+import { flagLabel } from '@/lib/platform/approvals';
 import { formatRelative } from '@/lib/platform/format';
-import type { InboxItem, InboxKind, Person } from '@/lib/platform/types';
+import { inboxLook, isDecision } from '@/lib/platform/inbox';
+import type { InboxItem, MileageEntry, Person, Receipt } from '@/lib/platform/types';
 import { refHref } from './activity-list';
-import { InboxActions } from './inbox-actions';
+import { DoneButton, FixActions } from './inbox-actions';
+import { ReviewActions } from './review';
 
-export const inboxKinds: Record<
-  InboxKind,
-  { icon: IconName; bg: string; fg: string; label: string }
-> = {
-  'receipt-approval': {
-    icon: 'receipt',
-    bg: 'var(--color-tool-receipt)',
-    fg: '#16150F',
-    label: 'Approvals',
-  },
-  'unassigned-receipt': {
-    icon: 'receipt',
-    bg: 'var(--color-caution-soft)',
-    fg: 'var(--color-caution)',
-    label: 'Approvals',
-  },
-  'mileage-review': {
-    icon: 'route',
-    bg: 'var(--color-tool-miles)',
-    fg: '#16150F',
-    label: 'Approvals',
-  },
-  'receipt-returned': {
-    icon: 'arrow-left',
-    bg: 'var(--color-critical-soft)',
-    fg: 'var(--color-critical)',
-    label: 'Updates',
-  },
-  'document-uploaded': {
-    icon: 'file-text',
-    bg: 'var(--color-tool-files)',
-    fg: '#16150F',
-    label: 'Documents',
-  },
-  'document-expiring': {
-    icon: 'clock',
-    bg: 'var(--color-caution-soft)',
-    fg: 'var(--color-caution)',
-    label: 'Documents',
-  },
-  'access-request': {
-    icon: 'user-plus',
-    bg: 'var(--color-signal-soft)',
-    fg: 'var(--color-signal-ink)',
-    label: 'People',
-  },
-  mention: {
-    icon: 'message',
-    bg: 'var(--color-well)',
-    fg: 'var(--color-ink-2)',
-    label: 'Mentions',
-  },
-};
-
-export function InboxGlyph({ kind, size = 'md' }: { kind: InboxKind; size?: 'md' | 'lg' }) {
-  const spec = inboxKinds[kind];
+export function InboxGlyph({
+  item,
+  size = 'md',
+}: {
+  item: Pick<InboxItem, 'kind' | 'submission'>;
+  size?: 'md' | 'lg';
+}) {
+  const spec = inboxLook(item);
   return (
     <span
       className={cn(
@@ -77,16 +33,11 @@ export function InboxGlyph({ kind, size = 'md' }: { kind: InboxKind; size?: 'md'
   );
 }
 
-/** Receipts and trips waiting on a decision get Approve and Return; everything else is cleared. */
-export function isReviewable(item: Pick<InboxItem, 'kind' | 'subject'>) {
-  return (
-    (item.kind === 'receipt-approval' ||
-      item.kind === 'mileage-review' ||
-      item.kind === 'unassigned-receipt') &&
-    (item.subject.type === 'receipt' || item.subject.type === 'mileage')
-  );
-}
-
+/**
+ * Needs attention, one row per item. Approvals get Approve and Return; returned and unfinished
+ * items get their fix; notifications are cleared. `records` holds the viewer's own returned and
+ * draft submissions, so "Edit & resubmit" can open with what was sent.
+ */
 export function InboxList({
   items,
   people,
@@ -96,6 +47,7 @@ export function InboxList({
   timezone,
   limit,
   stacked = false,
+  records,
 }: {
   items: InboxItem[];
   people: Person[];
@@ -106,6 +58,7 @@ export function InboxList({
   limit?: number;
   /** For narrow panels: actions sit under the text instead of beside it. */
   stacked?: boolean;
+  records?: { receipts: Receipt[]; mileage: MileageEntry[] };
 }) {
   const byId = new Map(people.map((person) => [person.id, person]));
   const shown = limit ? items.slice(0, limit) : items;
@@ -114,21 +67,51 @@ export function InboxList({
       {shown.map((item) => {
         const from = item.fromId ? byId.get(item.fromId) : undefined;
         const done = item.status === 'done';
-        const decision = canApprove && isReviewable(item);
+        const submission = item.submission;
+        const decision = canApprove && isDecision(item);
+        const record =
+          submission &&
+          (submission.kind === 'receipt'
+            ? records?.receipts.find((row) => row.id === submission.id)
+            : records?.mileage.find((row) => row.id === submission.id));
+        const edit: EditTarget | undefined =
+          record && submission && (item.kind === 'returned' || item.kind === 'incomplete')
+            ? {
+                ...(submission.kind === 'receipt'
+                  ? { kind: 'receipt' as const, record: record as Receipt }
+                  : { kind: 'mileage' as const, record: record as MileageEntry }),
+                reason: submission.returnReason || undefined,
+                reviewer: from?.firstName,
+              }
+            : undefined;
+        const heavy = (decision || Boolean(edit)) && !done;
         const when = (
           <span className="text-[12px] whitespace-nowrap text-faint">
             {formatRelative(item.at, timezone)}
           </span>
         );
-        const actions = (
-          <InboxActions
+        const actions = decision ? (
+          <ReviewActions
             slug={slug}
-            id={item.id}
-            kind={item.kind}
-            subject={item.subject}
-            canApprove={canApprove}
+            subject={{
+              kind: submission!.kind,
+              id: submission!.id,
+              title: submission!.title,
+              amount: submission!.amount,
+            }}
+            from={from}
           />
+        ) : edit ? (
+          <FixActions
+            slug={slug}
+            inboxId={item.id}
+            edit={edit}
+            returned={item.kind === 'returned'}
+          />
+        ) : item.kind === 'approval' || item.kind === 'incomplete' ? null : (
+          <DoneButton slug={slug} id={item.id} label={item.subject.label} />
         );
+        const flags = decision ? submission!.flags.filter((flag) => flag !== 'resubmitted') : [];
         return (
           <li
             key={item.id}
@@ -139,11 +122,12 @@ export function InboxList({
               done && 'opacity-55',
             )}
           >
-            <InboxGlyph kind={item.kind} />
+            <InboxGlyph item={item} />
             <div className="min-w-0 flex-1 basis-[55%]">
               <p className="flex items-center gap-2 text-[14px] leading-snug font-medium text-ink">
                 <Link
                   href={refHref(base, item.subject)}
+                  scroll={false}
                   className={cn(
                     'hover:underline',
                     // Narrow rows keep the whole title: two lines rather than an ellipsis.
@@ -159,15 +143,35 @@ export function InboxList({
                   />
                 )}
               </p>
-              <p className="mt-0.5 flex items-center gap-1.5 truncate text-[12.5px] text-muted">
+              <p
+                className={cn(
+                  'mt-0.5 flex items-center gap-1.5 text-[12.5px] text-muted',
+                  item.kind === 'returned' ? 'text-ink-2' : 'truncate',
+                )}
+              >
                 {from && <Avatar person={from} size="xs" />}
-                <span className="truncate">
+                <span className={item.kind === 'returned' ? 'line-clamp-2' : 'truncate'}>
                   {from ? `${from.firstName} · ` : ''}
                   {item.detail}
                 </span>
               </p>
+              {(flags.length > 0 || (decision && submission?.flags.includes('resubmitted'))) && (
+                <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px]">
+                  {submission?.flags.includes('resubmitted') && submission.returnReason && (
+                    <span className="text-ink-2">
+                      <Icon name="arrow-up-right" size={12} className="mr-0.5 inline" />
+                      Fixed after: “{submission.returnReason}”
+                    </span>
+                  )}
+                  {flags.map((flag) => (
+                    <span key={flag} className="font-medium text-caution">
+                      {flagLabel[flag]}
+                    </span>
+                  ))}
+                </p>
+              )}
             </div>
-            {decision && !done ? (
+            {heavy ? (
               <>
                 {/* Two buttons need the width: on phones and in narrow panels they sit under the text. */}
                 <span

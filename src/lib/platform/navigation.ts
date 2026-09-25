@@ -22,6 +22,8 @@ export type NavModel = {
     icon: IconName;
     color: string;
     ink: 'dark' | 'light';
+    /** Kept within reach by this person; pinned tools lead the list. */
+    pinned?: boolean;
   }[];
   settings?: NavItem;
 };

@@ -1,6 +1,7 @@
 import type { IconName } from '@/components/ui/icon';
 import { can, type Permission } from './roles';
 import { availability, getTool } from './tools';
+import { workProfile } from './work';
 import type { Membership, Role, Space } from './types';
 
 /**
@@ -213,12 +214,12 @@ export function createActionsFor(
         typeof definition.label === 'string'
           ? definition.label
           : (definition.label[view] ?? definition.label.default);
-      const projectLabel = space.labels?.projects?.singular;
+      const projectLabel = space.kind === 'business' ? workProfile(space).singular : undefined;
       return {
         id: definition.id,
         toolId: definition.toolId,
         label:
-          definition.id === 'project' && projectLabel
+          definition.id === 'project' && projectLabel && projectLabel !== 'Project'
             ? `Create ${projectLabel.toLowerCase()}`
             : label,
         hint: definition.hint,

@@ -5,6 +5,7 @@ import {
   createProject,
   createVehicle,
   invitePerson,
+  resubmitMileage,
 } from '@/app/(app)/[space]/actions';
 import { Avatar } from '@/components/ui/avatar';
 import { cn } from '@/components/ui/cn';
@@ -13,9 +14,10 @@ import { Icon } from '@/components/ui/icon';
 import { useWorkspace } from '@/components/shell/workspace-context';
 import { formatMiles } from '@/lib/platform/format';
 import { roles } from '@/lib/platform/roles';
+import { workProfile } from '@/lib/platform/work';
 import type { ProjectStatus, Role } from '@/lib/platform/types';
 import { useSubmit, type FormProps } from './create-sheets';
-import { FormFooter, Section, SubmitButton, todayInput } from './parts';
+import { dateInput, EditNote, FormFooter, Section, SubmitButton, todayInput } from './parts';
 
 /* ---------- Mileage ---------- */
 
@@ -26,27 +28,43 @@ export function MileageForm({ request, onDone, formId }: FormProps) {
   const mine = workspace.options.vehicles.find(
     (vehicle) => vehicle.assignedTo === workspace.person.id,
   );
+  // Fixing a returned trip starts from what was sent, not from a blank form.
+  const editing = request.edit?.kind === 'mileage' ? request.edit.record : undefined;
   const [mode, setMode] = useState<'miles' | 'odometer'>('miles');
-  const [date, setDate] = useState(() => todayInput(workspace.space.timezone));
-  const [from, setFrom] = useState(workspace.options.places[0] ?? '');
-  const [to, setTo] = useState('');
-  const [miles, setMiles] = useState('');
-  const [roundTrip, setRoundTrip] = useState(false);
+  const [date, setDate] = useState(() =>
+    editing
+      ? dateInput(editing.date, workspace.space.timezone)
+      : todayInput(workspace.space.timezone),
+  );
+  const [from, setFrom] = useState(editing?.from ?? workspace.options.places[0] ?? '');
+  const [to, setTo] = useState(editing?.to ?? '');
+  const [miles, setMiles] = useState(
+    editing
+      ? String(editing.roundTrip ? Math.round((editing.miles / 2) * 10) / 10 : editing.miles)
+      : '',
+  );
+  const [roundTrip, setRoundTrip] = useState(Boolean(editing?.roundTrip));
   const [vehicleId, setVehicleId] = useState(
-    request.attachTo?.type === 'vehicle' ? request.attachTo.id : (mine?.id ?? ''),
+    editing
+      ? (editing.vehicleId ?? '')
+      : request.attachTo?.type === 'vehicle'
+        ? request.attachTo.id
+        : (mine?.id ?? ''),
   );
   const vehicle = workspace.options.vehicles.find((item) => item.id === vehicleId);
   const [start, setStart] = useState(vehicle ? String(vehicle.odometer) : '');
   const [end, setEnd] = useState('');
   const [projectId, setProjectId] = useState(
-    request.attachTo?.type === 'project'
-      ? request.attachTo.id
-      : workspace.space.kind === 'business'
-        ? (workspace.options.currentProjectId ?? '')
-        : '',
+    editing
+      ? (editing.projectId ?? '')
+      : request.attachTo?.type === 'project'
+        ? request.attachTo.id
+        : workspace.space.kind === 'business'
+          ? (workspace.options.currentProjectId ?? '')
+          : '',
   );
-  const [purpose, setPurpose] = useState('');
-  const recent = workspace.options.recentTrips;
+  const [purpose, setPurpose] = useState(editing?.purpose ?? '');
+  const recent = editing ? [] : workspace.options.recentTrips;
 
   // Heading to a job site files the trip to that job.
   const pickDestination = (place: string) => {
@@ -80,25 +98,31 @@ export function MileageForm({ request, onDone, formId }: FormProps) {
       id={formId}
       onSubmit={(event) => {
         event.preventDefault();
+        const values = {
+          date,
+          from,
+          to,
+          miles: total ? Math.round(total * 10) / 10 : '',
+          roundTrip: mode === 'miles' && roundTrip,
+          purpose,
+          vehicleId,
+          projectId,
+        };
         submit(
           () =>
-            createMileage(workspace.space.slug, {
-              date,
-              from,
-              to,
-              miles: total ? Math.round(total * 10) / 10 : '',
-              roundTrip: mode === 'miles' && roundTrip,
-              purpose,
-              vehicleId,
-              projectId,
-            }),
+            editing
+              ? resubmitMileage(workspace.space.slug, editing.id, values)
+              : createMileage(workspace.space.slug, values),
           {
-            title: `${formatMiles(Math.round(total * 10) / 10)} logged`,
-            href: workspace.href('/tools/mileage'),
+            title: editing
+              ? `${formatMiles(Math.round(total * 10) / 10)} resubmitted`
+              : `${formatMiles(Math.round(total * 10) / 10)} logged`,
+            href: workspace.href(editing ? `/tools/mileage?trip=${editing.id}` : '/tools/mileage'),
           },
         );
       }}
     >
+      {request.edit && <EditNote reason={request.edit.reason} reviewer={request.edit.reviewer} />}
       {/* The number is the form: type miles straight into it, or tap a trip you've driven before. */}
       <div className="mt-1 rounded-[18px] bg-tool-miles/35 px-4 pt-3.5 pb-3 shadow-[inset_0_0_0_1px_rgb(0_0_0/.05)] transition-colors focus-within:bg-tool-miles/45">
         <div className="flex items-center justify-between gap-3">
@@ -312,7 +336,15 @@ export function MileageForm({ request, onDone, formId }: FormProps) {
           />
         </Field>
         {workspace.options.vehicles.length > 0 && (
-          <Field label="Vehicle" htmlFor={`${id}-vehicle`}>
+          <Field
+            label="Vehicle"
+            htmlFor={`${id}-vehicle`}
+            hint={
+              mine && !vehicleId
+                ? `${mine.name} is assigned to you. Personal vehicle trips are paid back by the mile.`
+                : undefined
+            }
+          >
             <Select
               id={`${id}-vehicle`}
               value={vehicleId}
@@ -324,7 +356,7 @@ export function MileageForm({ request, onDone, formId }: FormProps) {
                 if (next) setStart(String(next.odometer));
               }}
             >
-              <option value="">My own car</option>
+              <option value="">Personal vehicle</option>
               {workspace.options.vehicles.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.name}
@@ -365,7 +397,9 @@ export function MileageForm({ request, onDone, formId }: FormProps) {
         error={error}
         note={needsApproval ? 'Goes to your managers for approval' : undefined}
       >
-        <SubmitButton pending={pending}>{needsApproval ? 'Submit trip' : 'Save trip'}</SubmitButton>
+        <SubmitButton pending={pending}>
+          {editing ? 'Resubmit trip' : needsApproval ? 'Submit trip' : 'Save trip'}
+        </SubmitButton>
       </FormFooter>
     </form>
   );
@@ -377,7 +411,8 @@ export function ProjectForm({ onDone, formId }: FormProps) {
   const workspace = useWorkspace();
   const id = useId();
   const { pending, error, submit } = useSubmit(onDone);
-  const events = workspace.labels.project === 'Event';
+  const profile = workProfile(workspace.space);
+  const events = profile.style === 'events';
   const [name, setName] = useState('');
   const [location, setLocation] = useState('');
   const [client, setClient] = useState('');
@@ -385,7 +420,9 @@ export function ProjectForm({ onDone, formId }: FormProps) {
   const [leadId, setLeadId] = useState(workspace.person.id);
   const [team, setTeam] = useState<string[]>([workspace.person.id]);
   const [dueDate, setDueDate] = useState('');
-  const [budget, setBudget] = useState('');
+  const [value, setValue] = useState('');
+  const [allowance, setAllowance] = useState('');
+  const [withAllowance, setWithAllowance] = useState(false);
   const [summary, setSummary] = useState('');
   const people = workspace.options.people.filter((person) => person.role !== 'guest');
 
@@ -404,7 +441,8 @@ export function ProjectForm({ onDone, formId }: FormProps) {
               leadId,
               teamIds: team,
               dueDate,
-              budget,
+              value,
+              costAllowance: withAllowance ? allowance : '',
               summary,
             }),
           { title: `${name} created`, href: workspace.href('/projects') },
@@ -419,18 +457,18 @@ export function ProjectForm({ onDone, formId }: FormProps) {
             onChange={(event) => setName(event.target.value)}
             required
             data-autofocus
-            placeholder={events ? 'Harvest dinner' : '1845 Oak St'}
+            placeholder={profile.placeholder.name}
           />
         </Field>
-        <Field label={events ? 'Room' : 'Address'} htmlFor={`${id}-location`} optional>
+        <Field label={profile.location} htmlFor={`${id}-location`} optional>
           <Input
             id={`${id}-location`}
             value={location}
             onChange={(event) => setLocation(event.target.value)}
-            placeholder={events ? 'Private room' : 'Street, town'}
+            placeholder={profile.placeholder.location}
           />
         </Field>
-        <Field label={events ? 'Host' : 'Client'} htmlFor={`${id}-client`} optional>
+        <Field label={profile.client} htmlFor={`${id}-client`} optional>
           <Input
             id={`${id}-client`}
             value={client}
@@ -500,22 +538,51 @@ export function ProjectForm({ onDone, formId }: FormProps) {
               onChange={(event) => setDueDate(event.target.value)}
             />
           </Field>
+          {profile.value && (
+            <Field
+              label={profile.value}
+              htmlFor={`${id}-value`}
+              optional
+              hint={events ? 'What the booking is worth.' : 'What the customer is paying.'}
+            >
+              <Input
+                id={`${id}-value`}
+                value={value}
+                onChange={(event) => setValue(event.target.value.replace(/[^0-9.]/g, ''))}
+                inputMode="decimal"
+                placeholder="$"
+                className="num"
+              />
+            </Field>
+          )}
+        </div>
+        {/* Most projects don't need one; it's there for businesses that set a target. */}
+        {withAllowance ? (
           <Field
-            label="Expense budget"
-            htmlFor={`${id}-budget`}
+            label="Cost allowance"
+            htmlFor={`${id}-allowance`}
             optional
-            hint="What receipts on this can add up to."
+            hint="An internal target for costs tracked in Hyphy — fuel, purchases, mileage. Not the project’s value."
           >
             <Input
-              id={`${id}-budget`}
-              value={budget}
-              onChange={(event) => setBudget(event.target.value)}
-              inputMode="numeric"
+              id={`${id}-allowance`}
+              value={allowance}
+              onChange={(event) => setAllowance(event.target.value.replace(/[^0-9.]/g, ''))}
+              inputMode="decimal"
               placeholder="$"
               className="num"
+              data-autofocus
             />
           </Field>
-        </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setWithAllowance(true)}
+            className="-mt-1 flex items-center gap-1.5 self-start rounded-[10px] px-1 py-1 text-[13.5px] font-medium text-signal-ink hover:underline"
+          >
+            <Icon name="plus" size={14} /> Set a cost allowance
+          </button>
+        )}
         <Field label="Summary" htmlFor={`${id}-summary`} optional>
           <Textarea
             id={`${id}-summary`}

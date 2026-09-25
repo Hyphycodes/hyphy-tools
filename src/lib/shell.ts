@@ -6,6 +6,7 @@ import { currentProjectFor } from '@/lib/insights';
 import { createActionsFor } from '@/lib/platform/actions';
 import { navigationFor } from '@/lib/platform/navigation';
 import { plans } from '@/lib/platform/plans';
+import { workProfile } from '@/lib/platform/work';
 import { roles } from '@/lib/platform/roles';
 
 export function roleLabel(workspace: Pick<Workspace, 'space' | 'membership'>) {
@@ -15,13 +16,14 @@ export function roleLabel(workspace: Pick<Workspace, 'space' | 'membership'>) {
 /** Everything the client shell needs, computed once per request on the server. */
 export async function buildShellModel(workspace: Workspace, repo: Repository): Promise<ShellModel> {
   const { space, membership, person, session } = workspace;
-  const [inbox, projects, vehicles, members, trips, activity] = await Promise.all([
+  const [inbox, projects, vehicles, members, trips, activity, pins] = await Promise.all([
     repo.inbox(),
     repo.projects(),
     repo.vehicles(),
     repo.members(),
     repo.mileage({ createdBy: person.id }),
     repo.activity({ actorId: person.id, limit: 12 }),
+    repo.pins(),
   ]);
   const seen = new Set<string>();
   const recentTrips = [...trips]
@@ -43,6 +45,12 @@ export async function buildShellModel(workspace: Workspace, repo: Repository): P
       projectId: trip.projectId,
     }));
   const nav = navigationFor(space, membership);
+  // Pinned tools lead the sidebar's tool list, in the order they were pinned.
+  const pinned = pins.filter((pin) => pin.type === 'tool').map((pin) => pin.id);
+  const rank = (id: string) => (pinned.includes(id) ? pinned.indexOf(id) : pinned.length);
+  nav.tools = [...nav.tools]
+    .sort((a, b) => rank(a.id) - rank(b.id))
+    .map((tool) => ({ ...tool, pinned: pinned.includes(tool.id) }));
   const shop =
     space.id === 'sp_abc'
       ? ['Shop, Oak Brook']
@@ -101,8 +109,8 @@ export async function buildShellModel(workspace: Workspace, repo: Repository): P
       ],
     },
     labels: {
-      project: space.labels?.projects?.singular ?? 'Project',
-      projects: space.labels?.projects?.plural ?? 'Projects',
+      project: workProfile(space).singular,
+      projects: workProfile(space).plural,
     },
   };
 }

@@ -1,6 +1,11 @@
 import { CreateButton } from '@/components/create/create-button';
-import { ReviewButtons } from '@/components/records/inbox-actions';
+import { Relations, relationsOf } from '@/components/records/relations';
+import { ReturnedNotice, ReviewActions } from '@/components/records/review';
 import { MileageRow } from '@/components/records/rows';
+import { ApprovalBadge } from '@/components/records/status';
+import { SubmissionTimeline } from '@/components/records/timeline';
+import { ToolGlyph } from '@/components/ui/marks';
+import { UrlSheet } from '@/components/ui/url-sheet';
 import { CsvButton } from '@/components/tools/csv-button';
 import { ToolHeader } from '@/components/tools/tool-header';
 import { EmptyState } from '@/components/ui/empty';
@@ -8,7 +13,15 @@ import { Page } from '@/components/ui/page';
 import { Panel, PanelHeader } from '@/components/ui/panel';
 import { openPage } from '@/lib/page';
 import { cn } from '@/components/ui/cn';
-import { formatMiles, formatNumber, formatRelative, plural } from '@/lib/platform/format';
+import { tripTitle } from '@/lib/platform/approvals';
+import {
+  formatCurrency,
+  formatDateLong,
+  formatMiles,
+  formatNumber,
+  formatRelative,
+  plural,
+} from '@/lib/platform/format';
 import { getTool } from '@/lib/platform/tools';
 import type { MileageEntry } from '@/lib/platform/types';
 
@@ -19,8 +32,12 @@ function isFresh(at: string) {
   return Date.now() - new Date(at).getTime() < 120_000;
 }
 
-export default async function MileagePage({ params }: PageProps<'/[space]/tools/mileage'>) {
-  const { workspace, repo, people, tz, can } = await openPage(params, 'mileage');
+export default async function MileagePage({
+  params,
+  searchParams,
+}: PageProps<'/[space]/tools/mileage'>) {
+  const { workspace, repo, people, tz, can, base } = await openPage(params, 'mileage');
+  const query = await searchParams;
   const [entries, vehicles, projects] = await Promise.all([
     repo.mileage(),
     repo.vehicles(),
@@ -29,6 +46,23 @@ export default async function MileagePage({ params }: PageProps<'/[space]/tools/
   const business = workspace.space.kind === 'business';
   const approver = business && can('expenses.approve');
   const pending = entries.filter((entry) => entry.status === 'submitted');
+  const me = workspace.person.id;
+  const selected =
+    typeof query.trip === 'string' ? entries.find((entry) => entry.id === query.trip) : undefined;
+  const history = selected
+    ? await repo.activity({ about: { type: 'mileage', id: selected.id } })
+    : [];
+  const tripHref = (id?: string) => `${base}/tools/mileage${id ? `?trip=${id}` : ''}`;
+  const context = (entry: MileageEntry) =>
+    business
+      ? [
+          vehicles.find((vehicle) => vehicle.id === entry.vehicleId)?.name ?? 'Personal vehicle',
+          projects.find((project) => project.id === entry.projectId)?.name,
+        ]
+          .filter(Boolean)
+          .join(' · ')
+      : undefined;
+  const rate = workspace.space.mileageRate;
 
   const monthKey = (iso: string) =>
     new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric', timeZone: tz }).format(
@@ -39,7 +73,7 @@ export default async function MileagePage({ params }: PageProps<'/[space]/tools/
     months.set(monthKey(entry.date), [...(months.get(monthKey(entry.date)) ?? []), entry]);
   const counted = (list: MileageEntry[]) =>
     list
-      .filter((entry) => entry.status !== 'rejected')
+      .filter((entry) => entry.status !== 'returned')
       .reduce((sum, entry) => sum + entry.miles, 0);
   const thisMonth = months.get(monthKey(new Date().toISOString())) ?? [];
   const latest = [...entries].sort((a, b) => b.date.localeCompare(a.date))[0];
@@ -185,13 +219,19 @@ export default async function MileagePage({ params }: PageProps<'/[space]/tools/
                         people={people}
                         timezone={tz}
                         kind={workspace.space.kind}
+                        context={context(entry)}
+                        href={tripHref(entry.id)}
                         actions={
-                          approver && entry.status === 'submitted' ? (
-                            <ReviewButtons
+                          approver && entry.status === 'submitted' && entry.createdBy !== me ? (
+                            <ReviewActions
                               slug={workspace.space.slug}
-                              table="mileage"
-                              id={entry.id}
-                              label={`${formatMiles(entry.miles)} · ${entry.to}`}
+                              subject={{
+                                kind: 'mileage',
+                                id: entry.id,
+                                title: tripTitle(entry),
+                                amount: formatMiles(entry.miles),
+                              }}
+                              from={people.get(entry.createdBy)}
                             />
                           ) : undefined
                         }
@@ -202,6 +242,90 @@ export default async function MileagePage({ params }: PageProps<'/[space]/tools/
             </Panel>
           ))}
         </div>
+      )}
+
+      {selected && (
+        <UrlSheet
+          key={selected.id}
+          closeHref={tripHref()}
+          title={tripTitle(selected)}
+          description={`${formatDateLong(selected.date, tz)}${selected.purpose ? ` · ${selected.purpose}` : ''}`}
+          leading={<ToolGlyph tool={getTool('mileage')!} size="md" />}
+          footer={
+            approver && selected.status === 'submitted' && selected.createdBy !== me ? (
+              <ReviewActions
+                slug={workspace.space.slug}
+                size="md"
+                subject={{
+                  kind: 'mileage',
+                  id: selected.id,
+                  title: tripTitle(selected),
+                  amount: formatMiles(selected.miles),
+                }}
+                from={people.get(selected.createdBy)}
+              />
+            ) : undefined
+          }
+        >
+          <div className="grid gap-5 pt-1">
+            {selected.createdBy === me && selected.status === 'returned' && (
+              <ReturnedNotice
+                slug={workspace.space.slug}
+                inboxId={`rt_${selected.id}`}
+                reason={selected.returnReason || undefined}
+                reviewer={selected.reviewedBy ? people.get(selected.reviewedBy) : undefined}
+                edit={{ kind: 'mileage', record: selected }}
+              />
+            )}
+            <div className="flex items-center justify-between gap-4 rounded-[18px] bg-tool-miles/35 p-4 shadow-[inset_0_0_0_1px_rgb(0_0_0/.04)] sm:p-5">
+              <div className="min-w-0">
+                <p className="label !text-ink/55">Distance</p>
+                <p className="display num mt-1 text-[34px] leading-none text-ink">
+                  {formatMiles(selected.miles)}
+                </p>
+                <p className="mt-1.5 text-[13px] text-ink/60">
+                  {selected.roundTrip ? 'Round trip' : 'One way'}
+                  {business && !selected.vehicleId && rate
+                    ? ` · ${formatCurrency(selected.miles * rate)} paid back at ${formatCurrency(rate)}/mi`
+                    : ''}
+                </p>
+              </div>
+              <ApprovalBadge status={selected.status} kind={workspace.space.kind} />
+            </div>
+            {business && (
+              <Relations
+                label="Belongs to"
+                base={base}
+                items={relationsOf(selected, { people, projects, vehicles, trip: true })}
+                canOpen={{ person: can('people.view') }}
+              />
+            )}
+            <dl className="row-divide rounded-[14px] bg-subtle px-3.5 shadow-[inset_0_0_0_1px_var(--color-line)]">
+              {[
+                ['From', selected.from],
+                ['To', selected.to],
+                ['Purpose', selected.purpose || '—'],
+              ].map(([label, value]) => (
+                <div
+                  key={label}
+                  className="flex items-center justify-between gap-4 py-2.5 text-[13.5px]"
+                >
+                  <dt className="text-muted">{label}</dt>
+                  <dd className="min-w-0 truncate text-right font-medium text-ink">{value}</dd>
+                </div>
+              ))}
+            </dl>
+            {business && (
+              <SubmissionTimeline
+                record={selected}
+                events={history}
+                people={people}
+                timezone={tz}
+                approvedNote="Counted on its project"
+              />
+            )}
+          </div>
+        </UrlSheet>
       )}
     </Page>
   );

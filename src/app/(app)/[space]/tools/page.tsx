@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { PinButton } from '@/components/records/pin-button';
 import { CreateButton } from '@/components/create/create-button';
 import { ToolPreview } from '@/components/tools/previews';
 import { Badge } from '@/components/ui/badge';
@@ -37,7 +38,7 @@ const primary: Record<string, { id: CreateActionId; label: string }> = {
 export default async function ToolsPage({ params }: PageProps<'/[space]/tools'>) {
   const { workspace, repo, base, can, tz } = await openPage(params);
   const { space, membership } = workspace;
-  const [receipts, mileage, qrCodes, linkPages, files, projects, vehicles, members] =
+  const [receipts, mileage, qrCodes, linkPages, files, projects, vehicles, members, pins] =
     await Promise.all([
       repo.receipts(),
       repo.mileage(),
@@ -47,7 +48,9 @@ export default async function ToolsPage({ params }: PageProps<'/[space]/tools'>)
       repo.projects(),
       repo.vehicles(),
       repo.members(),
+      repo.pins(),
     ]);
+  const pinned = new Set(pins.filter((pin) => pin.type === 'tool').map((pin) => pin.id));
   const made = (source: string) => files.filter((file) => file.source === source);
   const usage: Record<string, string | undefined> = {
     receipts: receipts.length ? `${plural(receipts.length, 'receipt')} here` : undefined,
@@ -211,6 +214,14 @@ export default async function ToolsPage({ params }: PageProps<'/[space]/tools'>)
                   href={`${base}${tool.path}`}
                   className="absolute inset-0 z-0 rounded-[24px]"
                   aria-label={`Open ${tool.name}`}
+                />
+                {/* Pinned tools lead Home and the sidebar. */}
+                <PinButton
+                  slug={space.slug}
+                  target={{ type: 'tool', id: tool.id }}
+                  pinned={pinned.has(tool.id)}
+                  label={tool.name}
+                  className="absolute top-2.5 right-2.5 z-10 bg-white/70 backdrop-blur"
                 />
                 <div
                   className={cn(

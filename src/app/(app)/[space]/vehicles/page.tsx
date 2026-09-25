@@ -52,7 +52,7 @@ export default async function VehiclesPage({ params }: PageProps<'/[space]/vehic
               (receipt) =>
                 receipt.vehicleId === vehicle.id &&
                 month(receipt.date) &&
-                receipt.status !== 'rejected',
+                receipt.status !== 'returned',
             );
             const miles = mileage
               .filter((entry) => entry.vehicleId === vehicle.id && month(entry.date))

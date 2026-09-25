@@ -146,5 +146,26 @@ export function Section({ title, children }: { title?: string; children: ReactNo
 
 /** Today's date as yyyy-mm-dd in the given timezone, for date inputs. */
 export function todayInput(timezone: string) {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(new Date());
+  return dateInput(new Date().toISOString(), timezone);
+}
+
+/** A stored moment as yyyy-mm-dd in the given timezone, for date inputs. */
+export function dateInput(iso: string, timezone: string) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(new Date(iso));
+}
+
+/** While fixing a returned item, the reviewer's words stay in view above the form. */
+export function EditNote({ reason, reviewer }: { reason?: string; reviewer?: string }) {
+  return (
+    <div className="mt-1 mb-2 flex items-start gap-2.5 rounded-[14px] bg-caution-soft/70 px-3.5 py-3 shadow-[inset_0_0_0_1px_rgb(180_83_9/.14)]">
+      <Icon name="arrow-left" size={15} className="mt-0.5 shrink-0 text-caution" />
+      <p className="min-w-0 text-[13.5px] leading-snug text-ink">
+        <span className="font-medium text-caution">
+          {reviewer ? `${reviewer} returned it` : 'Returned'}
+          {reason ? ':' : ''}
+        </span>{' '}
+        {reason ? `“${reason}”` : 'Check the details and send it again.'}
+      </p>
+    </div>
+  );
 }

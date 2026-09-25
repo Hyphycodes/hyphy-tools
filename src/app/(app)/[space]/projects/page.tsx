@@ -8,9 +8,17 @@ import { Page, PageHeader } from '@/components/ui/page';
 import { Panel } from '@/components/ui/panel';
 import { Progress } from '@/components/ui/progress';
 import { Chips } from '@/components/ui/tabs';
-import { spendBy } from '@/lib/insights';
+import { PinButton } from '@/components/records/pin-button';
+import { projectMoney } from '@/lib/insights';
 import { openPage } from '@/lib/page';
-import { daysUntil, formatCurrency, formatDate } from '@/lib/platform/format';
+import {
+  daysUntil,
+  formatCompactMoney,
+  formatCurrency,
+  formatDate,
+  formatDateLong,
+} from '@/lib/platform/format';
+import { keyDate, workProfile } from '@/lib/platform/work';
 import type { Person, ProjectStatus } from '@/lib/platform/types';
 
 export const metadata = { title: 'Projects' };
@@ -29,22 +37,37 @@ export default async function ProjectsPage({
 }: PageProps<'/[space]/projects'>) {
   const { workspace, repo, base, people, tz, can } = await openPage(params, 'projects');
   const view = String((await searchParams).status ?? 'open');
-  const [projects, receipts, files] = await Promise.all([
+  const [projects, receipts, mileage, files, pins] = await Promise.all([
     repo.projects(),
     repo.receipts(),
+    repo.mileage(),
     repo.files(),
+    repo.pins(),
   ]);
-  const spend = spendBy(receipts, 'projectId');
-  const labels = workspace.space.labels?.projects ?? { singular: 'Project', plural: 'Projects' };
-  const events = Boolean(workspace.space.labels?.projects);
+  // Tracked the same way the project page counts it: receipts plus personal-vehicle miles.
+  const tracked = (projectId: string) =>
+    projectMoney(
+      {},
+      receipts.filter((receipt) => receipt.projectId === projectId),
+      mileage.filter((entry) => entry.projectId === projectId),
+      workspace.space.mileageRate,
+    ).tracked;
+  const profile = workProfile(workspace.space);
+  const labels = { singular: profile.singular, plural: profile.plural };
+  const events = profile.style === 'events';
+  const pinned = new Set(pins.filter((pin) => pin.type === 'project').map((pin) => pin.id));
+  // Pinned first: the jobs someone keeps an eye on sit at the top of their list.
   const shown = projects
     .filter((project) =>
       view === 'open' ? project.status !== 'done' : view === 'all' ? true : project.status === view,
     )
-    .sort((a, b) =>
-      events
-        ? a.startDate.localeCompare(b.startDate)
-        : order.indexOf(a.status) - order.indexOf(b.status) || b.progress - a.progress,
+    .sort(
+      (a, b) =>
+        Number(pinned.has(b.id)) - Number(pinned.has(a.id)) ||
+        (events
+          ? a.startDate.localeCompare(b.startDate)
+          : order.indexOf(a.status) - order.indexOf(b.status) ||
+            (b.progress ?? 0) - (a.progress ?? 0)),
     );
   const guestOrMember = !can('projects.view_all');
 
@@ -99,7 +122,7 @@ export default async function ProjectsPage({
         <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
           {shown.map((project, index) => {
             const team = project.teamIds.map((id) => people.get(id)).filter(Boolean) as Person[];
-            const spent = spend.get(project.id) ?? 0;
+            const spent = tracked(project.id);
             const photos = files.filter(
               (file) =>
                 file.kind === 'image' && file.attachedTo.some((ref) => ref.id === project.id),
@@ -107,17 +130,21 @@ export default async function ProjectsPage({
             const fileCount = files.filter((file) =>
               file.attachedTo.some((ref) => ref.id === project.id),
             ).length;
-            const date = events ? project.startDate : project.dueDate;
+            const date = keyDate(project, profile);
             const days = date ? daysUntil(date) : null;
             return (
-              <Link
+              <div
                 key={project.id}
-                href={`${base}/projects/${project.id}`}
-                className="group flex min-w-0 animate-rise flex-col overflow-hidden rounded-[18px] bg-surface shadow-card transition-all hover:-translate-y-0.5 hover:shadow-lift"
+                className="group relative flex min-w-0 animate-rise flex-col overflow-hidden rounded-[18px] bg-surface shadow-card transition-all hover:-translate-y-0.5 hover:shadow-lift"
                 style={{ animationDelay: `${index * 30}ms` }}
               >
+                <Link
+                  href={`${base}/projects/${project.id}`}
+                  className="absolute inset-0 z-0 rounded-[18px]"
+                  aria-label={project.name}
+                />
                 <div
-                  className="relative h-24 overflow-hidden"
+                  className="pointer-events-none relative h-24 overflow-hidden"
                   style={{ background: `color-mix(in oklab, ${project.color} 22%, white)` }}
                 >
                   {photos.length > 0 ? (
@@ -155,28 +182,47 @@ export default async function ProjectsPage({
                     </span>
                   )}
                 </div>
-                <div className="flex flex-1 flex-col p-4">
-                  <h2 className="text-[17px] font-semibold tracking-[-0.01em] text-ink">
+                <div className="pointer-events-none relative flex flex-1 flex-col p-4">
+                  <h2 className="pr-9 text-[17px] font-semibold tracking-[-0.01em] text-ink">
                     {project.name}
                   </h2>
                   <p className="mt-0.5 flex items-center gap-1.5 truncate text-[13px] text-muted">
                     <Icon name="map-pin" size={13} /> {project.location}
                     {project.client && <span className="truncate">· {project.client}</span>}
                   </p>
-                  <div className="mt-4 flex items-center gap-2.5">
-                    <Progress
-                      value={project.progress}
-                      color={project.color}
-                      className="flex-1"
-                      label="Progress"
-                    />
-                    <span className="text-[12px] text-muted">{project.progress}%</span>
-                  </div>
+                  {profile.progress && project.progress !== undefined ? (
+                    <div className="mt-4 flex items-center gap-2.5">
+                      <Progress
+                        value={project.progress}
+                        color={project.color}
+                        className="flex-1"
+                        label="Progress"
+                      />
+                      <span className="text-[12px] text-muted">{project.progress}%</span>
+                    </div>
+                  ) : (
+                    <p className="mt-4 text-[13px] text-ink-2">
+                      {[
+                        date ? formatDateLong(date, tz) : undefined,
+                        project.custom?.guests ? `${project.custom.guests} guests` : undefined,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </p>
+                  )}
                   <div className="mt-4 flex items-center justify-between border-t border-line pt-3">
                     <AvatarStack people={team} size="sm" max={4} />
                     <span className="flex gap-3 text-[12.5px] text-muted">
+                      {can('expenses.view_all') && project.value ? (
+                        <span title={profile.value ?? undefined}>
+                          {formatCompactMoney(project.value)}{' '}
+                          {profile.value === 'Booking' ? 'booked' : 'contract'}
+                        </span>
+                      ) : null}
                       {can('expenses.view_all') && spent > 0 && (
-                        <span>{formatCurrency(spent, { cents: false })}</span>
+                        <span title="Tracked costs">
+                          {formatCurrency(spent, { cents: false })} tracked
+                        </span>
                       )}
                       <span className="flex items-center gap-1">
                         <Icon name="files" size={13} /> {fileCount}
@@ -184,7 +230,14 @@ export default async function ProjectsPage({
                     </span>
                   </div>
                 </div>
-              </Link>
+                <PinButton
+                  slug={workspace.space.slug}
+                  target={{ type: 'project', id: project.id }}
+                  pinned={pinned.has(project.id)}
+                  label={project.name}
+                  className="absolute top-[104px] right-2.5 z-10"
+                />
+              </div>
             );
           })}
         </div>

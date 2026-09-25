@@ -4,8 +4,16 @@ import { cn } from '@/components/ui/cn';
 import { Page } from '@/components/ui/page';
 import { getRepository } from '@/lib/data';
 import { requireWorkspace } from '@/lib/identity';
-import { currentProjectFor, monthSummary, spendBy } from '@/lib/insights';
+import {
+  currentProjectFor,
+  exceptionsFor,
+  monthSummary,
+  projectMoney,
+  toolUsage,
+  weekSummary,
+} from '@/lib/insights';
 import { dashboardFor } from '@/lib/platform/dashboard';
+import { workProfile } from '@/lib/platform/work';
 import {
   daysUntil,
   formatCurrency,
@@ -35,6 +43,7 @@ export default async function Home({ params }: PageProps<'/[space]'>) {
     files,
     qrCodes,
     linkPages,
+    pins,
   ] = await Promise.all([
     repo.members(),
     repo.directory(),
@@ -47,11 +56,16 @@ export default async function Home({ params }: PageProps<'/[space]'>) {
     repo.files(),
     repo.qrCodes(),
     repo.linkPages(),
+    repo.pins(),
   ]);
+  const people = new Map(directory.map((item) => [item.id, item]));
+  const rate = space.mileageRate;
+  // Things the Inbox already shows aren't repeated as exceptions.
+  const inInbox = new Set(inbox.map((item) => item.subject.id));
   const data: DashboardData = {
     workspace,
     base: `/${space.slug}`,
-    people: new Map(directory.map((item) => [item.id, item])),
+    people,
     directory,
     members,
     inbox,
@@ -64,7 +78,28 @@ export default async function Home({ params }: PageProps<'/[space]'>) {
     qrCodes,
     linkPages,
     month: monthSummary({ receipts, mileage, files }, space.timezone),
-    projectSpend: spendBy(receipts, 'projectId'),
+    // Tracked the way a project page counts it: receipts plus personal-vehicle miles.
+    projectSpend: new Map(
+      projects.map((project) => [
+        project.id,
+        projectMoney(
+          project,
+          receipts.filter((row) => row.projectId === project.id),
+          mileage.filter((row) => row.projectId === project.id),
+          rate,
+        ).tracked,
+      ]),
+    ),
+    pins,
+    usage: toolUsage(person.id, { receipts, mileage, files, qrCodes, linkPages }),
+    exceptions:
+      space.kind === 'business' && workspace.permissions.includes('expenses.view_all')
+        ? exceptionsFor(
+            { receipts, mileage, files, projects, vehicles, people },
+            { rate, skip: inInbox },
+          )
+        : [],
+    week: weekSummary({ receipts, mileage, projects, activity }, rate),
   };
   const layout = dashboardFor(space, membership);
   const can = (permission: (typeof workspace.permissions)[number]) =>
@@ -104,13 +139,14 @@ export default async function Home({ params }: PageProps<'/[space]'>) {
       const pending = [...receipts, ...mileage].filter(
         (item) => item.status === 'submitted',
       ).length;
-      const returned = [...receipts, ...mileage].filter(
-        (item) => item.status === 'rejected',
-      ).length;
+      const back = [...receipts, ...mileage].filter(
+        (item) => item.status === 'returned' && !item.returnSeenAt,
+      );
+      const reviewer = back[0]?.reviewedBy ? data.people.get(back[0].reviewedBy) : undefined;
       return [
         project ? `You’re on ${project.name}.` : undefined,
-        returned
-          ? `${plural(returned, 'submission')} came back — take a look.`
+        back.length
+          ? `${reviewer ? reviewer.firstName : 'A manager'} sent ${back.length === 1 ? 'one thing' : `${back.length} things`} back to fix.`
           : pending
             ? `${plural(pending, 'submission')} waiting for approval.`
             : undefined,
@@ -125,7 +161,7 @@ export default async function Home({ params }: PageProps<'/[space]'>) {
       .map((project) => project.custom?.next_inspection as string | undefined)
       .filter(Boolean)
       .sort()[0];
-    return `${plural(projects.length, space.labels?.projects?.singular.toLowerCase() ?? 'project')} shared with you by ${space.name}.${
+    return `${plural(projects.length, workProfile(space).singular.toLowerCase())} shared with you by ${space.name}.${
       next ? ` Next inspection in ${daysUntil(next)} days.` : ''
     }`;
   })();

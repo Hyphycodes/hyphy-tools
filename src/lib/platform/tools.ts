@@ -1,6 +1,7 @@
 import type { IconName } from '@/components/ui/icon';
 import { can, type Permission } from './roles';
 import { planFor, plans } from './plans';
+import { workProfile } from './work';
 import type { Membership, ModuleId, PlanId, Role, Space, SpaceKind } from './types';
 
 /**
@@ -314,6 +315,7 @@ export function getTool(id: string) {
 
 /** A tool's name as this Space calls it (a restaurant's Projects are Events). */
 export function toolName(tool: ToolDefinition, space: Space) {
+  if (tool.module === 'projects') return workProfile(space).plural;
   return (tool.module && space.labels?.[tool.module]?.plural) || tool.name;
 }
 

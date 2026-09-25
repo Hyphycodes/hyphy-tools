@@ -10,7 +10,8 @@ const verbs: Record<ActivityVerb, string> = {
   uploaded: 'added',
   submitted: 'submitted',
   approved: 'approved',
-  rejected: 'returned',
+  returned: 'returned',
+  resubmitted: 'resubmitted',
   logged: 'logged',
   assigned: 'assigned',
   joined: 'joined',
@@ -23,7 +24,8 @@ const verbs: Record<ActivityVerb, string> = {
 
 const verbIcon: Partial<Record<ActivityVerb, IconName>> = {
   approved: 'check',
-  rejected: 'arrow-left',
+  returned: 'arrow-left',
+  resubmitted: 'arrow-up-right',
   logged: 'route',
   uploaded: 'upload',
   created: 'plus',
@@ -47,7 +49,7 @@ export function refHref(base: string, ref: Pick<ObjectRef, 'type' | 'id'>) {
     case 'receipt':
       return `${base}/tools/receipts?receipt=${ref.id}`;
     case 'mileage':
-      return `${base}/tools/mileage`;
+      return `${base}/tools/mileage?trip=${ref.id}`;
     case 'qr':
       return `${base}/tools/qr`;
     case 'link':

@@ -2,14 +2,24 @@
 import { useRouter } from 'next/navigation';
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 import type { CreateActionId } from '@/lib/platform/actions';
-import type { AttachmentRef } from '@/lib/platform/types';
+import type { AttachmentRef, MileageEntry, Receipt } from '@/lib/platform/types';
 import { useWorkspace } from '@/components/shell/workspace-context';
 import { CreateSheets } from './create-sheets';
+
+/** Opening a form on something that already exists: a returned item to fix and resend. */
+export type EditTarget = (
+  { kind: 'receipt'; record: Receipt } | { kind: 'mileage'; record: MileageEntry }
+) & {
+  /** The reviewer's note, shown at the top of the form while fixing. */
+  reason?: string;
+  reviewer?: string;
+};
 
 export type CreateRequest = {
   id: CreateActionId;
   attachTo?: AttachmentRef;
   preset?: Record<string, unknown>;
+  edit?: EditTarget;
 };
 
 type CreateValue = {

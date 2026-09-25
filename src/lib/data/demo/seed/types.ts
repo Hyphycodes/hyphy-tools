@@ -6,6 +6,7 @@ import type {
   Membership,
   MileageEntry,
   Person,
+  Pin,
   Project,
   QrCode,
   Receipt,
@@ -27,8 +28,10 @@ export type Dataset = {
   linkPages: LinkPage[];
   activity: ActivityEvent[];
   inbox: InboxItem[];
+  /** Default pins; a visitor's own choices are kept beside the journal (see prefs.ts). */
+  pins: Pin[];
 };
 
 export type TableName = keyof Dataset;
 
-export type SeedSlice = Partial<Omit<Dataset, 'people' | 'spaces' | 'memberships'>>;
+export type SeedSlice = Partial<Omit<Dataset, 'people' | 'spaces' | 'memberships' | 'pins'>>;

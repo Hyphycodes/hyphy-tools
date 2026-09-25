@@ -1,5 +1,14 @@
 import 'server-only';
 import type { Workspace } from '@/lib/identity/types';
+import {
+  awaitingFix,
+  mileageSubmission,
+  receiptSubmission,
+  submissionKinds,
+  tripTitle,
+  type Submission,
+  type SubmissionKind,
+} from '@/lib/platform/approvals';
 import type {
   ActivityEvent,
   FileRecord,
@@ -7,14 +16,17 @@ import type {
   LinkPage,
   Membership,
   MileageEntry,
+  ObjectRef,
   Person,
+  PinTarget,
   Project,
   QrCode,
   Receipt,
   Vehicle,
 } from '@/lib/platform/types';
-import type { Member, Repository } from '../repository';
+import { RuleError, type Member, type RecordFilter, type Repository } from '../repository';
 import { newId, readJournal, writeJournal, type JournalOp, type PendingOp } from './journal';
+import { readPins, writePins } from './prefs';
 import type { Dataset, TableName } from './seed';
 import { getDemoData } from './store';
 
@@ -96,6 +108,217 @@ export function createDemoRepository(workspace: Workspace): Repository {
     createdAt: new Date().toISOString(),
   });
 
+  const business = space.kind === 'business';
+  const approver = business && has('expenses.approve');
+  /** Personal Spaces and approvers file straight through; everyone else waits for a decision. */
+  const filedStatus = () =>
+    space.kind === 'personal' || has('expenses.approve') ? 'approved' : 'submitted';
+
+  /**
+   * Names are read from the records themselves, never from copies: rename a project and every
+   * activity line and inbox item that mentions it follows.
+   */
+  function relabel(ref: ObjectRef, dataset: Dataset): ObjectRef {
+    const find = <T extends { id: string }>(rows: T[]) => rows.find((row) => row.id === ref.id);
+    let label: string | undefined;
+    switch (ref.type) {
+      case 'project':
+        label = find(dataset.projects)?.name;
+        break;
+      case 'vehicle':
+        label = find(dataset.vehicles)?.name;
+        break;
+      case 'person':
+        label = find(dataset.people)?.name;
+        break;
+      case 'file':
+        label = find(dataset.files)?.name;
+        break;
+      case 'receipt': {
+        const receipt = find(dataset.receipts);
+        label = receipt && `${receipt.vendor} receipt`;
+        break;
+      }
+      case 'mileage': {
+        const entry = find(dataset.mileage);
+        label = entry && tripTitle(entry);
+        break;
+      }
+    }
+    return label ? { ...ref, label } : ref;
+  }
+
+  function toSubmissions(dataset: Dataset, filter: RecordFilter = {}): Submission[] {
+    const assigned = (personId: string) =>
+      inSpace(dataset.vehicles).find((vehicle) => vehicle.assignedTo === personId)?.id;
+    const match = (row: {
+      projectId?: string;
+      vehicleId?: string;
+      createdBy: string;
+      status: string;
+    }) =>
+      (!filter.projectId || row.projectId === filter.projectId) &&
+      (!filter.vehicleId || row.vehicleId === filter.vehicleId) &&
+      (!filter.createdBy || row.createdBy === filter.createdBy) &&
+      (!filter.status || row.status === filter.status);
+    return [
+      ...ownOrAll(inSpace(dataset.receipts))
+        .filter(match)
+        .map((receipt) => receiptSubmission(receipt, business)),
+      ...ownOrAll(inSpace(dataset.mileage))
+        .filter(match)
+        .map((entry) => mileageSubmission(entry, business ? assigned(entry.createdBy) : undefined)),
+    ].sort((a, b) => b.date.localeCompare(a.date));
+  }
+
+  /** "Shell · $71.42 · Truck 24 · Oak Brook Remodel", from the records as they are now. */
+  function describe(item: Submission, dataset: Dataset) {
+    const vehicle = item.vehicleId
+      ? inSpace(dataset.vehicles).find((row) => row.id === item.vehicleId)?.name
+      : item.kind === 'mileage' && business
+        ? 'Personal vehicle'
+        : undefined;
+    const project = inSpace(dataset.projects).find((row) => row.id === item.projectId)?.name;
+    return item.kind === 'receipt'
+      ? [item.title, item.amount, vehicle, project].filter(Boolean).join(' · ')
+      : [item.amount, item.title, vehicle, project].filter(Boolean).join(' · ');
+  }
+
+  /** The inbox items that are really just views of submissions. */
+  function derivedInbox(dataset: Dataset, includeDone: boolean): InboxItem[] {
+    const items: InboxItem[] = [];
+    const all = toSubmissions(dataset);
+    const subject = (item: Submission) =>
+      relabel({ type: item.kind, id: item.id, label: item.title }, dataset);
+    for (const item of all) {
+      const noun = submissionKinds[item.kind].noun;
+      const Noun = item.kind === 'mileage' ? 'Mileage' : 'Receipt';
+      if (approver && item.status === 'submitted' && item.createdBy !== me)
+        items.push({
+          id: `ap_${item.id}`,
+          spaceId: space.id,
+          kind: 'approval',
+          title: item.flags.includes('resubmitted')
+            ? `${Noun} resubmitted`
+            : item.flags.includes('unassigned') && item.kind === 'receipt'
+              ? 'Receipt isn’t assigned'
+              : item.kind === 'receipt'
+                ? 'Receipt needs approval'
+                : 'Mileage submitted',
+          detail: describe(item, dataset),
+          at: item.resubmittedAt ?? item.createdAt,
+          subject: subject(item),
+          audience: 'expenses.approve',
+          fromId: item.createdBy,
+          priority: 'normal',
+          status: 'open',
+          submission: item,
+        });
+      else if (
+        includeDone &&
+        approver &&
+        item.reviewedBy === me &&
+        item.reviewedAt &&
+        (item.status === 'approved' || item.status === 'returned') &&
+        Date.now() - new Date(item.reviewedAt).getTime() < 14 * 86_400_000
+      )
+        items.push({
+          id: `ap_${item.id}`,
+          spaceId: space.id,
+          kind: 'approval',
+          title: `${Noun} ${item.status === 'approved' ? 'approved' : 'returned'}`,
+          detail: describe(item, dataset),
+          at: item.reviewedAt,
+          subject: subject(item),
+          audience: 'expenses.approve',
+          fromId: item.createdBy,
+          priority: 'normal',
+          status: 'done',
+          submission: item,
+        });
+      if (item.createdBy !== me) continue;
+      if (awaitingFix(item, me))
+        items.push({
+          id: `rt_${item.id}`,
+          spaceId: space.id,
+          kind: 'returned',
+          title: `${Noun} returned`,
+          detail: item.returnReason
+            ? `“${item.returnReason}”`
+            : `${describe(item, dataset)} · no note given`,
+          at: item.reviewedAt ?? item.createdAt,
+          subject: subject(item),
+          recipientId: me,
+          fromId: item.reviewedBy,
+          priority: 'normal',
+          status: 'open',
+          submission: item,
+        });
+      if (item.status === 'draft')
+        items.push({
+          id: `in_${item.id}`,
+          spaceId: space.id,
+          kind: 'incomplete',
+          title: item.value
+            ? `${item.title} ${noun} isn’t sent`
+            : `${item.title} ${noun} needs a total`,
+          detail:
+            dataset.receipts.find((row) => row.id === item.id)?.notes ??
+            'Finish it when you have a minute.',
+          at: item.createdAt,
+          subject: subject(item),
+          recipientId: me,
+          priority: 'normal',
+          status: 'open',
+          submission: item,
+        });
+    }
+    return items;
+  }
+
+  /** A submission this person may decide on: in this Space, waiting, and not their own. */
+  function decidable(dataset: Dataset, kind: SubmissionKind, id: string) {
+    const table = submissionKinds[kind].table;
+    const record = inSpace(dataset[table] as (Receipt | MileageEntry)[]).find(
+      (row) => row.id === id,
+    );
+    if (!record) throw new RuleError('That item isn’t in this Space.');
+    if (record.createdBy === me) throw new RuleError('Someone else approves your own submissions.');
+    if (record.status !== 'submitted') throw new RuleError('That one has already been decided.');
+    return { table, record };
+  }
+
+  /** The submitter's own returned item or draft, ready to be sent again. */
+  function fixable<T extends Receipt | MileageEntry>(rows: T[], id: string) {
+    const record = inSpace(rows).find((row) => row.id === id);
+    if (!record || record.createdBy !== me)
+      throw new RuleError('Only the person who sent it can resend it.');
+    if (record.status !== 'returned' && record.status !== 'draft')
+      throw new RuleError('Only returned items and drafts can be sent again.');
+    const now = new Date().toISOString();
+    return {
+      record,
+      patch: {
+        status: filedStatus(),
+        ...(record.status === 'returned' ? { resubmittedAt: now } : {}),
+        ...(has('expenses.approve') && business ? { reviewedBy: me, reviewedAt: now } : {}),
+      },
+    };
+  }
+
+  async function pins() {
+    const dataset = await data();
+    const chosen =
+      (await readPins(space.id, me)) ??
+      dataset.pins.filter((pin) => pin.spaceId === space.id && pin.personId === me);
+    return chosen.map((target) => ({
+      type: target.type,
+      id: target.id,
+      spaceId: space.id,
+      personId: me,
+    }));
+  }
+
   async function members(): Promise<Member[]> {
     const dataset = await data();
     const all = inSpace(dataset.memberships).map((item) => ({
@@ -171,6 +394,10 @@ export function createDemoRepository(workspace: Workspace): Repository {
       return inSpace((await data()).linkPages).sort(byNewest<LinkPage>('updatedAt'));
     },
 
+    async submissions(filter = {}) {
+      return toSubmissions(await data(), filter);
+    },
+
     async activity(filter = {}) {
       const dataset = await data();
       let events = inSpace(dataset.activity);
@@ -197,37 +424,43 @@ export function createDemoRepository(workspace: Workspace): Repository {
         );
       if (filter.actorId) events = events.filter((event) => event.actorId === filter.actorId);
       events.sort(byNewest<ActivityEvent>('at'));
-      return filter.limit ? events.slice(0, filter.limit) : events;
+      return (filter.limit ? events.slice(0, filter.limit) : events).map((event) => ({
+        ...event,
+        object: relabel(event.object, dataset),
+        context: event.context && relabel(event.context, dataset),
+      }));
     },
 
     async inbox(options = {}) {
-      return inSpace((await data()).inbox)
+      const dataset = await data();
+      const stored = inSpace(dataset.inbox)
         .filter((item) => item.recipientId === me || (item.audience && has(item.audience)))
         .filter((item) => options.includeDone || item.status === 'open')
-        .sort((a, b) =>
-          a.status !== b.status
-            ? a.status === 'open'
+        .map((item) => ({ ...item, subject: relabel(item.subject, dataset) }));
+      return [...stored, ...derivedInbox(dataset, Boolean(options.includeDone))].sort((a, b) =>
+        a.status !== b.status
+          ? a.status === 'open'
+            ? -1
+            : 1
+          : a.priority !== b.priority
+            ? a.priority === 'high'
               ? -1
               : 1
-            : a.priority !== b.priority
-              ? a.priority === 'high'
-                ? -1
-                : 1
-              : byNewest<InboxItem>('at')(a, b),
-        );
+            : byNewest<InboxItem>('at')(a, b),
+      );
     },
+
+    pins,
 
     async createReceipt(input) {
       const { draft, ...fields } = input;
       const receipt: Receipt = {
         ...owned('rc'),
         ...fields,
-        status: draft
-          ? 'draft'
-          : space.kind === 'personal' || has('expenses.approve')
-            ? 'approved'
-            : 'submitted',
-        ...(has('expenses.approve') && space.kind === 'business' ? { reviewedBy: me } : {}),
+        status: draft ? 'draft' : filedStatus(),
+        ...(has('expenses.approve') && business && !draft
+          ? { reviewedBy: me, reviewedAt: new Date().toISOString() }
+          : {}),
       };
       await commit(add('receipts', receipt));
       return receipt;
@@ -236,7 +469,10 @@ export function createDemoRepository(workspace: Workspace): Repository {
       const entry: MileageEntry = {
         ...owned('mi'),
         ...input,
-        status: space.kind === 'personal' || has('expenses.approve') ? 'approved' : 'submitted',
+        status: filedStatus(),
+        ...(has('expenses.approve') && business
+          ? { reviewedBy: me, reviewedAt: new Date().toISOString() }
+          : {}),
       };
       await commit(add('mileage', entry));
       return entry;
@@ -245,8 +481,8 @@ export function createDemoRepository(workspace: Workspace): Repository {
       const project: Project = {
         ...owned('prj'),
         ...input,
-        startDate: new Date().toISOString(),
-        progress: 0,
+        startDate: input.startDate ?? new Date().toISOString(),
+        ...(space.workStyle === 'events' ? {} : { progress: 0 }),
         color: space.brand.color,
       };
       await commit(add('projects', project));
@@ -315,15 +551,81 @@ export function createDemoRepository(workspace: Workspace): Repository {
       await commit(add('linkPages', page));
       return page;
     },
-    async review(table, id, decision) {
-      const rows = inSpace((await data())[table] as (Receipt | MileageEntry)[]);
-      if (!rows.some((row) => row.id === id)) throw new Error('Not found in this Space.');
-      await commit({ k: 'set', t: table, id, patch: { status: decision, reviewedBy: me } });
+    async review(kind, id, decision, reason) {
+      const { table } = decidable(await data(), kind, id);
+      await commit({
+        k: 'set',
+        t: table,
+        id,
+        patch: {
+          status: decision,
+          reviewedBy: me,
+          reviewedAt: new Date().toISOString(),
+          // A new return replaces any earlier note; an approval keeps it as history.
+          ...(decision === 'returned' ? { returnReason: reason?.trim() ?? '' } : {}),
+        },
+      });
+    },
+    async approveMany(refs) {
+      const dataset = await data();
+      const at = new Date().toISOString();
+      const ops: PendingOp[] = [];
+      for (const ref of refs) {
+        try {
+          const { table } = decidable(dataset, ref.kind, ref.id);
+          if (ops.some((op) => op.k === 'set' && op.id === ref.id)) continue;
+          ops.push({
+            k: 'set',
+            t: table,
+            id: ref.id,
+            patch: { status: 'approved', reviewedBy: me, reviewedAt: at },
+          });
+        } catch {
+          // Already decided (or someone's own): leave it out, approve the rest.
+        }
+      }
+      if (ops.length) await commit(...ops);
+      return ops.length;
+    },
+    async resubmitReceipt(id, input) {
+      const fields: Partial<typeof input> = { ...input };
+      delete fields.draft;
+      const { record, patch } = fixable(inSpace((await data()).receipts), id);
+      await commit({ k: 'set', t: 'receipts', id, patch: { ...fields, ...patch } });
+      return { ...record, ...fields, ...patch } as Receipt;
+    },
+    async resubmitMileage(id, input) {
+      const { record, patch } = fixable(inSpace((await data()).mileage), id);
+      await commit({ k: 'set', t: 'mileage', id, patch: { ...input, ...patch } });
+      return { ...record, ...input, ...patch } as MileageEntry;
     },
     async resolveInbox(id) {
-      const item = inSpace((await data()).inbox).find((entry) => entry.id === id);
-      if (!item) throw new Error('Not found in this Space.');
+      const dataset = await data();
+      // A returned item is "resolved" by reading it and leaving it as it is.
+      if (id.startsWith('rt_')) {
+        const recordId = id.slice(3);
+        const table = dataset.receipts.some((row) => row.id === recordId) ? 'receipts' : 'mileage';
+        const record = inSpace(dataset[table] as (Receipt | MileageEntry)[]).find(
+          (row) => row.id === recordId,
+        );
+        if (!record || !awaitingFix(record, me))
+          throw new RuleError('That item is already handled.');
+        await commit({
+          k: 'set',
+          t: table,
+          id: recordId,
+          patch: { returnSeenAt: new Date().toISOString() },
+        });
+        return;
+      }
+      const item = inSpace(dataset.inbox).find((entry) => entry.id === id);
+      if (!item) throw new RuleError('That item is decided on its own page.');
       await commit({ k: 'set', t: 'inbox', id, patch: { status: 'done' } });
+    },
+    async setPinned(target, pinned) {
+      const current = (await pins()).map(({ type, id }) => ({ type, id }) as PinTarget);
+      const rest = current.filter((pin) => !(pin.type === target.type && pin.id === target.id));
+      await writePins(space.id, me, pinned ? [...rest, target] : rest);
     },
     async setModules(modules) {
       await commit({ k: 'set', t: 'spaces', id: space.id, patch: { modules } });

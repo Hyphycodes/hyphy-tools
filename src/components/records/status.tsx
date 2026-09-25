@@ -16,7 +16,7 @@ export function approvalBadge(
       return { tone: 'caution', label: 'Pending' };
     case 'approved':
       return { tone: 'positive', label: 'Approved' };
-    case 'rejected':
+    case 'returned':
       return { tone: 'critical', label: 'Returned' };
   }
 }

@@ -11,6 +11,18 @@ export function formatCurrency(value: number, { cents = true }: { cents?: boolea
   }).format(value);
 }
 
+/** "$148k", "$1.2M", "$640": big values at a glance. */
+export function formatCompactMoney(value: number) {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    notation: value >= 10000 ? 'compact' : 'standard',
+    maximumFractionDigits: value >= 10000 ? 1 : 0,
+  })
+    .format(value)
+    .replace(/K$/, 'k');
+}
+
 export function formatNumber(value: number, digits = 0) {
   return new Intl.NumberFormat('en-US', {
     minimumFractionDigits: digits,

@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useId, useRef, useState } from 'react';
-import { createReceipt } from '@/app/(app)/[space]/actions';
+import { createReceipt, resubmitReceipt } from '@/app/(app)/[space]/actions';
 import { Button } from '@/components/ui/button';
 import { Field, Input, Select, Textarea } from '@/components/ui/form';
 import { Icon } from '@/components/ui/icon';
@@ -8,7 +8,15 @@ import { useWorkspace } from '@/components/shell/workspace-context';
 import { formatCurrency } from '@/lib/platform/format';
 import type { ReceiptCategory } from '@/lib/platform/types';
 import { useSubmit, type FormProps } from './create-sheets';
-import { ChoiceChips, FormFooter, Section, SubmitButton, todayInput } from './parts';
+import {
+  ChoiceChips,
+  dateInput,
+  EditNote,
+  FormFooter,
+  Section,
+  SubmitButton,
+  todayInput,
+} from './parts';
 
 const CATEGORIES: {
   value: ReceiptCategory;
@@ -37,28 +45,44 @@ export function ReceiptForm({ request, onDone, formId }: FormProps) {
     (vehicle) => vehicle.assignedTo === workspace.person.id,
   );
   const attached = request.attachTo;
+  // Fixing a returned receipt (or finishing a draft) starts from what was saved.
+  const editing = request.edit?.kind === 'receipt' ? request.edit.record : undefined;
   const [photo, setPhoto] = useState<Photo | null>(null);
   const [category, setCategory] = useState<ReceiptCategory>(
-    (request.preset?.category as ReceiptCategory) ?? (mine ? 'fuel' : 'materials'),
+    editing?.category ??
+      (request.preset?.category as ReceiptCategory) ??
+      (mine ? 'fuel' : 'materials'),
   );
-  const [vendor, setVendor] = useState('');
-  const [total, setTotal] = useState('');
-  const [date, setDate] = useState(() => todayInput(workspace.space.timezone));
-  const [gallons, setGallons] = useState('');
-  const [odometer, setOdometer] = useState('');
+  const [vendor, setVendor] = useState(editing?.vendor ?? '');
+  const [total, setTotal] = useState(editing?.total ? String(editing.total) : '');
+  const [date, setDate] = useState(() =>
+    editing
+      ? dateInput(editing.date, workspace.space.timezone)
+      : todayInput(workspace.space.timezone),
+  );
+  const [gallons, setGallons] = useState(editing?.gallons ? String(editing.gallons) : '');
+  const [odometer, setOdometer] = useState(editing?.odometer ? String(editing.odometer) : '');
   const [vehicleId, setVehicleId] = useState(
-    attached?.type === 'vehicle' ? attached.id : category === 'fuel' ? (mine?.id ?? '') : '',
+    editing
+      ? (editing.vehicleId ?? '')
+      : attached?.type === 'vehicle'
+        ? attached.id
+        : category === 'fuel'
+          ? (mine?.id ?? '')
+          : '',
   );
   const [projectId, setProjectId] = useState(
-    attached?.type === 'project'
-      ? attached.id
-      : attached?.type === 'vehicle' || workspace.space.kind === 'personal'
-        ? ''
-        : (workspace.options.currentProjectId ?? ''),
+    editing
+      ? (editing.projectId ?? '')
+      : attached?.type === 'project'
+        ? attached.id
+        : attached?.type === 'vehicle' || workspace.space.kind === 'personal'
+          ? ''
+          : (workspace.options.currentProjectId ?? ''),
   );
-  const [notes, setNotes] = useState('');
+  const [notes, setNotes] = useState(editing?.notes ?? '');
   const vehicle = workspace.options.vehicles.find((item) => item.id === vehicleId);
-  const [payment, setPayment] = useState('');
+  const [payment, setPayment] = useState(editing?.paymentMethod ?? '');
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(
@@ -74,6 +98,7 @@ export function ReceiptForm({ request, onDone, formId }: FormProps) {
     ...(vehicle?.fuelCardLast4 ? [`Fuel card ••${vehicle.fuelCardLast4}`] : []),
     ...(business ? ['Company card', 'Personal card (reimburse me)'] : ['Card', 'Cash']),
   ];
+  if (payment && !payments.includes(payment)) payments.unshift(payment);
 
   function fillSample() {
     const start = vehicle?.odometer ?? mine?.odometer ?? 61204;
@@ -104,12 +129,23 @@ export function ReceiptForm({ request, onDone, formId }: FormProps) {
       id={formId}
       onSubmit={(event) => {
         event.preventDefault();
-        submit(() => createReceipt(workspace.space.slug, values()), {
-          title: `${vendor || 'Receipt'} · ${total ? formatCurrency(Number(total)) : 'no total yet'}`,
-          href: workspace.href('/tools/receipts'),
-        });
+        submit(
+          () =>
+            editing
+              ? resubmitReceipt(workspace.space.slug, editing.id, values())
+              : createReceipt(workspace.space.slug, values()),
+          {
+            title: `${vendor || 'Receipt'} · ${total ? formatCurrency(Number(total)) : 'no total yet'}`,
+            href: workspace.href(
+              editing ? `/tools/receipts?receipt=${editing.id}` : '/tools/receipts',
+            ),
+          },
+        );
       }}
     >
+      {request.edit && request.edit.record.status === 'returned' && (
+        <EditNote reason={request.edit.reason} reviewer={request.edit.reviewer} />
+      )}
       {/* Capture */}
       <input
         ref={fileInput}
@@ -346,20 +382,26 @@ export function ReceiptForm({ request, onDone, formId }: FormProps) {
               : undefined
         }
       >
-        <Button
-          variant="ghost"
-          disabled={pending || !vendor}
-          onClick={() =>
-            submit(() => createReceipt(workspace.space.slug, { ...values(), draft: true }), {
-              title: 'Draft saved',
-              href: workspace.href('/tools/receipts'),
-            })
-          }
-        >
-          Save draft
-        </Button>
+        {!editing && (
+          <Button
+            variant="ghost"
+            disabled={pending || !vendor}
+            onClick={() =>
+              submit(() => createReceipt(workspace.space.slug, { ...values(), draft: true }), {
+                title: 'Draft saved',
+                href: workspace.href('/tools/receipts'),
+              })
+            }
+          >
+            Save draft
+          </Button>
+        )}
         <SubmitButton pending={pending}>
-          {needsApproval ? 'Submit for approval' : 'Save receipt'}
+          {editing?.status === 'returned'
+            ? 'Resubmit receipt'
+            : needsApproval
+              ? 'Submit for approval'
+              : 'Save receipt'}
         </SubmitButton>
       </FormFooter>
     </form>

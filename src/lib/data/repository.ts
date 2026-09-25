@@ -1,3 +1,4 @@
+import type { Submission, SubmissionKind, SubmissionRef } from '@/lib/platform/approvals';
 import type {
   ActivityEvent,
   ApprovalStatus,
@@ -10,6 +11,8 @@ import type {
   ModuleId,
   ObjectRef,
   Person,
+  Pin,
+  PinTarget,
   Project,
   QrCode,
   Receipt,
@@ -27,6 +30,9 @@ import type {
  */
 
 export type Member = Membership & { person: Person };
+
+/** A change the rules refuse ("that one was already decided"), in words the person can act on. */
+export class RuleError extends Error {}
 
 export type RecordFilter = {
   projectId?: string;
@@ -63,9 +69,13 @@ export type ProjectInput = Pick<
   | 'dueDate'
   | 'leadId'
   | 'teamIds'
-  | 'budget'
+  | 'value'
+  | 'costAllowance'
   | 'status'
->;
+> & {
+  /** An event's day; jobs start the day they're created. */
+  startDate?: string;
+};
 
 export type InviteInput = {
   name: string;
@@ -85,7 +95,10 @@ export type FileInput = Pick<
   'name' | 'kind' | 'size' | 'folder' | 'attachedTo' | 'access' | 'source' | 'pages' | 'preview'
 >;
 
-export type QrInput = Pick<QrCode, 'label' | 'content' | 'fg' | 'bg' | 'placement'>;
+export type QrInput = Pick<
+  QrCode,
+  'label' | 'content' | 'fg' | 'bg' | 'placement' | 'projectId' | 'linkPageId'
+>;
 
 export type LinkPageInput = Pick<LinkPage, 'title' | 'handle' | 'bio' | 'theme' | 'links'> & {
   id?: string;
@@ -117,8 +130,18 @@ export interface Repository {
   qrCodes(): Promise<QrCode[]>;
   linkPages(): Promise<LinkPage[]>;
 
+  /** Receipts and trips as one list, in the shared approval shape. Same visibility as each. */
+  submissions(filter?: RecordFilter): Promise<Submission[]>;
+
   activity(filter?: ActivityFilter): Promise<ActivityEvent[]>;
+  /**
+   * What needs this person: stored notifications, plus items derived from the records themselves
+   * (submissions waiting on them, their own returned or unfinished ones). Derived items can't go
+   * stale — they disappear when the record changes.
+   */
   inbox(options?: { includeDone?: boolean }): Promise<InboxItem[]>;
+  /** This person's pins in this Space. */
+  pins(): Promise<Pin[]>;
 
   createReceipt(input: ReceiptInput): Promise<Receipt>;
   createMileage(input: MileageInput): Promise<MileageEntry>;
@@ -128,11 +151,19 @@ export interface Repository {
   addFiles(inputs: FileInput[]): Promise<FileRecord[]>;
   saveQrCode(input: QrInput): Promise<QrCode>;
   saveLinkPage(input: LinkPageInput): Promise<LinkPage>;
+  /** Approve or return one submission. A return can carry a short reason for the submitter. */
   review(
-    table: 'receipts' | 'mileage',
+    kind: SubmissionKind,
     id: string,
-    decision: 'approved' | 'rejected',
+    decision: 'approved' | 'returned',
+    reason?: string,
   ): Promise<void>;
+  /** Approves several at once; returns how many were still waiting. Never returns in bulk. */
+  approveMany(refs: SubmissionRef[]): Promise<number>;
+  /** The submitter's fix for a returned item (or a finished draft), sent again. */
+  resubmitReceipt(id: string, input: ReceiptInput): Promise<Receipt>;
+  resubmitMileage(id: string, input: MileageInput): Promise<MileageEntry>;
   resolveInbox(id: string): Promise<void>;
+  setPinned(target: PinTarget, pinned: boolean): Promise<void>;
   setModules(modules: ModuleId[]): Promise<void>;
 }

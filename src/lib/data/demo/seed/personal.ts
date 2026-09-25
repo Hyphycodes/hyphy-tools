@@ -345,18 +345,6 @@ export function personal(t: Clock): SeedSlice {
         priority: 'normal',
         status: 'open',
       },
-      {
-        id: 'in_p_02',
-        spaceId: J,
-        kind: 'receipt-returned',
-        title: 'Receipt needs a total',
-        detail: 'Walgreens · the photo came out blurry',
-        at: t.ago(1, 1),
-        subject: { type: 'receipt', id: 'rc_p_04', label: 'Walgreens receipt' },
-        recipientId: 'jerry',
-        priority: 'normal',
-        status: 'open',
-      },
     ],
   };
 }

@@ -1,9 +1,11 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { CreateButton } from '@/components/create/create-button';
-import { ReviewButtons } from '@/components/records/inbox-actions';
+import { Relations, relationsOf } from '@/components/records/relations';
+import { ReturnedNotice, ReviewActions } from '@/components/records/review';
 import { ReceiptPaper } from '@/components/records/receipt-paper';
 import { ReceiptRow } from '@/components/records/rows';
+import { SubmissionTimeline } from '@/components/records/timeline';
 import { ApprovalBadge } from '@/components/records/status';
 import { ToolHeader } from '@/components/tools/tool-header';
 import { Avatar } from '@/components/ui/avatar';
@@ -17,14 +19,9 @@ import { Chips } from '@/components/ui/tabs';
 import { UrlSheet } from '@/components/ui/url-sheet';
 import { categoryLabel, monthSummary } from '@/lib/insights';
 import { openPage } from '@/lib/page';
-import {
-  formatCurrency,
-  formatDateLong,
-  formatNumber,
-  formatRelative,
-} from '@/lib/platform/format';
+import { formatCurrency, formatDateLong, formatNumber } from '@/lib/platform/format';
 import { getTool } from '@/lib/platform/tools';
-import type { ApprovalStatus, Person, Receipt } from '@/lib/platform/types';
+import type { ActivityEvent, ApprovalStatus, Person, Receipt } from '@/lib/platform/types';
 
 export const metadata = { title: 'Receipts' };
 
@@ -32,7 +29,7 @@ const views: { id: 'all' | ApprovalStatus; label: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'submitted', label: 'Pending' },
   { id: 'approved', label: 'Approved' },
-  { id: 'rejected', label: 'Returned' },
+  { id: 'returned', label: 'Returned' },
   { id: 'draft', label: 'Drafts' },
 ];
 
@@ -97,7 +94,7 @@ export default async function ReceiptsPage({
     )
     .sort((a, b) => b.total - a.total);
   const gallons = receipts
-    .filter((receipt) => receipt.gallons && receipt.status !== 'rejected')
+    .filter((receipt) => receipt.gallons && receipt.status !== 'returned')
     .reduce((sum, receipt) => sum + (receipt.gallons ?? 0), 0);
 
   const stats: [string, string, string, string?][] = [
@@ -196,12 +193,18 @@ export default async function ReceiptsPage({
                     context={context(receipt)}
                     href={href({ receipt: receipt.id })}
                     actions={
-                      approver && receipt.status === 'submitted' ? (
-                        <ReviewButtons
+                      approver &&
+                      receipt.status === 'submitted' &&
+                      receipt.createdBy !== workspace.person.id ? (
+                        <ReviewActions
                           slug={workspace.space.slug}
-                          table="receipts"
-                          id={receipt.id}
-                          label={`${receipt.vendor} · ${formatCurrency(receipt.total)}`}
+                          subject={{
+                            kind: 'receipt',
+                            id: receipt.id,
+                            title: receipt.vendor,
+                            amount: formatCurrency(receipt.total),
+                          }}
+                          from={people.get(receipt.createdBy)}
                         />
                       ) : undefined
                     }
@@ -315,12 +318,19 @@ export default async function ReceiptsPage({
           description={`${formatDateLong(selected.date, tz)} · ${categoryLabel[selected.category]}`}
           leading={<ToolGlyph tool={getTool('receipts')!} size="md" />}
           footer={
-            approver && selected.status === 'submitted' ? (
-              <ReviewButtons
+            approver &&
+            selected.status === 'submitted' &&
+            selected.createdBy !== workspace.person.id ? (
+              <ReviewActions
                 slug={workspace.space.slug}
-                table="receipts"
-                id={selected.id}
-                label={`${selected.vendor} · ${formatCurrency(selected.total)}`}
+                size="md"
+                subject={{
+                  kind: 'receipt',
+                  id: selected.id,
+                  title: selected.vendor,
+                  amount: formatCurrency(selected.total),
+                }}
+                from={people.get(selected.createdBy)}
               />
             ) : undefined
           }
@@ -331,11 +341,11 @@ export default async function ReceiptsPage({
             tz={tz}
             business={business}
             people={people}
-            vehicle={vehicleName(selected.vehicleId)}
-            project={projectName(selected.projectId)}
-            reviewedAt={
-              history.find((event) => event.verb === 'approved' || event.verb === 'rejected')?.at
-            }
+            slug={workspace.space.slug}
+            viewerId={workspace.person.id}
+            relations={relationsOf(selected, { people, projects, vehicles })}
+            canOpenPeople={can('people.view') && workspace.space.modules.includes('people')}
+            history={history}
           />
         </UrlSheet>
       )}
@@ -345,24 +355,27 @@ export default async function ReceiptsPage({
 
 function ReceiptDetail({
   receipt,
-  base,
   tz,
   business,
   people,
-  vehicle,
-  project,
-  reviewedAt,
+  base,
+  slug,
+  viewerId,
+  relations,
+  canOpenPeople,
+  history,
 }: {
   receipt: Receipt;
   base: string;
   tz: string;
   business: boolean;
   people: Map<string, Person>;
-  vehicle?: string;
-  project?: string;
-  reviewedAt?: string;
+  slug: string;
+  viewerId: string;
+  relations: ReturnType<typeof relationsOf>;
+  canOpenPeople: boolean;
+  history: ActivityEvent[];
 }) {
-  const by = people.get(receipt.createdBy);
   const reviewer = receipt.reviewedBy ? people.get(receipt.reviewedBy) : undefined;
   const rows: [string, ReactNode][] = [
     ['Paid with', receipt.paymentMethod ?? '—'],
@@ -378,69 +391,21 @@ function ReceiptDetail({
     ...(receipt.odometer
       ? ([['Odometer', `${formatNumber(receipt.odometer)} mi`]] as [string, ReactNode][])
       : []),
-    ...(business
-      ? ([
-          [
-            'Vehicle',
-            vehicle && receipt.vehicleId ? (
-              <Link href={`${base}/vehicles/${receipt.vehicleId}`} className="hover:underline">
-                {vehicle}
-              </Link>
-            ) : (
-              <span className="text-muted">None</span>
-            ),
-          ],
-          [
-            'Project',
-            project && receipt.projectId ? (
-              <Link href={`${base}/projects/${receipt.projectId}`} className="hover:underline">
-                {project}
-              </Link>
-            ) : (
-              <span className="text-muted">None</span>
-            ),
-          ],
-        ] as [string, ReactNode][])
-      : []),
   ];
-  const steps: { label: string; detail: string; done: boolean; tone?: 'critical' }[] = business
-    ? [
-        {
-          label:
-            receipt.status === 'draft'
-              ? 'Saved as a draft'
-              : `Submitted by ${by?.firstName ?? 'someone'}`,
-          detail: formatRelative(receipt.createdAt, tz),
-          done: true,
-        },
-        receipt.status === 'approved'
-          ? {
-              label: `Approved${reviewer ? ` by ${reviewer.firstName}` : ''}`,
-              detail: reviewedAt
-                ? formatRelative(reviewedAt, tz)
-                : 'Counted on its project and vehicle',
-              done: true,
-            }
-          : receipt.status === 'rejected'
-            ? {
-                label: `Returned${reviewer ? ` by ${reviewer.firstName}` : ''}`,
-                detail: receipt.notes ?? (reviewedAt ? formatRelative(reviewedAt, tz) : ''),
-                done: true,
-                tone: 'critical',
-              }
-            : {
-                label: receipt.status === 'draft' ? 'Not sent yet' : 'Waiting for a manager',
-                detail:
-                  receipt.status === 'draft'
-                    ? 'Add the total, then submit'
-                    : 'Usually within a day',
-                done: false,
-              },
-      ]
-    : [];
+  const mine = receipt.createdBy === viewerId;
 
   return (
     <div className="grid gap-5 pt-1">
+      {mine && (receipt.status === 'returned' || receipt.status === 'draft') && (
+        <ReturnedNotice
+          slug={slug}
+          inboxId={receipt.status === 'returned' ? `rt_${receipt.id}` : undefined}
+          reason={receipt.status === 'returned' ? receipt.returnReason || undefined : undefined}
+          reviewer={receipt.status === 'returned' ? reviewer : undefined}
+          edit={{ kind: 'receipt', record: receipt }}
+          draft={receipt.status === 'draft'}
+        />
+      )}
       <div className="flex items-center gap-5 rounded-[18px] bg-tool-receipt/30 p-4 shadow-[inset_0_0_0_1px_rgb(0_0_0/.04)] sm:p-5">
         <ReceiptPaper receipt={receipt} timezone={tz} className="-rotate-2" />
         <div className="min-w-0">
@@ -451,13 +416,17 @@ function ReceiptDetail({
           <div className="mt-3">
             <ApprovalBadge status={receipt.status} kind={business ? 'business' : 'personal'} />
           </div>
-          {by && business && (
-            <p className="mt-3 flex items-center gap-1.5 text-[12.5px] text-ink/60">
-              <Avatar person={by} size="xs" /> {by.name}
-            </p>
-          )}
         </div>
       </div>
+
+      {relations.length > 0 && (
+        <Relations
+          items={relations}
+          base={base}
+          canOpen={{ person: canOpenPeople && business }}
+          label="Belongs to"
+        />
+      )}
 
       <dl className="row-divide rounded-[14px] bg-subtle px-3.5 shadow-[inset_0_0_0_1px_var(--color-line)]">
         {rows.map(([label, value]) => (
@@ -468,50 +437,14 @@ function ReceiptDetail({
         ))}
       </dl>
 
-      {receipt.notes && receipt.status !== 'rejected' && (
+      {receipt.notes && (
         <p className="rounded-[14px] bg-subtle px-3.5 py-3 text-[13.5px] text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line)]">
           “{receipt.notes}”
         </p>
       )}
 
-      {steps.length > 0 && (
-        <section aria-label="Status">
-          <p className="label mb-2.5">Status</p>
-          <ol className="grid gap-0">
-            {steps.map((step, index) => (
-              <li key={step.label} className="relative flex gap-3 pb-4 last:pb-0">
-                {index < steps.length - 1 && (
-                  <span
-                    className="absolute top-6 bottom-0 left-[11px] w-px bg-line-strong"
-                    aria-hidden="true"
-                  />
-                )}
-                <span
-                  className={cn(
-                    'relative grid size-6 shrink-0 place-items-center rounded-full',
-                    step.done
-                      ? step.tone === 'critical'
-                        ? 'bg-critical text-white'
-                        : 'bg-ink text-white'
-                      : 'bg-surface text-muted shadow-[inset_0_0_0_1.5px_var(--color-line-strong)]',
-                  )}
-                >
-                  <Icon
-                    name={step.done ? (step.tone === 'critical' ? 'arrow-left' : 'check') : 'clock'}
-                    size={12}
-                    strokeWidth={2.4}
-                  />
-                </span>
-                <span className="min-w-0 pt-0.5">
-                  <span className="block text-[14px] font-medium text-ink">{step.label}</span>
-                  {step.detail && (
-                    <span className="block text-[12.5px] text-muted">{step.detail}</span>
-                  )}
-                </span>
-              </li>
-            ))}
-          </ol>
-        </section>
+      {business && (
+        <SubmissionTimeline record={receipt} events={history} people={people} timezone={tz} />
       )}
 
       <p className="text-[12px] text-faint">

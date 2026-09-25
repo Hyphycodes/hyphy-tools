@@ -1,12 +1,13 @@
 'use client';
 import Link from 'next/link';
 import { useId, useState, useTransition } from 'react';
-import { saveLinkPage } from '@/app/(app)/[space]/actions';
-import { Button, buttonClass } from '@/components/ui/button';
+import { createLinkPageQr, saveLinkPage } from '@/app/(app)/[space]/actions';
+import { QrMini } from '@/components/records/qr-mini';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/components/ui/cn';
 import { Icon } from '@/components/ui/icon';
 import { useToast } from '@/components/ui/toast';
-import type { LinkItem, LinkPage } from '@/lib/platform/types';
+import type { LinkItem, LinkPage, QrCode } from '@/lib/platform/types';
 
 const THEMES: Record<
   LinkPage['theme'],
@@ -54,10 +55,35 @@ const inline =
  * Link Pages: one link for everything. You edit the page itself — tap the name, the bio or a
  * link on the phone and type. Page-wide choices (finish, address) sit beside it.
  */
-export function LinkEditor({ slug, page, base }: { slug: string; page?: LinkPage; base: string }) {
+export function LinkEditor({
+  slug,
+  page,
+  base,
+  code,
+  brand,
+}: {
+  slug: string;
+  page?: LinkPage;
+  base: string;
+  /** The saved QR code that opens this page, if one was made. */
+  code?: QrCode;
+  /** The Space's color, which a new code for the page wears. */
+  brand: string;
+}) {
   const id = useId();
   const toast = useToast();
   const [saving, start] = useTransition();
+  const [making, startMaking] = useTransition();
+  const makeCode = () =>
+    page &&
+    startMaking(async () => {
+      const result = await createLinkPageQr(slug, page.id);
+      toast(
+        result.ok
+          ? { title: `QR code for @${page.handle}`, description: result.message, icon: 'qr' }
+          : { title: result.error, icon: 'alert' },
+      );
+    });
   const [title, setTitle] = useState(page?.title ?? '');
   const [handle, setHandle] = useState(page?.handle ?? '');
   const [bio, setBio] = useState(page?.bio ?? '');
@@ -372,19 +398,68 @@ export function LinkEditor({ slug, page, base }: { slug: string; page?: LinkPage
                 {slug === 'personal' ? 'Personal' : 'this Space'}
               </p>
             )}
-            {cleanHandle && (
-              <Link
-                href={`${base}/tools/qr?content=${encodeURIComponent(`https://hyphy.example/@${cleanHandle}`)}`}
-                className={buttonClass()}
-              >
-                <Icon name="qr" size={16} /> Make a QR code for it
-              </Link>
-            )}
           </div>
           {dirty && (
             <p className="mt-2.5 flex items-center justify-center gap-1.5 text-[12px] text-muted">
               <span className="size-1.5 rounded-full bg-caution" aria-hidden="true" /> Unsaved
               changes
+            </p>
+          )}
+        </section>
+
+        {/* The page, its code and the Space belong together: one tap makes the printed way in. */}
+        <section
+          className="rounded-[20px] bg-surface p-4 shadow-card"
+          aria-label="QR code for this page"
+        >
+          <h2 className="label mb-3">QR code</h2>
+          {code ? (
+            <div className="flex items-center gap-3.5">
+              <span className="block w-[88px] shrink-0 rounded-[12px] bg-white p-1.5 shadow-card">
+                <QrMini content={code.content} fg={code.fg} bg={code.bg} />
+              </span>
+              <div className="min-w-0">
+                <p className="truncate text-[14px] font-medium text-ink">{code.label}</p>
+                <p className="mt-0.5 text-[12.5px] leading-snug text-muted">
+                  Opens @{page?.handle}. Saved in {slug === 'personal' ? 'Personal' : 'this Space'}{' '}
+                  with your other codes.
+                </p>
+                <Link
+                  href={`${base}/tools/qr?code=${code.id}`}
+                  className="mt-2 inline-flex items-center gap-1 text-[13px] font-medium text-signal-ink hover:underline"
+                >
+                  Download or restyle <Icon name="arrow-right" size={13} />
+                </Link>
+              </div>
+            </div>
+          ) : page ? (
+            <>
+              <p className="text-[13px] leading-snug text-muted">
+                For a table tent, a flyer or the shop window: a code that opens @{page.handle}, in
+                your Space’s color.
+              </p>
+              <div className="mt-3 grid gap-2">
+                <Button onClick={makeCode} disabled={making}>
+                  <span
+                    className="size-3.5 rounded-[3px] shadow-[inset_0_0_0_1px_rgb(0_0_0/.15)]"
+                    style={{ background: brand }}
+                    aria-hidden="true"
+                  />
+                  {making ? 'Making it…' : 'Create QR for this page'}
+                </Button>
+                {cleanHandle && (
+                  <Link
+                    href={`${base}/tools/qr?content=${encodeURIComponent(`https://hyphy.example/@${cleanHandle}`)}&label=${encodeURIComponent(`@${cleanHandle} link page`)}`}
+                    className="text-center text-[12.5px] text-muted hover:text-ink"
+                  >
+                    Or design it yourself in QR Codes
+                  </Link>
+                )}
+              </div>
+            </>
+          ) : (
+            <p className="text-[13px] text-muted">
+              Save the page first, then make its QR code here.
             </p>
           )}
         </section>

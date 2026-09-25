@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import { CreateButton } from '@/components/create/create-button';
 import { ActivityList } from '@/components/records/activity-list';
 import { InboxList } from '@/components/records/inbox-list';
+import { PinButton } from '@/components/records/pin-button';
+import { ApproveAll, ReturnedNotice } from '@/components/records/review';
 import { QrMini } from '@/components/records/qr-mini';
 import {
   FileRow,
@@ -16,12 +18,26 @@ import { Avatar, AvatarStack } from '@/components/ui/avatar';
 import { buttonClass } from '@/components/ui/button';
 import { cn } from '@/components/ui/cn';
 import { EmptyState } from '@/components/ui/empty';
-import { Icon } from '@/components/ui/icon';
+import { Icon, type IconName } from '@/components/ui/icon';
 import { ToolGlyph } from '@/components/ui/marks';
 import { Panel, PanelHeader } from '@/components/ui/panel';
 import type { Member } from '@/lib/data';
 import type { Workspace } from '@/lib/identity/types';
-import { categoryLabel, currentProjectFor, monthSummary } from '@/lib/insights';
+import {
+  categoryLabel,
+  currentProjectFor,
+  monthSummary,
+  projectMoney,
+  type Exception,
+  type WeekSummary,
+} from '@/lib/insights';
+import {
+  describeCount,
+  groupBySubmitter,
+  mileageSubmission,
+  receiptSubmission,
+  tripTitle,
+} from '@/lib/platform/approvals';
 import type { CreateActionId } from '@/lib/platform/actions';
 import type { WidgetId } from '@/lib/platform/dashboard';
 import {
@@ -36,6 +52,7 @@ import {
 } from '@/lib/platform/format';
 import { roles } from '@/lib/platform/roles';
 import { availability, getTool, tools, type ToolDefinition } from '@/lib/platform/tools';
+import { keyDate, workProfile } from '@/lib/platform/work';
 import type {
   ActivityEvent,
   FileRecord,
@@ -43,6 +60,7 @@ import type {
   LinkPage,
   MileageEntry,
   Person,
+  Pin,
   Project,
   QrCode,
   Receipt,
@@ -66,12 +84,27 @@ export type DashboardData = {
   linkPages: LinkPage[];
   month: ReturnType<typeof monthSummary>;
   projectSpend: Map<string, number>;
+  pins: Pin[];
+  /** Per tool: when this person last made something with it, and how often lately. */
+  usage: Map<string, { last: string; recent: number }>;
+  exceptions: Exception[];
+  week: WeekSummary;
 };
 
 export function Widget({ id, data }: { id: WidgetId; data: DashboardData }) {
   switch (id) {
     case 'pulse':
       return <Pulse data={data} />;
+    case 'pinned-projects':
+      return <PinnedProjects data={data} />;
+    case 'approvals':
+      return <Approvals data={data} />;
+    case 'exceptions':
+      return <Exceptions data={data} />;
+    case 'week':
+      return <Week data={data} />;
+    case 'to-fix':
+      return <ToFix data={data} />;
     case 'attention':
       return <Attention data={data} />;
     case 'projects':
@@ -139,8 +172,8 @@ function Pulse({ data }: { data: DashboardData }) {
   const nextDue = [...active]
     .filter((project) => project.dueDate || project.startDate)
     .sort((a, b) => (a.dueDate ?? a.startDate).localeCompare(b.dueDate ?? b.startDate))[0];
-  const word = workspace.space.labels?.projects?.plural ?? 'Projects';
-  const events = Boolean(workspace.space.labels?.projects);
+  const word = workProfile(workspace.space).plural;
+  const events = workProfile(workspace.space).style === 'events';
   const today = activeToday(data);
   const others = members.filter(
     (member) => member.status === 'active' && member.personId !== workspace.person.id,
@@ -259,12 +292,16 @@ function Pulse({ data }: { data: DashboardData }) {
 }
 
 function Attention({ data }: { data: DashboardData }) {
-  const { workspace, inbox, base } = data;
+  const { workspace, base } = data;
   const personal = workspace.space.kind === 'personal';
+  const approvals = workspace.permissions.includes('expenses.approve') && !personal;
+  // Approvals have their own queue above; this is everything else that needs a look.
+  const inbox = approvals ? data.inbox.filter((item) => item.kind !== 'approval') : data.inbox;
+  if (approvals && !inbox.length) return null;
   return (
     <Panel aria-label="Needs attention">
       <PanelHeader
-        title="Needs attention"
+        title={approvals ? 'Also needs you' : 'Needs attention'}
         count={inbox.length}
         href={`${base}/inbox`}
         action={personal ? 'Inbox' : 'Open Inbox'}
@@ -279,6 +316,7 @@ function Attention({ data }: { data: DashboardData }) {
           canApprove={workspace.permissions.includes('expenses.approve')}
           timezone={workspace.space.timezone}
           stacked={personal}
+          records={{ receipts: data.receipts, mileage: data.mileage }}
         />
       ) : (
         <EmptyState compact icon="check-circle" title="All clear">
@@ -299,14 +337,17 @@ function Attention({ data }: { data: DashboardData }) {
 
 function Projects({ data }: { data: DashboardData }) {
   const { workspace, projects, base } = data;
-  const label = workspace.space.labels?.projects?.plural ?? 'Projects';
-  const events = Boolean(workspace.space.labels?.projects);
+  const label = workProfile(workspace.space).plural;
+  const events = workProfile(workspace.space).style === 'events';
   const open = projects
     .filter((project) => project.status !== 'done')
-    .sort((a, b) =>
-      events
-        ? a.startDate.localeCompare(b.startDate)
-        : Number(b.status === 'active') - Number(a.status === 'active') || b.progress - a.progress,
+    .sort(
+      (a, b) =>
+        Number(pinnedIds(data).has(b.id)) - Number(pinnedIds(data).has(a.id)) ||
+        (events
+          ? a.startDate.localeCompare(b.startDate)
+          : Number(b.status === 'active') - Number(a.status === 'active') ||
+            (b.progress ?? 0) - (a.progress ?? 0)),
     );
   return (
     <Panel>
@@ -329,6 +370,7 @@ function Projects({ data }: { data: DashboardData }) {
                   ? data.projectSpend.get(project.id)
                   : undefined
               }
+              pinned={pinnedIds(data).has(project.id)}
             />
           ))}
         </div>
@@ -417,7 +459,7 @@ function Team({ data }: { data: DashboardData }) {
                     {member.status === 'invited'
                       ? 'Invited · hasn’t joined yet'
                       : last
-                        ? `${last.verb === 'uploaded' ? 'Added' : last.verb === 'rejected' ? 'Returned' : last.verb[0].toUpperCase() + last.verb.slice(1)} ${last.object.label} · ${formatRelative(last.at, workspace.space.timezone)}`
+                        ? `${last.verb === 'uploaded' ? 'Added' : last.verb === 'returned' ? 'Returned' : last.verb[0].toUpperCase() + last.verb.slice(1)} ${last.object.label} · ${formatRelative(last.at, workspace.space.timezone)}`
                         : member.title}
                   </span>
                 </span>
@@ -432,7 +474,7 @@ function Team({ data }: { data: DashboardData }) {
 
 /** Where this month's money went, by kind and by job. */
 function Money({ data }: { data: DashboardData }) {
-  const { month, workspace, base, projects, projectSpend } = data;
+  const { month, workspace, base, projects } = data;
   const max = Math.max(...month.categories.map((item) => item.total), 1);
   const top = month.projects
     .slice(0, 3)
@@ -441,8 +483,7 @@ function Money({ data }: { data: DashboardData }) {
       total,
     }))
     .filter((item) => item.project);
-  const word = workspace.space.labels?.projects?.plural.toLowerCase() ?? 'projects';
-  const budgeted = top.some(({ project }) => project!.budget);
+  const word = workProfile(workspace.space).plural.toLowerCase();
   return (
     <Panel>
       <PanelHeader title="Where the money went" href={`${base}/tools/receipts`} action="Receipts" />
@@ -479,17 +520,7 @@ function Money({ data }: { data: DashboardData }) {
         )}
         {top.length > 0 && (
           <div className="mt-4 border-t border-line pt-3">
-            <p className="mb-1.5 flex items-baseline justify-between gap-2 text-[12px] text-muted">
-              <span>Top {word} this month</span>
-              {budgeted && (
-                <span
-                  className="text-[11px] text-faint"
-                  title="Everything spent so far, against its budget"
-                >
-                  Budget used
-                </span>
-              )}
-            </p>
+            <p className="mb-1.5 text-[12px] text-muted">Top {word} this month</p>
             <ul className="grid gap-0.5">
               {top.map(({ project, total }) => (
                 <li key={project!.id}>
@@ -504,14 +535,6 @@ function Money({ data }: { data: DashboardData }) {
                     />
                     <span className="min-w-0 flex-1 truncate text-ink-2">{project!.name}</span>
                     <span className="num text-ink">{formatCurrency(total, { cents: false })}</span>
-                    {project!.budget ? (
-                      <span className="mono-num w-10 shrink-0 text-right text-[11px] text-faint">
-                        {Math.round(((projectSpend.get(project!.id) ?? 0) / project!.budget) * 100)}
-                        %
-                      </span>
-                    ) : budgeted ? (
-                      <span className="w-10 shrink-0" aria-hidden="true" />
-                    ) : null}
                   </Link>
                 </li>
               ))}
@@ -691,13 +714,33 @@ function Launcher({ data }: { data: DashboardData }) {
         return null;
     }
   };
-  const tiles = ready.map(tile).filter(Boolean) as LauncherTile[];
-  if (!tiles.length) return null;
+  const all = ready.map(tile).filter(Boolean) as LauncherTile[];
+  if (!all.length) return null;
+  // Pinned tools get the big tiles, in the order they were pinned; the rest follow by how
+  // recently this person made something with them. Home gets more "theirs" the more it's used.
+  const order = data.pins.filter((pin) => pin.type === 'tool').map((pin) => pin.id);
+  const pinned = order
+    .map((id) => all.find((item) => item.tool.id === id))
+    .filter((item): item is LauncherTile => Boolean(item));
+  const lastUsed = (id: string) => data.usage.get(id)?.last ?? '';
+  const rest = all
+    .filter((item) => !order.includes(item.tool.id))
+    .sort((a, b) => lastUsed(b.tool.id).localeCompare(lastUsed(a.tool.id)));
+  const big = pinned.length ? pinned : all;
+  const slug = workspace.space.slug;
 
   return (
     <section aria-label="Your tools">
       <div className="mb-3 flex items-baseline justify-between">
-        <h2 className="label">Your tools</h2>
+        <h2 className="label flex items-center gap-1.5">
+          {pinned.length ? (
+            <>
+              <Icon name="pin" size={12} /> Pinned tools
+            </>
+          ) : (
+            'Your tools'
+          )}
+        </h2>
         <Link
           href={`${base}/tools`}
           className="text-[13px] text-muted transition-colors hover:text-ink"
@@ -706,7 +749,7 @@ function Launcher({ data }: { data: DashboardData }) {
         </Link>
       </div>
       <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-3 lg:gap-3">
-        {tiles.map((item, index) => (
+        {big.map((item, index) => (
           <div
             key={item.tool.id}
             className="group relative flex min-h-[148px] animate-rise flex-col overflow-hidden rounded-[20px] p-3.5 transition-[transform,box-shadow] duration-200 hover:-translate-y-0.5 hover:shadow-lift sm:p-4 lg:min-h-[176px]"
@@ -725,12 +768,14 @@ function Launcher({ data }: { data: DashboardData }) {
               <span className="min-w-0 flex-1 truncate text-[14.5px] font-semibold text-ink">
                 {item.tool.name}
               </span>
-              <Icon
-                name="arrow-up-right"
-                size={16}
-                className="hidden text-ink/30 transition-colors group-hover:text-ink sm:block"
-              />
             </div>
+            <PinButton
+              slug={slug}
+              target={{ type: 'tool', id: item.tool.id }}
+              pinned={order.includes(item.tool.id)}
+              label={item.tool.name}
+              className="absolute top-2.5 right-2.5 z-10 sm:top-3 sm:right-3"
+            />
             <div className="pointer-events-none relative mt-4 flex flex-1 items-start gap-3">
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[22px] leading-none font-semibold tracking-[-0.025em] text-ink sm:text-[26px]">
@@ -759,6 +804,44 @@ function Launcher({ data }: { data: DashboardData }) {
           </div>
         ))}
       </div>
+      {pinned.length > 0 && rest.length > 0 && (
+        <>
+          <h2 className="label mt-5 mb-2.5">Recently used</h2>
+          <ul className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+            {rest.map((item) => {
+              const used = data.usage.get(item.tool.id);
+              return (
+                <li
+                  key={item.tool.id}
+                  className="relative flex items-center gap-2.5 rounded-[16px] bg-surface py-2.5 pr-1.5 pl-2.5 shadow-card transition-shadow hover:shadow-lift"
+                >
+                  <Link
+                    href={`${base}${item.tool.path}`}
+                    className="absolute inset-0 z-0 rounded-[16px]"
+                    aria-label={`Open ${item.tool.name}`}
+                  />
+                  <ToolGlyph tool={item.tool} size="md" />
+                  <span className="pointer-events-none relative min-w-0 flex-1">
+                    <span className="block truncate text-[13.5px] font-medium text-ink">
+                      {item.tool.name}
+                    </span>
+                    <span className="block truncate text-[12px] text-muted">
+                      {used ? `Used ${formatRelativeInline(used.last, tz)}` : 'Not used yet'}
+                    </span>
+                  </span>
+                  <PinButton
+                    slug={slug}
+                    target={{ type: 'tool', id: item.tool.id }}
+                    pinned={false}
+                    label={item.tool.name}
+                    className="relative z-10"
+                  />
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
     </section>
   );
 }
@@ -893,8 +976,8 @@ function MyDay({ data }: { data: DashboardData }) {
     return (
       <Panel>
         <EmptyState icon="projects" title="No project assigned yet">
-          When a manager adds you to a{' '}
-          {workspace.space.labels?.projects?.singular.toLowerCase() ?? 'project'}, it shows up here.
+          When a manager adds you to a {workProfile(workspace.space).singular.toLowerCase()}, it
+          shows up here.
         </EmptyState>
       </Panel>
     );
@@ -1074,12 +1157,20 @@ function MySubmissions({ data }: { data: DashboardData }) {
   const tz = workspace.space.timezone;
   const all = [...data.receipts, ...data.mileage];
   const pending = all.filter((item) => item.status === 'submitted').length;
-  const returned = all.filter((item) => item.status === 'rejected').length;
+  const returned = all.filter((item) => item.status === 'returned').length;
+  const where = (projectId?: string, vehicleId?: string, trip = false) =>
+    [
+      data.vehicles.find((vehicle) => vehicle.id === vehicleId)?.name ??
+        (trip ? 'Personal vehicle' : undefined),
+      data.projects.find((project) => project.id === projectId)?.name,
+    ]
+      .filter(Boolean)
+      .join(' · ') || undefined;
   // Returned items first — they're the only ones that need Mike again.
   const items = [
     ...data.receipts.map((receipt) => ({
       at: receipt.createdAt,
-      returned: receipt.status === 'rejected',
+      returned: receipt.status === 'returned',
       node: (
         <ReceiptRow
           key={receipt.id}
@@ -1088,13 +1179,14 @@ function MySubmissions({ data }: { data: DashboardData }) {
           timezone={tz}
           kind="business"
           showPerson={false}
+          context={where(receipt.projectId, receipt.vehicleId)}
           href={`${base}/tools/receipts?receipt=${receipt.id}`}
         />
       ),
     })),
     ...data.mileage.map((entry) => ({
       at: entry.createdAt,
-      returned: entry.status === 'rejected',
+      returned: entry.status === 'returned',
       node: (
         <MileageRow
           key={entry.id}
@@ -1103,6 +1195,8 @@ function MySubmissions({ data }: { data: DashboardData }) {
           timezone={tz}
           kind="business"
           showPerson={false}
+          context={where(entry.projectId, entry.vehicleId, true)}
+          href={`${base}/tools/mileage?trip=${entry.id}`}
         />
       ),
     })),
@@ -1139,17 +1233,14 @@ function MySubmissions({ data }: { data: DashboardData }) {
 
 function Notices({ data }: { data: DashboardData }) {
   const { workspace, base } = data;
+  // Returned items have their own card above, with the fix.
+  const inbox = data.inbox.filter((item) => item.kind !== 'returned');
   return (
     <Panel>
-      <PanelHeader
-        title="For you"
-        count={data.inbox.length}
-        href={`${base}/inbox`}
-        action="Inbox"
-      />
-      {data.inbox.length ? (
+      <PanelHeader title="For you" count={inbox.length} href={`${base}/inbox`} action="Inbox" />
+      {inbox.length ? (
         <InboxList
-          items={data.inbox}
+          items={inbox}
           limit={3}
           people={data.directory}
           base={base}
@@ -1172,7 +1263,7 @@ function Notices({ data }: { data: DashboardData }) {
 function SharedProjects({ data }: { data: DashboardData }) {
   const { projects, base, workspace, files } = data;
   const tz = workspace.space.timezone;
-  const label = workspace.space.labels?.projects?.plural ?? 'Projects';
+  const label = workProfile(workspace.space).plural;
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       {projects.map((project) => {
@@ -1263,8 +1354,7 @@ function SharedProjects({ data }: { data: DashboardData }) {
         <Panel className="sm:col-span-2">
           <EmptyState icon="projects" title={`No ${label.toLowerCase()} shared yet`}>
             When {workspace.space.name} shares a{' '}
-            {workspace.space.labels?.projects?.singular.toLowerCase() ?? 'project'} with you, it
-            shows up here.
+            {workProfile(workspace.space).singular.toLowerCase()} with you, it shows up here.
           </EmptyState>
         </Panel>
       )}
@@ -1275,7 +1365,7 @@ function SharedProjects({ data }: { data: DashboardData }) {
 /** A guest's plain answer to “who can access this?”: what's shared, what isn't, who to call. */
 function GuestAccess({ data }: { data: DashboardData }) {
   const { projects, workspace } = data;
-  const word = workspace.space.labels?.projects?.plural.toLowerCase() ?? 'projects';
+  const word = workProfile(workspace.space).plural.toLowerCase();
   const leads = [...new Set(projects.map((project) => project.leadId))]
     .map((id) => data.people.get(id))
     .filter(Boolean) as Person[];
@@ -1353,6 +1443,333 @@ function SharedFiles({ data }: { data: DashboardData }) {
               }))
               .filter((ref) => ref.label)}
           />
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+/* ---------- connected: pins, decisions, exceptions, the week ---------- */
+
+function pinnedIds(data: DashboardData, type: 'project' | 'tool' = 'project') {
+  return new Set(data.pins.filter((pin) => pin.type === type).map((pin) => pin.id));
+}
+
+/** The few projects this person keeps an eye on, with what matters on each today. */
+function PinnedProjects({ data }: { data: DashboardData }) {
+  const { workspace, base, projects, receipts, mileage } = data;
+  const tz = workspace.space.timezone;
+  const profile = workProfile(workspace.space);
+  const money = workspace.permissions.includes('expenses.view_all');
+  const pinned = data.pins
+    .filter((pin) => pin.type === 'project')
+    .map((pin) => projects.find((project) => project.id === pin.id))
+    .filter((project): project is Project => Boolean(project));
+  if (!pinned.length) return null;
+  return (
+    <section aria-label="Pinned projects">
+      <h2 className="label mb-2.5 flex items-center gap-1.5">
+        <Icon name="pin" size={12} /> Pinned
+      </h2>
+      <div className="scrollbar-none -mx-4 flex gap-3 overflow-x-auto px-4 pb-1 sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 xl:grid-cols-3">
+        {pinned.map((project) => {
+          const on = (row: { projectId?: string }) => row.projectId === project.id;
+          const figures = projectMoney(
+            project,
+            receipts.filter(on),
+            mileage.filter(on),
+            workspace.space.mileageRate,
+          );
+          const waiting = [...receipts, ...mileage].filter(
+            (row) => on(row) && row.status === 'submitted',
+          ).length;
+          const date = keyDate(project, profile);
+          const used = project.costAllowance ? figures.tracked / project.costAllowance : 0;
+          return (
+            <Link
+              key={project.id}
+              href={`${base}/projects/${project.id}`}
+              className="group relative flex w-[78vw] max-w-[320px] shrink-0 flex-col overflow-hidden rounded-[18px] bg-surface p-4 shadow-card transition-all hover:-translate-y-0.5 hover:shadow-lift sm:w-auto sm:max-w-none"
+            >
+              <span
+                className="absolute inset-x-0 top-0 h-1"
+                style={{ background: project.color }}
+                aria-hidden="true"
+              />
+              <span className="truncate text-[15.5px] font-semibold text-ink">{project.name}</span>
+              <span className="mt-0.5 truncate text-[12.5px] text-muted">
+                {[
+                  date
+                    ? profile.schedule === 'on'
+                      ? formatDate(date, tz)
+                      : `Due ${formatDate(date, tz)}`
+                    : undefined,
+                  project.location,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </span>
+              {money ? (
+                <span className="mt-3 flex items-baseline gap-1.5">
+                  <span className="num text-[20px] font-semibold tracking-[-0.02em] text-ink">
+                    {formatCurrency(figures.tracked, { cents: false })}
+                  </span>
+                  <span className="text-[12px] text-muted">
+                    tracked
+                    {project.costAllowance
+                      ? ` of ${formatCurrency(project.costAllowance, { cents: false })} allowance`
+                      : project.value
+                        ? ` · ${formatCurrency(project.value, { cents: false })} ${profile.value?.toLowerCase()}`
+                        : ''}
+                  </span>
+                </span>
+              ) : null}
+              {money && project.costAllowance ? (
+                <span className="mt-2 h-1.5 overflow-hidden rounded-full bg-well">
+                  <span
+                    className={cn('block h-full rounded-full', used > 1 ? 'bg-critical' : 'bg-ink')}
+                    style={{ width: `${Math.min(100, Math.max(2, used * 100))}%` }}
+                  />
+                </span>
+              ) : null}
+              <span className="mt-3 flex items-center gap-2 text-[12px] text-muted">
+                {waiting > 0 ? (
+                  <span className="flex items-center gap-1.5 font-medium text-signal-ink">
+                    <span className="size-1.5 rounded-full bg-signal" aria-hidden="true" />
+                    {waiting} waiting for approval
+                  </span>
+                ) : (
+                  <span>Nothing waiting</span>
+                )}
+              </span>
+            </Link>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * The approver's queue at a glance: one line per person, with the routine case — approve
+ * everything they sent — two taps away. Anything that needs a closer look opens in the Inbox.
+ */
+function Approvals({ data }: { data: DashboardData }) {
+  const { workspace, base, receipts, mileage, vehicles, people } = data;
+  const assigned = (personId: string) =>
+    vehicles.find((vehicle) => vehicle.assignedTo === personId)?.id;
+  const waiting = [
+    ...receipts
+      .filter((row) => row.status === 'submitted' && row.createdBy !== workspace.person.id)
+      .map((row) => receiptSubmission(row)),
+    ...mileage
+      .filter((row) => row.status === 'submitted' && row.createdBy !== workspace.person.id)
+      .map((row) => mileageSubmission(row, assigned(row.createdBy))),
+  ];
+  if (!waiting.length) return null;
+  const groups = groupBySubmitter(waiting);
+  return (
+    <Panel aria-label="Waiting on you">
+      <PanelHeader
+        title="Waiting on you"
+        count={waiting.length}
+        href={`${base}/inbox?view=approvals`}
+        action="Review in Inbox"
+      />
+      <ul className="row-divide pb-1">
+        {groups.map((group) => {
+          const person = people.get(group.personId);
+          const flagged = group.items.filter((item) =>
+            item.flags.some((flag) => flag !== 'resubmitted'),
+          ).length;
+          const amounts = [
+            group.dollars ? formatCurrency(group.dollars) : undefined,
+            group.miles ? formatMiles(Math.round(group.miles * 10) / 10) : undefined,
+          ]
+            .filter(Boolean)
+            .join(' · ');
+          return (
+            <li
+              key={group.personId}
+              className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3"
+              data-submission={group.personId}
+            >
+              {person && <Avatar person={person} size="md" />}
+              <Link
+                href={`${base}/inbox?from=${group.personId}`}
+                className="min-w-0 flex-1 basis-[50%] hover:[&>span:first-child]:underline"
+              >
+                <span className="block truncate text-[14px] font-medium text-ink">
+                  {person?.name ?? 'Someone'}
+                </span>
+                <span className="block truncate text-[12.5px] text-muted">
+                  {describeCount(group.items)} · {amounts}
+                  {flagged ? <span className="text-caution"> · {flagged} to look at</span> : null}
+                </span>
+              </Link>
+              <ApproveAll
+                slug={workspace.space.slug}
+                refs={group.items.map((item) => ({ kind: item.kind, id: item.id }))}
+                label={group.items.length === 1 ? 'Approve' : `Approve all ${group.items.length}`}
+                summary={`${describeCount(group.items)} · ${amounts}`}
+                className="max-sm:ml-[44px]"
+              />
+            </li>
+          );
+        })}
+      </ul>
+    </Panel>
+  );
+}
+
+const exceptionIcon: Record<Exception['rule'], IconName> = {
+  returned: 'arrow-left',
+  unassigned: 'projects',
+  'own-vehicle': 'car',
+  expiring: 'clock',
+  allowance: 'gauge',
+  'no-total': 'receipt',
+};
+
+/** "Worth a look": simple rules over the Space's records, so owners don't read every line. */
+function Exceptions({ data }: { data: DashboardData }) {
+  const { base } = data;
+  if (!data.exceptions.length) return null;
+  return (
+    <Panel aria-label="Worth a look">
+      <PanelHeader title="Worth a look" count={data.exceptions.length} />
+      <ul className="row-divide pb-1">
+        {data.exceptions.slice(0, 5).map((item) => (
+          <li key={item.id}>
+            <Link
+              href={`${base}${item.path}`}
+              className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-subtle"
+            >
+              <span
+                className={cn(
+                  'grid size-9 shrink-0 place-items-center rounded-[11px]',
+                  item.tone === 'critical'
+                    ? 'bg-critical-soft text-critical'
+                    : item.tone === 'caution'
+                      ? 'bg-caution-soft text-caution'
+                      : 'bg-well text-ink-2',
+                )}
+                aria-hidden="true"
+              >
+                <Icon name={exceptionIcon[item.rule]} size={16} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[14px] font-medium text-ink">
+                  {item.title}
+                </span>
+                <span className="block truncate text-[12.5px] text-muted">{item.detail}</span>
+              </span>
+              <Icon name="chevron-right" size={16} className="shrink-0 text-faint" />
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </Panel>
+  );
+}
+
+/** A preview of the Monday summary, written from this week's records. Nothing is sent yet. */
+function Week({ data }: { data: DashboardData }) {
+  const { week, workspace, base } = data;
+  const word = workProfile(workspace.space).plural.toLowerCase();
+  const lines: [string, string][] = [
+    [String(week.receipts), `receipt${week.receipts === 1 ? '' : 's'} submitted`],
+    ...(workspace.space.modules.includes('mileage')
+      ? ([[formatNumber(week.miles, week.miles % 1 ? 1 : 0), 'miles logged']] as [string, string][])
+      : []),
+    [formatCurrency(week.tracked, { cents: false }), 'tracked expenses'],
+    [String(week.activeProjects), `${word} active`],
+    [
+      String(week.waiting),
+      `${week.waiting === 1 ? 'item still needs' : 'items still need'} approval`,
+    ],
+  ];
+  return (
+    <Panel aria-label="This week" className="overflow-hidden">
+      <div className="bg-night px-4 pt-3.5 pb-4 text-white">
+        <p className="label !text-white/50">This week · {workspace.space.name}</p>
+        <ul className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2.5">
+          {lines.map(([value, label]) => (
+            <li key={label} className="min-w-0">
+              <span className="num block text-[20px] leading-none font-semibold tracking-[-0.02em]">
+                {value}
+              </span>
+              <span className="mt-0.5 block truncate text-[12px] text-white/60">{label}</span>
+            </li>
+          ))}
+        </ul>
+        {week.busiest && (
+          <p className="mt-3.5 border-t border-white/10 pt-3 text-[13px] text-white/80">
+            Busiest:{' '}
+            <Link
+              href={`${base}/projects/${week.busiest.project.id}`}
+              className="font-medium text-white hover:underline"
+            >
+              {week.busiest.project.name}
+            </Link>{' '}
+            <span className="text-white/50">· {plural(week.busiest.events, 'update')}</span>
+          </p>
+        )}
+      </div>
+      <p className="flex items-center gap-1.5 px-4 py-2.5 text-[12px] text-muted">
+        <Icon name="mail" size={13} /> Preview of a weekly summary. Nothing is emailed yet.
+      </p>
+    </Panel>
+  );
+}
+
+/** For the person something came back to: the note, and the fix, before anything else. */
+function ToFix({ data }: { data: DashboardData }) {
+  const { workspace, receipts, mileage, people } = data;
+  const me = workspace.person.id;
+  const back = [
+    ...receipts
+      .filter((row) => row.createdBy === me && row.status === 'returned' && !row.returnSeenAt)
+      .map((record) => ({ kind: 'receipt' as const, record, title: record.vendor })),
+    ...mileage
+      .filter((row) => row.createdBy === me && row.status === 'returned' && !row.returnSeenAt)
+      .map((record) => ({ kind: 'mileage' as const, record, title: tripTitle(record) })),
+  ].sort((a, b) => (b.record.reviewedAt ?? '').localeCompare(a.record.reviewedAt ?? ''));
+  if (!back.length) return null;
+  return (
+    <Panel aria-label="Sent back to you" className="p-4">
+      <p className="mb-3 flex items-baseline justify-between gap-2">
+        <span className="text-[15px] font-semibold text-ink">
+          {back.length === 1 ? 'One thing came back' : `${back.length} things came back`}
+        </span>
+        <span className="text-[12.5px] text-muted">Fix and send again</span>
+      </p>
+      <div className="grid gap-3">
+        {back.map((item) => (
+          <div key={item.record.id}>
+            <p className="mb-1.5 flex items-center gap-2 text-[13.5px] text-ink-2">
+              <Icon name={item.kind === 'receipt' ? 'receipt' : 'route'} size={14} />
+              <span className="truncate font-medium text-ink">{item.title}</span>
+              <span className="shrink-0 text-muted">
+                ·{' '}
+                {item.kind === 'receipt'
+                  ? formatCurrency(item.record.total)
+                  : formatMiles(item.record.miles)}
+              </span>
+            </p>
+            <ReturnedNotice
+              slug={workspace.space.slug}
+              inboxId={`rt_${item.record.id}`}
+              reason={item.record.returnReason || undefined}
+              reviewer={item.record.reviewedBy ? people.get(item.record.reviewedBy) : undefined}
+              edit={
+                item.kind === 'receipt'
+                  ? { kind: 'receipt', record: item.record }
+                  : { kind: 'mileage', record: item.record }
+              }
+              compact
+            />
+          </div>
         ))}
       </div>
     </Panel>

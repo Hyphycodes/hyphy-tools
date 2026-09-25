@@ -380,7 +380,11 @@ test('People shows what each person is on and what waits on the approver', async
   await expect(mike).toContainText('4 waiting on you');
   await mike.click();
   await expect(page.getByText(/4 waiting on you/)).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Approve' })).toHaveCount(4);
+  await expect(page.getByRole('button', { name: 'Approve', exact: true })).toHaveCount(4);
+  await expect(page.getByRole('link', { name: 'View pending submissions' })).toHaveAttribute(
+    'href',
+    `${BASE_PATH}/abc-construction/inbox?from=mike`,
+  );
 });
 
 test('every tool in the library has a way in', async ({ page, context, baseURL }) => {
@@ -391,6 +395,133 @@ test('every tool in the library has a way in', async ({ page, context, baseURL }
     'href',
     `${BASE_PATH}/abc-construction/tools/images`,
   );
+});
+
+async function reset(page: Page) {
+  await page
+    .getByRole('button', { name: /Reset demo/ })
+    .filter({ visible: true })
+    .click();
+  await page.waitForLoadState('networkidle');
+}
+
+test('returning with a reason reaches the person, who fixes and resubmits it', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  await previewAs(context, 'dana', baseURL!);
+  await visit(page, '/abc-construction/inbox?view=approvals');
+  const row = page.getByRole('listitem').filter({ hasText: 'Home Depot · $58.64' });
+  await row.getByRole('button', { name: 'Return' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Return this receipt' });
+  await sheet.getByLabel('What should change?').fill('Please attach this to Oak Brook Remodel.');
+  await sheet.getByRole('button', { name: 'Return to Mike' }).click();
+  await expect(page.getByRole('listitem').filter({ hasText: 'Home Depot · $58.64' })).toHaveCount(
+    0,
+  );
+
+  await previewAs(context, 'mike', baseURL!);
+  await visit(page, '/abc-construction/tools/receipts?view=returned');
+  await page
+    .getByRole('link', { name: /Home Depot/ })
+    .first()
+    .click();
+  const detail = page.getByRole('dialog', { name: 'Home Depot' });
+  await expect(
+    detail.getByText('“Please attach this to Oak Brook Remodel.”').first(),
+  ).toBeVisible();
+  await detail.getByRole('button', { name: 'Edit & resubmit' }).click();
+  const form = page.getByRole('dialog', { name: 'Fix and resubmit' });
+  await expect(form.getByText(/Dana returned it/)).toBeVisible();
+  await form.getByLabel('Project').selectOption({ label: 'Oak Brook Remodel' });
+  await form.getByRole('button', { name: 'Resubmit receipt' }).click();
+  await expect(page.getByText('Sent back for approval')).toBeVisible();
+
+  await previewAs(context, 'dana', baseURL!);
+  await visit(page, '/abc-construction/inbox?view=approvals');
+  const again = page.getByRole('listitem').filter({ hasText: 'Receipt resubmitted' });
+  await expect(again).toContainText('Oak Brook Remodel');
+  await expect(again).toContainText('Fixed after: “Please attach this to Oak Brook Remodel.”');
+  await reset(page);
+});
+
+test('a project gathers its money, trucks and records, each linked to the others', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  await previewAs(context, 'dana', baseURL!);
+  await visit(page, '/abc-construction/projects/prj_oakbrook');
+  const money = page.getByRole('region', { name: 'Money' });
+  await expect(money.getByText('Contract value')).toBeVisible();
+  await expect(money.getByText('$148,000')).toBeVisible();
+  await expect(money.getByText('Tracked costs', { exact: true })).toBeVisible();
+  await expect(money.getByText('Cost allowance')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Vehicles on this job' })).toContainText(
+    'Truck 24',
+  );
+
+  // An event has a day and no percent complete.
+  await previewAs(context, 'rosa', baseURL!);
+  await visit(page, '/salt-and-ember/projects/prj_se_keller');
+  await expect(page.getByText('How far along')).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Money' })).toContainText('Booking');
+});
+
+test('pins are remembered, and Reset puts the defaults back', async ({ page }) => {
+  await visit(page, '/personal');
+  const tools = page.getByRole('region', { name: 'Your tools' });
+  await expect(tools.getByRole('button', { name: 'Unpin PDF' })).toBeVisible();
+  await tools.getByRole('button', { name: 'Pin Image Resize' }).click();
+  await expect(tools.getByRole('button', { name: 'Unpin Image Resize' })).toBeVisible();
+  await visit(page, '/personal');
+  await expect(
+    page
+      .getByRole('region', { name: 'Your tools' })
+      .getByRole('button', { name: 'Unpin Image Resize' }),
+  ).toBeVisible();
+  await reset(page);
+  await visit(page, '/personal');
+  await expect(
+    page
+      .getByRole('region', { name: 'Your tools' })
+      .getByRole('button', { name: 'Pin Image Resize' }),
+  ).toBeVisible();
+});
+
+test('a link page makes its own QR code, saved with the page', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  await previewAs(context, 'rosa', baseURL!);
+  await visit(page, '/salt-and-ember/tools/links');
+  const panel = page.getByRole('region', { name: 'QR code for this page' });
+  await panel.getByRole('button', { name: 'Create QR for this page' }).click();
+  await expect(panel.getByText('@saltandember link page')).toBeVisible();
+  await visit(page, '/salt-and-ember/tools/qr');
+  await expect(page.getByText('@saltandember link page').first()).toBeVisible();
+  await reset(page);
+});
+
+test('a PDF made with the tool lands in Files, on its project, with its origin', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  await previewAs(context, 'dana', baseURL!);
+  await visit(page, '/abc-construction/tools/pdf');
+  await page.getByRole('button', { name: /Try three samples/ }).click();
+  await page.getByRole('button', { name: 'Merge 3 PDFs' }).click();
+  await page.getByLabel('Attach to').selectOption({ label: 'Oak Brook Remodel' });
+  await page.getByRole('button', { name: 'Save to Files' }).click();
+  await page.getByRole('link', { name: /Saved to Files · Open/ }).click();
+  await expect(page.getByText(/Made with the PDF tool/)).toBeVisible();
+  await expect(
+    page.getByRole('list', { name: 'Belongs to' }).getByRole('link', { name: 'Oak Brook Remodel' }),
+  ).toBeVisible();
+  await reset(page);
 });
 
 test.describe('phones', () => {
@@ -417,5 +548,51 @@ test.describe('phones', () => {
     await expect(sheet.getByRole('button', { name: /Submit receipt/ })).toBeVisible();
     const box = await sheet.getByRole('button', { name: /Submit receipt/ }).boundingBox();
     expect(box!.height).toBeGreaterThanOrEqual(44);
+  });
+
+  test('Mike fixes a returned trip; Dana batch approves and follows a receipt to its people and places', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await previewAs(context, 'mike', baseURL!);
+    await visit(page, '/abc-construction');
+    const back = page.getByRole('region', { name: 'Sent back to you' });
+    await expect(
+      back.getByText('“Please use Truck 24 instead of Personal Vehicle.”'),
+    ).toBeVisible();
+    await back.getByRole('button', { name: 'Edit & resubmit' }).click();
+    const form = page.getByRole('dialog', { name: 'Fix and resubmit' });
+    await form.getByLabel('Vehicle').selectOption({ label: 'Truck 24' });
+    await form.getByRole('button', { name: 'Resubmit trip' }).click();
+    await expect(page.getByText('11.6 mi resubmitted')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Sent back to you' })).toHaveCount(0);
+
+    await previewAs(context, 'dana', baseURL!);
+    await visit(page, '/abc-construction/inbox?view=approvals');
+    const mike = page.getByRole('region', { name: 'From Mike Rodriguez' });
+    await expect(mike.getByText('Mileage resubmitted')).toBeVisible();
+    await mike.getByRole('button', { name: 'Approve all 5' }).click();
+    await mike.getByRole('button', { name: 'Yes, approve 5' }).click();
+    await expect(page.getByRole('region', { name: 'From Mike Rodriguez' })).toHaveCount(0);
+    await noHorizontalScroll(page);
+
+    await visit(page, '/abc-construction/tools/receipts?receipt=rc_abc_01');
+    const receipt = page.getByRole('dialog', { name: 'Shell' });
+    await expect(receipt.getByText(/Approved by Dana/)).toBeVisible();
+    const links = receipt.getByRole('list', { name: 'Belongs to' });
+    await links.getByRole('link', { name: 'Mike Rodriguez' }).click();
+    await expect(page).toHaveURL(/\/people\/mike$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'Mike Rodriguez' })).toBeVisible();
+    await page
+      .getByRole('link', { name: /^Truck 24/ })
+      .first()
+      .click();
+    await expect(page).toHaveURL(/\/vehicles\/veh_t24$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'Truck 24' })).toBeVisible();
+    await page.getByRole('link', { name: /Oak Brook Remodel.*From its latest trips/ }).click();
+    await expect(page).toHaveURL(/\/projects\/prj_oakbrook$/);
+    await noHorizontalScroll(page);
+    await reset(page);
   });
 });

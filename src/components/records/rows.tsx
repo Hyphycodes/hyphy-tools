@@ -7,6 +7,7 @@ import { Progress } from '@/components/ui/progress';
 import {
   daysUntil,
   formatBytes,
+  formatCompactMoney,
   formatCurrency,
   formatDate,
   formatMiles,
@@ -82,7 +83,10 @@ const refIcon = {
   receipt: 'receipt',
 } as const;
 
-const sourceName: Partial<Record<string, string>> = { pdf: 'PDF', images: 'Image Resize' };
+export const sourceName: Partial<Record<string, string>> = {
+  pdf: 'PDF',
+  images: 'Image Resize',
+};
 
 /**
  * A file, and what it belongs to. `links` are the records it's attached to (already resolved to
@@ -119,21 +123,24 @@ export function FileRow({
       <FileThumb file={file} />
       <div className="min-w-0 flex-1">
         <p className="truncate text-[14px] font-medium text-ink">{file.name}</p>
+        {/* Why it exists, then where it belongs, then who and when. */}
         <p className="flex min-w-0 items-center gap-1 text-[12.5px] text-muted">
+          {made && (
+            <span className="flex shrink-0 items-center gap-1 text-ink-2">
+              <Icon name={file.source === 'pdf' ? 'pdf' : 'image'} size={12.5} />
+              {first ? made : `Made with ${made}`}
+            </span>
+          )}
           {first ? (
             <span className="flex min-w-0 items-center gap-1 text-ink-2">
+              {made && <span className="text-faint">·</span>}
               <Icon name={refIcon[first.type]} size={12.5} className="shrink-0 text-muted" />
               <span className="truncate">{first.label}</span>
               {links!.length > 1 && (
                 <span className="shrink-0 text-faint">+{links!.length - 1}</span>
               )}
             </span>
-          ) : made ? (
-            <span className="flex shrink-0 items-center gap-1 text-ink-2">
-              <Icon name={file.source === 'pdf' ? 'pdf' : 'image'} size={12.5} />
-              Made with {made}
-            </span>
-          ) : context ? (
+          ) : !made && context ? (
             <span className="max-w-[60%] shrink-0 truncate">{context}</span>
           ) : null}
           <span className="min-w-0 truncate text-muted">
@@ -166,12 +173,18 @@ export function ProjectRow({
   timezone,
   spent,
   compact,
+  valueWord,
+  pinned,
 }: {
   project: Project;
   base: string;
   people: Map<string, Person>;
   timezone: string;
+  /** Tracked costs, for people who see money. */
   spent?: number;
+  /** What the value is called here ("contract", "booking"); value shows only when passed money. */
+  valueWord?: string;
+  pinned?: boolean;
   /** For narrow side panels: name and progress stacked, no team column. */
   compact?: boolean;
 }) {
@@ -202,17 +215,23 @@ export function ProjectRow({
         />
         <div className="min-w-0 flex-1">
           <p className="truncate text-[14px] font-medium text-ink">{project.name}</p>
-          <div className="mt-1.5 flex items-center gap-2">
-            <Progress
-              value={project.progress}
-              color={project.color}
-              className="flex-1"
-              label={`${project.name} progress`}
-            />
-            <span className="mono-num w-8 text-right text-[11px] text-muted">
-              {project.progress}%
-            </span>
-          </div>
+          {project.progress !== undefined ? (
+            <div className="mt-1.5 flex items-center gap-2">
+              <Progress
+                value={project.progress}
+                color={project.color}
+                className="flex-1"
+                label={`${project.name} progress`}
+              />
+              <span className="mono-num w-8 text-right text-[11px] text-muted">
+                {project.progress}%
+              </span>
+            </div>
+          ) : (
+            <p className="truncate text-[12.5px] text-muted">
+              {[project.location, formatDate(due, timezone)].filter(Boolean).join(' · ')}
+            </p>
+          )}
         </div>
         <span className="shrink-0 text-[12px] text-muted">{when}</span>
       </Link>
@@ -230,25 +249,35 @@ export function ProjectRow({
       <div className="min-w-0">
         <p className="flex items-center gap-2 truncate text-[14.5px] font-medium text-ink">
           <span className="truncate">{project.name}</span>
+          {pinned && <Icon name="pin" size={13} className="shrink-0 text-faint" label="Pinned" />}
           {project.status !== 'active' && <ProjectStatusBadge status={project.status} />}
         </p>
         <p className="truncate text-[12.5px] text-muted">
           {[
             project.location,
-            spent ? `${formatCurrency(spent, { cents: false })} spent` : undefined,
+            project.value && valueWord
+              ? `${formatCompactMoney(project.value)} ${valueWord}`
+              : undefined,
+            spent ? `${formatCurrency(spent, { cents: false })} tracked` : undefined,
           ]
             .filter(Boolean)
             .join(' · ')}
         </p>
       </div>
       <div className="hidden items-center gap-2.5 sm:flex">
-        <Progress
-          value={project.progress}
-          color={project.color}
-          className="flex-1"
-          label={`${project.name} progress`}
-        />
-        <span className="w-8 text-right text-[12px] text-muted">{project.progress}%</span>
+        {project.progress !== undefined ? (
+          <>
+            <Progress
+              value={project.progress}
+              color={project.color}
+              className="flex-1"
+              label={`${project.name} progress`}
+            />
+            <span className="w-8 text-right text-[12px] text-muted">{project.progress}%</span>
+          </>
+        ) : (
+          <span className="text-[12.5px] text-muted">{formatDate(due, timezone)}</span>
+        )}
       </div>
       <div className="flex items-center gap-3">
         <span className="hidden md:block">
@@ -424,6 +453,8 @@ export function MileageRow({
   timezone,
   kind,
   showPerson = true,
+  context,
+  href,
   actions,
 }: {
   entry: MileageEntry;
@@ -431,6 +462,10 @@ export function MileageRow({
   timezone: string;
   kind: SpaceKind;
   showPerson?: boolean;
+  /** What it belongs to, in words: "Truck 24 · Oak Brook Remodel". */
+  context?: string;
+  /** Opens the trip's details. */
+  href?: string;
   actions?: ReactNode;
 }) {
   const by = people.get(entry.createdBy);
@@ -438,7 +473,7 @@ export function MileageRow({
     <WithActions
       actions={actions}
       row={
-        <RowShell>
+        <RowShell href={href}>
           <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-tool-miles/60 text-ink shadow-[inset_0_0_0_1px_rgb(0_0_0/.05)]">
             <Icon name="route" size={17} />
           </span>
@@ -449,7 +484,7 @@ export function MileageRow({
             <p className="truncate text-[12.5px] text-muted">
               {[
                 showPerson && kind === 'business' ? by?.firstName : undefined,
-                entry.purpose,
+                context ?? entry.purpose,
                 formatDate(entry.date, timezone),
               ]
                 .filter(Boolean)

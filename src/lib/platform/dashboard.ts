@@ -9,11 +9,16 @@ import type { Membership, Space } from './types';
  * Each perspective answers one question first:
  *   personal  “What can I do right now?”      — the tools, with what's in them
  *   member    “What do I need to do?”         — big actions, my project, my submissions
- *   operator  “What needs me, and how are we doing?” — a pulse, then attention and projects
+ *   operator  “What needs me, and how are we doing?” — a pulse, then decisions and exceptions
  *   guest     “What's been shared with me?”
  */
 export type WidgetId =
   | 'pulse'
+  | 'pinned-projects'
+  | 'approvals'
+  | 'exceptions'
+  | 'week'
+  | 'to-fix'
   | 'attention'
   | 'projects'
   | 'activity'
@@ -51,15 +56,31 @@ const rules: Rule[] = [
   { id: 'attention', area: 'side', when: personal },
   { id: 'recent-files', area: 'side', when: personal },
 
-  // People who run a business Space
+  // People who run a business Space: exceptions first, not every transaction
   { id: 'pulse', area: 'top', when: operator },
+  {
+    id: 'pinned-projects',
+    area: 'top',
+    when: (space, m) => operator(space, m) && isModuleReady('projects', space, m),
+  },
+  {
+    id: 'approvals',
+    area: 'main',
+    when: (space, m) => operator(space, m) && can(m, 'expenses.approve'),
+  },
   { id: 'attention', area: 'main', when: operator },
+  { id: 'exceptions', area: 'main', when: operator },
   {
     id: 'projects',
     area: 'main',
     when: (space, m) => operator(space, m) && isModuleReady('projects', space, m),
   },
   { id: 'activity', area: 'main', when: operator },
+  {
+    id: 'week',
+    area: 'side',
+    when: (space, m) => operator(space, m) && can(m, 'expenses.view_all'),
+  },
   {
     id: 'team',
     area: 'side',
@@ -83,7 +104,8 @@ const rules: Rule[] = [
       operator(space, m) && !isModuleReady('vehicles', space, m) && isModuleReady('qr', space, m),
   },
 
-  // Members: their day, their truck, their submissions
+  // Members: what they need to do — anything sent back first — then their day and their truck
+  { id: 'to-fix', area: 'main', when: (space, m) => business(space) && m.role === 'member' },
   { id: 'my-day', area: 'main', when: (space, m) => business(space) && m.role === 'member' },
   // What someone asked of them is part of their day, so it sits right under the project.
   { id: 'notices', area: 'main', when: (space, m) => business(space) && m.role === 'member' },

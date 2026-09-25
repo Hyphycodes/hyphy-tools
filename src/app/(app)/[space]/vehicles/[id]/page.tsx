@@ -9,9 +9,10 @@ import { EmptyState } from '@/components/ui/empty';
 import { Icon } from '@/components/ui/icon';
 import { Page } from '@/components/ui/page';
 import { Panel, PanelHeader } from '@/components/ui/panel';
+import { thisMonth, vehicleProject } from '@/lib/insights';
 import { openPage } from '@/lib/page';
 import { formatField } from '@/lib/platform/custom-fields';
-import { formatCurrency, formatNumber, startOfMonth } from '@/lib/platform/format';
+import { formatCurrency, formatMiles, formatNumber, plural } from '@/lib/platform/format';
 import type { FieldType } from '@/lib/platform/types';
 
 export async function generateMetadata({ params }: PageProps<'/[space]/vehicles/[id]'>) {
@@ -33,10 +34,17 @@ export default async function VehiclePage({ params }: PageProps<'/[space]/vehicl
   ]);
   const driver = vehicle.assignedTo ? people.get(vehicle.assignedTo) : undefined;
   const fuel = receipts.filter(
-    (receipt) => receipt.category === 'fuel' && receipt.status !== 'rejected',
+    (receipt) => receipt.category === 'fuel' && receipt.status !== 'returned',
   );
-  const since = startOfMonth(tz);
-  const monthFuel = fuel.filter((receipt) => new Date(receipt.date).getTime() >= since);
+  const monthFuel = thisMonth(fuel, tz);
+  const monthTrips = thisMonth(
+    mileage.filter((entry) => entry.status !== 'returned'),
+    tz,
+  );
+  const monthMiles = Math.round(monthTrips.reduce((sum, entry) => sum + entry.miles, 0) * 10) / 10;
+  const current = vehicleProject(vehicle, projects, receipts, mileage);
+  const projectName = (projectId?: string) =>
+    projects.find((project) => project.id === projectId)?.name;
   // Miles per gallon from consecutive fill-ups that recorded the odometer.
   const fills = fuel
     .filter((receipt) => receipt.odometer && receipt.gallons)
@@ -94,14 +102,14 @@ export default async function VehiclePage({ params }: PageProps<'/[space]/vehicl
             icon="fuel"
             size="sm"
           >
-            Log fuel
+            Add fuel receipt
           </CreateButton>
           <CreateButton
             request={{ id: 'mileage', attachTo: { type: 'vehicle', id } }}
             icon="route"
             size="sm"
           >
-            Log trip
+            Log mileage
           </CreateButton>
           <CreateButton
             request={{ id: 'file', attachTo: { type: 'vehicle', id } }}
@@ -109,12 +117,12 @@ export default async function VehiclePage({ params }: PageProps<'/[space]/vehicl
             size="sm"
             variant="primary"
           >
-            Add document
+            Upload document
           </CreateButton>
         </div>
       </header>
 
-      <div className="mb-5 grid grid-cols-2 gap-px overflow-hidden rounded-[16px] bg-line shadow-card sm:grid-cols-4">
+      <div className="mb-5 grid grid-cols-2 gap-px overflow-hidden rounded-[16px] bg-line shadow-card sm:grid-cols-5">
         {[
           ['Odometer', `${formatNumber(vehicle.odometer)} mi`, 'last reported'],
           [
@@ -122,6 +130,7 @@ export default async function VehiclePage({ params }: PageProps<'/[space]/vehicl
             toService !== null ? `${formatNumber(toService)} mi` : '—',
             vehicle.nextServiceMiles ? `at ${formatNumber(vehicle.nextServiceMiles)}` : '',
           ],
+          ['Miles this month', formatMiles(monthMiles), plural(monthTrips.length, 'trip')],
           [
             'Fuel this month',
             formatCurrency(monthFuel.reduce((sum, receipt) => sum + receipt.total, 0)),
@@ -156,7 +165,15 @@ export default async function VehiclePage({ params }: PageProps<'/[space]/vehicl
                     people={people}
                     timezone={tz}
                     kind="business"
-                    context={receipt.odometer ? `${formatNumber(receipt.odometer)} mi` : undefined}
+                    context={
+                      [
+                        projectName(receipt.projectId),
+                        receipt.odometer ? `${formatNumber(receipt.odometer)} mi` : undefined,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ') || undefined
+                    }
+                    href={`${base}/tools/receipts?receipt=${receipt.id}`}
                   />
                 ))}
               </div>
@@ -175,6 +192,8 @@ export default async function VehiclePage({ params }: PageProps<'/[space]/vehicl
                     people={people}
                     timezone={tz}
                     kind="business"
+                    context={projectName(entry.projectId) ?? entry.purpose}
+                    href={`${base}/tools/mileage?trip=${entry.id}`}
                   />
                 ))}
               </div>
@@ -184,6 +203,31 @@ export default async function VehiclePage({ params }: PageProps<'/[space]/vehicl
           </Panel>
         </div>
         <aside className="grid content-start gap-5">
+          <Panel className="p-4">
+            <p className="label mb-3">Working on</p>
+            {current ? (
+              <Link
+                href={`${base}/projects/${current.id}`}
+                className="group flex items-center gap-2.5"
+              >
+                <span
+                  className="h-9 w-1 shrink-0 rounded-full"
+                  style={{ background: current.color }}
+                  aria-hidden="true"
+                />
+                <span className="min-w-0">
+                  <span className="block truncate text-[15px] font-semibold group-hover:underline">
+                    {current.name}
+                  </span>
+                  <span className="block truncate text-[12.5px] text-muted">
+                    From its latest trips and fill-ups
+                  </span>
+                </span>
+              </Link>
+            ) : (
+              <p className="text-[13.5px] text-muted">No open project right now.</p>
+            )}
+          </Panel>
           <Panel className="p-4">
             <p className="label mb-3">Assigned to</p>
             {driver ? (

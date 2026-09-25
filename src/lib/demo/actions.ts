@@ -2,6 +2,7 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { clearJournal } from '@/lib/data/demo/journal';
+import { clearPins } from '@/lib/data/demo/prefs';
 import { seed } from '@/lib/data/demo/seed';
 import { PREVIEW_COOKIE } from '@/lib/identity/demo-source';
 
@@ -32,7 +33,9 @@ export async function previewAs(formData: FormData) {
 
 export async function resetDemo(formData: FormData) {
   assertDemo();
+  // Everything the visitor changed goes: records, decisions and their own pins.
   await clearJournal();
+  await clearPins();
   const back = String(formData.get('back') ?? '/');
   redirect(back.startsWith('/') && !back.startsWith('//') ? back : '/');
 }

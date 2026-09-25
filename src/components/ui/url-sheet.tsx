@@ -1,6 +1,6 @@
 'use client';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Sheet } from './sheet';
 
 /**
@@ -14,13 +14,19 @@ export function UrlSheet({
 }: Omit<Parameters<typeof Sheet>[0], 'open' | 'onClose'> & { closeHref: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(true);
+  // Where the sheet was opened. Following a link out of it (a person, a project) must not be
+  // undone by the sheet closing behind you.
+  const opened = useRef('');
+  useEffect(() => {
+    opened.current = window.location.href;
+  }, []);
   return (
     <Sheet
       {...props}
       open={open}
       onClose={() => {
         setOpen(false);
-        router.replace(closeHref, { scroll: false });
+        if (window.location.href === opened.current) router.replace(closeHref, { scroll: false });
       }}
     />
   );
