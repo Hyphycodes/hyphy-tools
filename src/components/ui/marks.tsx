@@ -1,6 +1,7 @@
 import type { ToolDefinition } from '@/lib/platform/tools';
 import type { Space } from '@/lib/platform/types';
 import { cn } from './cn';
+import { SpaceLogo } from '@/components/files/space-logo';
 import { Icon, type IconName } from './icon';
 
 const spaceSizes = {
@@ -16,16 +17,16 @@ export function SpaceMark({
   size = 'md',
   className,
 }: {
-  space: Pick<Space, 'brand' | 'name' | 'id' | 'kind' | 'slug'>;
+  space: Pick<Space, 'brand' | 'name' | 'id' | 'kind' | 'slug'> & Pick<Partial<Space>, 'logo'>;
   size?: keyof typeof spaceSizes;
   className?: string;
 }) {
-  const spark = space.slug === 'hyphy';
+  const spark = space.slug === 'hyphy' && !space.logo;
   return (
     <span
       aria-hidden="true"
       className={cn(
-        'inline-grid shrink-0 place-items-center font-display font-bold tracking-[-0.02em] select-none',
+        'relative inline-grid shrink-0 place-items-center overflow-hidden font-display font-bold tracking-[-0.02em] select-none',
         'shadow-[inset_0_0_0_1px_rgb(0_0_0/.08),inset_0_1px_0_rgb(255_255_255/.22)]',
         space.kind === 'personal' && '!rounded-full',
         spaceSizes[size],
@@ -42,6 +43,8 @@ export function SpaceMark({
       ) : (
         space.brand.monogram
       )}
+      {/* The business's own logo, over its initials (which show if it can't load). */}
+      {space.logo && space.kind === 'business' && <SpaceLogo space={space} />}
     </span>
   );
 }

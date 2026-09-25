@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
-import { useEffect, useId, useRef, useState, useTransition, type DragEvent } from 'react';
-import { addFiles } from '@/app/(app)/[space]/actions';
+import { useEffect, useId, useRef, useState, type DragEvent } from 'react';
+import { SaveProgress, useSaveToFiles } from '@/components/files/save-to-files';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/components/ui/cn';
 import { Field, Input, Select } from '@/components/ui/form';
@@ -37,7 +37,14 @@ const READABLE = /\.(jpe?g|png|webp|gif|avif|hei[cf])$/i;
 
 type Format = (typeof FORMATS)[number]['value'];
 type Size = { width: number; height: number };
-type Result = Size & { size: number; url: string; name: string; kept?: boolean };
+type Result = Size & {
+  size: number;
+  url: string;
+  name: string;
+  kept?: boolean;
+  /** The image itself, so Save to Files stores exactly these bytes. */
+  blob: Blob;
+};
 type Item = {
   id: number;
   file: File;
@@ -165,7 +172,8 @@ async function samplePhoto(): Promise<File> {
 
 export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean }) {
   const toast = useToast();
-  const [saving, startSaving] = useTransition();
+  const saver = useSaveToFiles(slug);
+  const saving = saver.busy;
   const [projectId, setProjectId] = useState('');
   const [savedIds, setSavedIds] = useState<string | null>(null);
   const workspace = useWorkspace();
@@ -253,6 +261,7 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
             url,
             name: keep ? item.file.name : `${base}-${output.width}w.${extension}`,
             kept: keep,
+            blob,
           },
         });
       } catch (error) {
@@ -375,31 +384,33 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
   const totalBefore = finished.reduce((sum, item) => sum + item.file.size, 0);
   const totalAfter = finished.reduce((sum, item) => sum + (item.result?.size ?? 0), 0);
 
-  const saveResults = () =>
-    startSaving(async () => {
-      const response = await addFiles(slug, {
+  const saveResults = async () => {
+    const saved: string[] = [];
+    for (const item of finished) {
+      const result = item.result!;
+      const file = await saver.save(result.blob, result.name, {
+        purpose: 'photo',
+        source: 'images',
         folder: 'Made with Image Resize',
+        width: result.width,
+        height: result.height,
         attachTo: projectId ? { type: 'project', id: projectId } : null,
-        files: finished.map((item) => ({
-          name: item.result!.name,
-          size: item.result!.size,
-          kind: 'image',
-          source: 'images',
-        })),
       });
-      if (response.ok) setSavedIds(response.id ?? '');
-      toast(
-        response.ok
-          ? {
-              title: `${finished.length} ${finished.length === 1 ? 'image' : 'images'} saved to Files`,
-              href: workspace.href(
-                finished.length === 1 ? `/files?file=${response.id}` : '/files?view=made',
-              ),
-              action: 'Open',
-            }
-          : { title: response.error, icon: 'alert' },
-      );
+      if (!file) break;
+      saved.push(file.fileId);
+    }
+    if (!saved.length) return;
+    setSavedIds(saved[0]);
+    toast({
+      title: `${saved.length} ${saved.length === 1 ? 'image' : 'images'} saved to Files`,
+      description:
+        saved.length < finished.length
+          ? `${finished.length - saved.length} didn’t save`
+          : undefined,
+      href: workspace.href(saved.length === 1 ? `/files?file=${saved[0]}` : '/files?view=made'),
+      action: 'Open',
     });
+  };
 
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
@@ -748,6 +759,7 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
                   <Icon name="files" size={16} />{' '}
                   {saving ? 'Saving…' : `Save ${finished.length} to Files`}
                 </Button>
+                <SaveProgress state={saver.state} className="text-center" />
               </>
             )}
           </div>

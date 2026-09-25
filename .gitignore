@@ -48,3 +48,6 @@ next-env.d.ts
 
 # Captured development email (HYPHY_EMAIL=capture)
 /.hyphy-mail/
+
+# The local Supabase stack's per-run secrets (supabase/local/stack.mjs)
+/.hyphy-local/

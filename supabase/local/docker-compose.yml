@@ -1,0 +1,87 @@
+# A local Supabase for the real-account and Storage end-to-end tests: Postgres, Supabase Auth,
+# Supabase Storage and a mail catcher, behind a small gateway at :54421 that stands in for the
+# hosted API gateway. Development only; never holds real data.
+#
+# Don't run this file directly: `node supabase/local/stack.mjs up` generates a fresh JWT secret
+# and keys for every run (into .hyphy-local/, which git ignores), starts it, applies the Hyphy
+# migrations and prints the variables the tests need. supabase/README.md, "Local stack".
+name: hyphy-local
+
+services:
+  db:
+    image: supabase/postgres:17.6.1.177
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXP: 3600
+    ports: ['54422:5432']
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-U', 'postgres', '-h', 'localhost']
+      interval: 2s
+      retries: 60
+
+  auth:
+    image: supabase/gotrue:v2.197.0
+    depends_on: { db: { condition: service_healthy } }
+    restart: on-failure
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: http://localhost:54421/auth/v1
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      GOTRUE_SITE_URL: ${SITE_URL}
+      GOTRUE_URI_ALLOW_LIST: '*'
+      GOTRUE_DISABLE_SIGNUP: 'false'
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: 'true'
+      GOTRUE_MAILER_AUTOCONFIRM: 'false'
+      GOTRUE_PASSWORD_MIN_LENGTH: 8
+      GOTRUE_SMTP_HOST: mailpit
+      GOTRUE_SMTP_PORT: 1025
+      GOTRUE_SMTP_ADMIN_EMAIL: auth@hyphy-tools.example
+      GOTRUE_SMTP_SENDER_NAME: Hyphy Tools
+      GOTRUE_RATE_LIMIT_EMAIL_SENT: 1000
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: /auth/v1/verify
+      # Token-hash links, as docs/AUTH.md sets them on hosted Supabase.
+      GOTRUE_MAILER_TEMPLATES_CONFIRMATION: http://gateway:8000/templates/confirmation.html
+      GOTRUE_MAILER_TEMPLATES_RECOVERY: http://gateway:8000/templates/recovery.html
+
+  storage:
+    image: supabase/storage-api:v1.79.20
+    depends_on: { db: { condition: service_healthy } }
+    restart: on-failure
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_KEY: ${SERVICE_KEY}
+      AUTH_JWT_SECRET: ${JWT_SECRET}
+      AUTH_JWT_ALGORITHM: HS256
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      DB_INSTALL_ROLES: 'false'
+      FILE_SIZE_LIMIT: 52428800
+      STORAGE_BACKEND: file
+      STORAGE_FILE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: stub
+      REGION: local
+      GLOBAL_S3_BUCKET: stub
+      IMAGE_TRANSFORMATION_ENABLED: 'false'
+      STORAGE_PUBLIC_URL: http://localhost:54421/storage/v1
+      REQUEST_ALLOW_X_FORWARDED_PATH: 'true'
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports: ['54424:8025']
+
+  gateway:
+    image: supabase/storage-api:v1.79.20 # any image with Node; the gateway is one file
+    entrypoint: ['node', '/gateway/gateway.mjs']
+    environment:
+      PUBLISHABLE_KEY: ${PUBLISHABLE_KEY}
+      ANON_KEY: ${ANON_KEY}
+      SITE_URL: ${SITE_URL}
+    volumes: ['./gateway.mjs:/gateway/gateway.mjs:ro']
+    ports: ['54421:8000']

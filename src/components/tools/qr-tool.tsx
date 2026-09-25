@@ -1,6 +1,7 @@
 'use client';
 import { useId, useMemo, useState, useTransition } from 'react';
 import { saveQrCode } from '@/app/(app)/[space]/actions';
+import { SaveProgress, useSaveToFiles } from '@/components/files/save-to-files';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/components/ui/cn';
 import { Field, Input, Segmented, Select, Textarea } from '@/components/ui/form';
@@ -198,6 +199,8 @@ export function QrTool({
   const [message, setMessage] = useState('');
   const [saved, setSaved] = useState(false);
   const [saving, startSaving] = useTransition();
+  const imageSaver = useSaveToFiles(spaceSlug);
+  const [imageSaved, setImageSaved] = useState<string | null>(null);
   // A code made from a project (a job-site sign, an RSVP card) is saved with that project.
   const [projectId, setProjectId] = useState(initial?.projectId ?? '');
 
@@ -234,6 +237,8 @@ export function QrTool({
   const touched = () => {
     setMessage('');
     setSaved(false);
+    setImageSaved(null);
+    imageSaver.reset();
   };
 
   const downloadSvg = () => {
@@ -255,6 +260,35 @@ export function QrTool({
       setMessage('This browser couldn’t make the PNG. Download the SVG instead.');
     }
   };
+  /**
+   * The code as a real PNG in Files (to print, to attach to a job). Only when asked: drawing a
+   * preview stores nothing.
+   */
+  const savePngToFiles = async () => {
+    if (code.state !== 'ready') return;
+    let png: Blob;
+    try {
+      png = await renderPng(code.matrix, { size, margin, fg, bg, caption });
+    } catch {
+      setMessage('This browser couldn’t make the PNG.');
+      return;
+    }
+    const file = await imageSaver.save(png, `${fileBase}.png`, {
+      purpose: 'photo',
+      source: 'qr',
+      folder: 'QR codes',
+      attachTo: projectId ? { type: 'project', id: projectId } : null,
+    });
+    if (!file) return;
+    setImageSaved(file.fileId);
+    toast({
+      title: file.name,
+      description: 'Saved to Files',
+      href: `/${spaceSlug}/files?file=${file.fileId}`,
+      action: 'Open',
+    });
+  };
+
   const saveToSpace = () =>
     startSaving(async () => {
       const name =
@@ -404,6 +438,19 @@ export function QrTool({
                 <Icon name={saved ? 'check' : 'pin'} size={16} />
                 {saving ? 'Saving…' : saved ? `Saved in ${spaceName}` : `Save to ${spaceName}`}
               </Button>
+              <Button
+                className="mt-2 w-full !bg-white/60 hover:!bg-white"
+                disabled={code.state !== 'ready' || imageSaver.busy || Boolean(imageSaved)}
+                onClick={savePngToFiles}
+              >
+                <Icon name={imageSaved ? 'check' : 'files'} size={16} />
+                {imageSaver.busy
+                  ? 'Saving image…'
+                  : imageSaved
+                    ? 'Image saved to Files'
+                    : 'Save image to Files'}
+              </Button>
+              <SaveProgress state={imageSaver.state} className="mt-1.5 text-center" />
             </div>
           )}
         </div>

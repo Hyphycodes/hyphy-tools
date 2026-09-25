@@ -2,6 +2,7 @@
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { previewAs, resetDemo } from '@/lib/demo/actions';
+import { clearDeviceFiles } from '@/lib/files/device';
 import type { DemoModel } from '@/lib/demo/model';
 import { Avatar } from '@/components/ui/avatar';
 import { cn } from '@/components/ui/cn';
@@ -47,7 +48,11 @@ export function DemoBar({ demo }: { demo: DemoModel }) {
   // On a shared database Reset is off unless the server allows it (HYPHY_DEMO_RESET=on).
   const reset = (className: string, label?: boolean) =>
     demo.canReset && (
-      <form action={resetDemo}>
+      <form
+        action={resetDemo}
+        // The preview's files live in this browser; Reset clears them with everything else.
+        onSubmit={() => void clearDeviceFiles()}
+      >
         <input type="hidden" name="back" value={pathname} />
         <button
           type="submit"
@@ -184,7 +189,8 @@ export function DemoBar({ demo }: { demo: DemoModel }) {
           })}
           <p className="mt-3 rounded-[12px] bg-subtle px-3.5 py-3 text-[12.5px] leading-relaxed text-muted">
             Demo Mode stands in for sign-in. What you change (receipts, trips, projects) stays in
-            this browser until you reset, so you can submit as Mike and approve as Dana.
+            this browser until you reset, so you can submit as Mike and approve as Dana. Files you
+            add stay in this browser too.
           </p>
         </div>
       </Sheet>

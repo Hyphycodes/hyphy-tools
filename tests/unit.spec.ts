@@ -1376,6 +1376,9 @@ test.describe('filing follows the business’s rules', () => {
       },
       pins: async () => [],
       setPins: async () => {},
+      finishUpload: async () => 'ready',
+      setLogo: async () => null,
+      storageBytes: async () => null,
     };
     return { repo: createRepository(workspace, source), writes, fieldWrites };
   }
@@ -1571,5 +1574,342 @@ test.describe('setup never asks for what can’t be given', () => {
       changes: 0,
     });
     expect(() => applyConfig(seed(Date.UTC(2026, 8, 24, 18)), cleaned)).not.toThrow();
+  });
+});
+
+/* ---------- Phase 2D: real files ---------- */
+
+import {
+  acceptFor,
+  bytesMatch,
+  checkUpload,
+  cleanDisplayName,
+  FILE_TYPES,
+  isPathFor,
+  objectName,
+  renamed,
+  storagePath,
+  STORED_MIME_TYPES,
+  typeById,
+  MB,
+} from '@/lib/files/rules';
+import { originOf } from '@/lib/files/origin';
+
+const bytes = (...values: (number | string)[]) =>
+  new Uint8Array(
+    values.flatMap((value) =>
+      typeof value === 'string' ? Array.from(value, (char) => char.charCodeAt(0)) : [value],
+    ),
+  );
+const PDF = bytes('%PDF-1.7\n');
+const PNG = bytes(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13);
+const JPEG = bytes(0xff, 0xd8, 0xff, 0xe0, 0, 16, 'JFIF');
+const EXE = bytes('MZ', 0x90, 0, 3, 0, 0, 0, 4, 0);
+const ZIP = bytes('PK', 3, 4, 20, 0);
+
+test.describe('file names and places', () => {
+  test('display names lose folders, control characters and direction tricks', () => {
+    expect(cleanDisplayName('C:\\Users\\dana\\Desktop\\plans.pdf')).toBe('plans.pdf');
+    expect(cleanDisplayName('../../etc/passwd')).toBe('passwd');
+    expect(cleanDisplayName('invoice\u202Efdp.exe')).toBe('invoicefdp.exe');
+    expect(cleanDisplayName('  Oak   Brook\tPlans.pdf ')).toBe('Oak Brook Plans.pdf');
+    expect(cleanDisplayName('')).toBe('Untitled');
+    expect(cleanDisplayName('..')).toBe('Untitled');
+    const long = `${'a'.repeat(300)}.pdf`;
+    expect(cleanDisplayName(long)).toHaveLength(140);
+    expect(cleanDisplayName(long).endsWith('.pdf')).toBe(true);
+  });
+
+  test('stored names are Hyphy’s own: lowercase, no folders, the type’s extension', () => {
+    const pdf = typeById('pdf')!;
+    expect(objectName('Oak Brook Plans (v2).PDF', pdf)).toBe('oak-brook-plans-v2.pdf');
+    expect(objectName('../../evil/../x.pdf', pdf)).toBe('x.pdf');
+    expect(objectName('Café façade.pdf', pdf)).toBe('cafe-facade.pdf');
+    expect(objectName('日本語.pdf', pdf)).toBe('file.pdf');
+    expect(objectName('photo.jpeg', typeById('jpeg')!)).toBe('photo.jpg');
+    for (const name of ['a/b.pdf', '..pdf', '/.pdf', 'x'.repeat(500)])
+      expect(objectName(name, pdf)).toMatch(/^[a-z0-9][a-z0-9._-]{0,99}$/);
+  });
+
+  test('paths carry the Space and the file’s id, so two receipt.pdf never collide', () => {
+    const space = '0b7f9a3c-3d1e-4c5a-9e1f-2a3b4c5d6e7f';
+    const one = '1b7f9a3c-3d1e-4c5a-9e1f-2a3b4c5d6e7f';
+    const two = '2b7f9a3c-3d1e-4c5a-9e1f-2a3b4c5d6e7f';
+    const a = storagePath(space, one, objectName('receipt.pdf', typeById('pdf')!));
+    const b = storagePath(space, two, objectName('receipt.pdf', typeById('pdf')!));
+    expect(a).toBe(`spaces/${space}/files/${one}/receipt.pdf`);
+    expect(a).not.toBe(b);
+    expect(isPathFor(a, space, one)).toBe(true);
+    expect(isPathFor(a, space, two)).toBe(false);
+    expect(isPathFor(`spaces/${space}/files/${one}/../x.pdf`, space, one)).toBe(false);
+  });
+
+  test('renaming keeps the extension, so a PDF stays a PDF', () => {
+    expect(renamed('plans.pdf', 'Oak Brook Plans')).toBe('Oak Brook Plans.pdf');
+    expect(renamed('plans.pdf', 'Oak Brook Plans.pdf')).toBe('Oak Brook Plans.pdf');
+    expect(renamed('plans.pdf', 'sneaky.exe')).toBe('sneaky.exe.pdf');
+    expect(renamed('notes', 'New notes')).toBe('New notes');
+  });
+});
+
+test.describe('what Hyphy accepts', () => {
+  test('a conservative allowlist: no pages, scripts, programs or SVG', () => {
+    for (const mime of [
+      'text/html',
+      'image/svg+xml',
+      'application/javascript',
+      'application/x-msdownload',
+    ])
+      expect(STORED_MIME_TYPES).not.toContain(mime);
+    for (const name of ['page.html', 'logo.svg', 'setup.exe', 'run.sh', 'macro.js', 'x.bat'])
+      expect(checkUpload({ name, size: 10 }, 'file').ok).toBe(false);
+    expect(checkUpload({ name: 'noextension', size: 10 }, 'file').ok).toBe(false);
+  });
+
+  test('the first bytes must be what the name says', () => {
+    expect(checkUpload({ name: 'invoice.pdf', size: 100, head: EXE }, 'file')).toMatchObject({
+      ok: false,
+    });
+    expect(checkUpload({ name: 'invoice.pdf', size: 100, head: PDF }, 'file')).toMatchObject({
+      ok: true,
+    });
+    expect(checkUpload({ name: 'site.jpg', size: 100, head: PNG }, 'file').ok).toBe(false);
+    expect(checkUpload({ name: 'site.png', size: 100, head: PNG }, 'photo').ok).toBe(true);
+    expect(checkUpload({ name: 'site.jpeg', size: 100, head: JPEG }, 'photo').ok).toBe(true);
+    expect(checkUpload({ name: 'bid.docx', size: 100, head: ZIP }, 'file').ok).toBe(true);
+    expect(checkUpload({ name: 'bid.docx', size: 100, head: EXE }, 'file').ok).toBe(false);
+    // Text must be text, and not a web page in disguise.
+    expect(checkUpload({ name: 'list.csv', size: 20, head: bytes('a,b\n1,2\n') }, 'file').ok).toBe(
+      true,
+    );
+    expect(checkUpload({ name: 'list.csv', size: 20, head: EXE }, 'file').ok).toBe(false);
+    expect(
+      checkUpload({ name: 'notes.txt', size: 40, head: bytes('<!DOCTYPE html><script>') }, 'file')
+        .ok,
+    ).toBe(false);
+    expect(bytesMatch(typeById('pdf')!, bytes('  \n%PDF-1.4'))).toBe(true);
+    expect(bytesMatch(typeById('heic')!, bytes(0, 0, 0, 24, 'ftypheic'))).toBe(true);
+    expect(bytesMatch(typeById('webp')!, bytes('RIFF', 0, 0, 0, 0, 'WEBP'))).toBe(true);
+  });
+
+  test('the browser’s type must agree with the name, but is only a hint', () => {
+    expect(checkUpload({ name: 'plans.pdf', size: 10, mime: 'application/pdf' }, 'file').ok).toBe(
+      true,
+    );
+    expect(checkUpload({ name: 'plans.pdf', size: 10, mime: 'text/html' }, 'file').ok).toBe(false);
+    // Windows calls CSV Excel; browsers call unknown things octet-stream.
+    expect(
+      checkUpload({ name: 'a.csv', size: 10, mime: 'application/vnd.ms-excel' }, 'file').ok,
+    ).toBe(true);
+    expect(
+      checkUpload({ name: 'a.docx', size: 10, mime: 'application/octet-stream' }, 'file').ok,
+    ).toBe(true);
+  });
+
+  test('sizes: per kind, lower for logos, never empty', () => {
+    expect(checkUpload({ name: 'a.pdf', size: 50 * MB }, 'file').ok).toBe(true);
+    expect(checkUpload({ name: 'a.pdf', size: 50 * MB + 1 }, 'file').ok).toBe(false);
+    expect(checkUpload({ name: 'a.jpg', size: 21 * MB }, 'photo').ok).toBe(false);
+    expect(checkUpload({ name: 'a.csv', size: 6 * MB }, 'file').ok).toBe(false);
+    expect(checkUpload({ name: 'logo.png', size: 3 * MB }, 'logo').ok).toBe(false);
+    expect(checkUpload({ name: 'logo.png', size: 1 * MB }, 'logo').ok).toBe(true);
+    expect(checkUpload({ name: 'a.pdf', size: 0 }, 'file').ok).toBe(false);
+    const problem = checkUpload({ name: 'plans.pdf', size: 60 * MB }, 'file');
+    expect(!problem.ok && problem.problem).toContain('up to 50 MB');
+  });
+
+  test('each purpose asks for less than a general file', () => {
+    expect(checkUpload({ name: 'plans.pdf', size: 10 }, 'photo').ok).toBe(false);
+    expect(checkUpload({ name: 'receipt.pdf', size: 10 }, 'receipt').ok).toBe(true);
+    expect(checkUpload({ name: 'receipt.heic', size: 10 }, 'receipt').ok).toBe(true);
+    expect(checkUpload({ name: 'list.csv', size: 10 }, 'receipt').ok).toBe(false);
+    expect(checkUpload({ name: 'logo.heic', size: 10 }, 'logo').ok).toBe(false);
+    expect(acceptFor('logo')).toBe('image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp');
+    expect(new Set(FILE_TYPES.map((type) => type.id)).size).toBe(FILE_TYPES.length);
+  });
+
+  test('where a file came from, as the product says it', () => {
+    expect(originOf({}).label).toBe('Uploaded');
+    expect(originOf({ source: 'pdf' }).label).toBe('PDF tool');
+    expect(originOf({ source: 'qr' }).label).toBe('QR tool');
+    expect(originOf({ source: 'receipts' }).label).toBe('Receipt photo');
+    expect(originOf({ source: 'brand' }).label).toBe('Business logo');
+  });
+});
+
+test.describe('files in Demo Mode', () => {
+  const base = seed();
+  const at = '2026-09-01T12:00:00.000Z';
+  const start = (id: string, by: string, extra: Record<string, unknown> = {}) => ({
+    k: 'add' as const,
+    t: 'files' as const,
+    by,
+    at,
+    row: {
+      id,
+      spaceId: 'sp_abc',
+      createdBy: by,
+      createdAt: at,
+      name: 'Plans.pdf',
+      kind: 'pdf',
+      size: 10,
+      folder: 'Plans',
+      access: 'team',
+      attachedTo: [{ type: 'project', id: 'prj_oakbrook' }],
+      storage: 'device',
+      status: 'pending',
+      ...extra,
+    },
+  });
+
+  test('a file’s activity is written when it finishes, not when it starts', () => {
+    const started = applyJournal(base, [start('fl_x', 'dana')]);
+    expect(started.activity.some((event) => event.object.id === 'fl_x')).toBe(false);
+    const done = applyJournal(base, [
+      start('fl_x', 'dana'),
+      { k: 'set', t: 'files', id: 'fl_x', patch: { status: 'ready' }, by: 'dana', at },
+    ]);
+    const line = done.activity.find((event) => event.object.id === 'fl_x');
+    expect(line).toMatchObject({
+      verb: 'uploaded',
+      context: { type: 'project', id: 'prj_oakbrook' },
+    });
+  });
+
+  test('Trash, restore, rename and delete for good', () => {
+    const data = applyJournal(base, [
+      start('fl_y', 'dana', { status: 'ready' }),
+      { k: 'set', t: 'files', id: 'fl_y', patch: { name: 'Oak Brook Plans.pdf' }, by: 'dana', at },
+      {
+        k: 'set',
+        t: 'files',
+        id: 'fl_y',
+        patch: { deletedAt: at, deletedBy: 'dana' },
+        by: 'dana',
+        at,
+      },
+      {
+        k: 'set',
+        t: 'files',
+        id: 'fl_y',
+        patch: { deletedAt: null, deletedBy: null },
+        by: 'dana',
+        at,
+      },
+    ]);
+    const verbs = data.activity.filter((event) => event.object.id === 'fl_y').map((e) => e.verb);
+    expect(verbs).toEqual(['uploaded', 'renamed', 'deleted', 'restored']);
+    const gone = applyJournal(base, [
+      start('fl_z', 'dana', { status: 'ready' }),
+      { k: 'del', t: 'files', id: 'fl_z', by: 'dana', at },
+    ]);
+    expect(gone.files.some((file) => file.id === 'fl_z')).toBe(false);
+  });
+
+  test('a receipt’s photo is attached to it, and seen with it', () => {
+    const photo = start('fl_photo', 'mike', {
+      status: 'ready',
+      attachedTo: [],
+      access: 'private',
+      source: 'receipts',
+      kind: 'image',
+    });
+    const data = applyJournal(base, [
+      photo,
+      {
+        k: 'add',
+        t: 'receipts',
+        by: 'mike',
+        at,
+        row: {
+          id: 'rc_photo',
+          spaceId: 'sp_abc',
+          createdBy: 'mike',
+          createdAt: at,
+          vendor: 'Shell',
+          category: 'fuel',
+          total: 64.18,
+          date: at,
+          status: 'submitted',
+          fileId: 'fl_photo',
+        },
+      },
+    ]);
+    const file = data.files.find((item) => item.id === 'fl_photo')!;
+    expect(file.attachedTo).toEqual([{ type: 'receipt', id: 'rc_photo' }]);
+    const sees = (person: string) => {
+      const membership = data.memberships.find(
+        (item) => item.personId === person && item.spaceId === 'sp_abc',
+      )!;
+      const space = data.spaces.find((item) => item.id === 'sp_abc')!;
+      const visible = visibleTo(
+        {
+          session: {
+            source: 'demo',
+            person: data.people.find((p) => p.id === person)!,
+            memberships: [],
+          },
+          person: data.people.find((p) => p.id === person)!,
+          space,
+          membership,
+          permissions: permissionsFor(membership, space),
+        },
+        data,
+      );
+      return visible.files.some((item) => item.id === 'fl_photo');
+    };
+    expect(sees('mike')).toBe(true);
+    expect(sees('dana')).toBe(true);
+    expect(sees('ray')).toBe(true);
+    expect(sees('tasha')).toBe(false);
+    expect(sees('chris')).toBe(false);
+  });
+
+  test('uploads still going are their uploader’s alone', () => {
+    const data = applyJournal(base, [start('fl_wait', 'mike')]);
+    const space = data.spaces.find((item) => item.id === 'sp_abc')!;
+    const view = (person: string) => {
+      const membership = data.memberships.find(
+        (item) => item.personId === person && item.spaceId === 'sp_abc',
+      )!;
+      return visibleTo(
+        {
+          session: {
+            source: 'demo',
+            person: data.people.find((p) => p.id === person)!,
+            memberships: [],
+          },
+          person: data.people.find((p) => p.id === person)!,
+          space,
+          membership,
+          permissions: permissionsFor(membership, space),
+        },
+        data,
+      ).files.some((item) => item.id === 'fl_wait');
+    };
+    expect(view('mike')).toBe(true);
+    expect(view('dana')).toBe(false);
+  });
+});
+
+test.describe('a receipt photo can be required', () => {
+  test('the rule is a real setting, checked when something is sent', () => {
+    const space = {
+      kind: 'business' as const,
+      modules: ['receipts' as const],
+      settings: { receipts: { requirePhoto: true } },
+    };
+    expect(parseSettings({ receipts: { requirePhoto: true } })).toEqual({
+      receipts: { requirePhoto: true },
+    });
+    expect(() => parseSettings({ receipts: { requirePhoto: 'yes' } })).toThrow();
+    expect(formRules(space).receipts.photo).toBe('required');
+    const words = { project: 'Job', vehicle: 'Truck' };
+    expect(submissionProblem(space, 'receipt', {}, words, false)).toBe(
+      'Add a photo of the receipt.',
+    );
+    expect(submissionProblem(space, 'receipt', { fileId: 'fl_1' }, words, false)).toBeNull();
+    // Personal Spaces have no such rules.
+    expect(formRules({ ...space, kind: 'personal' }).receipts.photo).toBe('optional');
   });
 });

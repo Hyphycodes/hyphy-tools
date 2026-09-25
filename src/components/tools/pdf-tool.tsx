@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
-import { useEffect, useId, useRef, useState, useTransition, type DragEvent } from 'react';
-import { addFiles } from '@/app/(app)/[space]/actions';
+import { useEffect, useId, useRef, useState, type DragEvent } from 'react';
+import { SaveProgress, useSaveToFiles } from '@/components/files/save-to-files';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/components/ui/cn';
 import { Input, Segmented } from '@/components/ui/form';
@@ -26,7 +26,15 @@ const MAX_PAGES = 500;
 const MAX_THUMBS = 120;
 
 type Entry = { id: number; file: File; pages?: number; thumb?: string; unreadable?: boolean };
-type Result = { url: string; name: string; pages: number; size: number; covers: string[] };
+type Result = {
+  url: string;
+  name: string;
+  pages: number;
+  size: number;
+  covers: string[];
+  /** The PDF itself, kept so Save to Files stores these exact bytes. */
+  blob: Blob;
+};
 
 async function preview(file: File, width: number) {
   const { openPdf } = await import('@/lib/tools/pdf-preview');
@@ -74,7 +82,8 @@ export function PdfTool({ slug, canSave }: { slug: string; canSave: boolean }) {
   const [dragging, setDragging] = useState<number | null>(null);
   const [message, setMessage] = useState('');
   const [result, setResult] = useState<Result | null>(null);
-  const [saving, startSaving] = useTransition();
+  const saver = useSaveToFiles(slug);
+  const saving = saver.busy;
   const [saved, setSaved] = useState<string | null>(null);
   const [projectId, setProjectId] = useState('');
   const workspace = useWorkspace();
@@ -97,6 +106,7 @@ export function PdfTool({ slug, canSave }: { slug: string; canSave: boolean }) {
     resultUrl.current = null;
     setResult(null);
     setSaved(null);
+    saver.reset();
     setMessage('');
   }
 
@@ -262,7 +272,7 @@ export function PdfTool({ slug, canSave }: { slug: string; canSave: boolean }) {
       const blob = new Blob([new Uint8Array(bytes)], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       resultUrl.current = url;
-      setResult({ url, name, pages: output.getPageCount(), size: blob.size, covers });
+      setResult({ url, name, pages: output.getPageCount(), size: blob.size, covers, blob });
       setMessage(
         `Ready: ${plural(output.getPageCount(), 'page')}${mode === 'merge' ? ', in the order shown' : ''}.`,
       );
@@ -275,30 +285,26 @@ export function PdfTool({ slug, canSave }: { slug: string; canSave: boolean }) {
     }
   }
 
-  const saveToFiles = () =>
-    result &&
-    startSaving(async () => {
-      const response = await addFiles(slug, {
-        files: [
-          { name: result.name, size: result.size, kind: 'pdf', pages: result.pages, source: 'pdf' },
-        ],
-        folder: 'Made with PDF',
-        attachTo: projectId ? { type: 'project', id: projectId } : null,
-      });
-      if (response.ok) setSaved(response.id ?? '');
-      toast(
-        response.ok
-          ? {
-              title: result.name,
-              description: projectId
-                ? `Saved to Files · ${workspace.options.projects.find((item) => item.id === projectId)?.name}`
-                : 'Saved to Files',
-              href: workspace.href(`/files?file=${response.id}`),
-              action: 'Open',
-            }
-          : { title: response.error, icon: 'alert' },
-      );
+  const saveToFiles = async () => {
+    if (!result) return;
+    const saved = await saver.save(result.blob, result.name, {
+      purpose: 'file',
+      source: 'pdf',
+      folder: 'Made with PDF',
+      pages: result.pages,
+      attachTo: projectId ? { type: 'project', id: projectId } : null,
     });
+    if (!saved) return;
+    setSaved(saved.fileId);
+    toast({
+      title: saved.name,
+      description: projectId
+        ? `Saved to Files · ${workspace.options.projects.find((item) => item.id === projectId)?.name}`
+        : 'Saved to Files',
+      href: workspace.href(`/files?file=${saved.fileId}`),
+      action: 'Open',
+    });
+  };
 
   const totalPages = files.reduce((sum, entry) => sum + (entry.pages ?? 0), 0);
   const ready = mode === 'merge' ? files.length >= 2 : files.length === 1 && keep.length > 0;
@@ -678,6 +684,7 @@ export function PdfTool({ slug, canSave }: { slug: string; canSave: boolean }) {
                         <Icon name="files" size={16} />
                         {saving ? 'Saving…' : 'Save to Files'}
                       </Button>
+                      <SaveProgress state={saver.state} className="text-center" />
                     </>
                   ))}
               </div>

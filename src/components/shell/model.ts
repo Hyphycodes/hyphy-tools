@@ -2,7 +2,7 @@ import type { CreateAction, CreateActionId } from '@/lib/platform/actions';
 import type { ApprovalRule, FormRules } from '@/lib/platform/business-settings';
 import type { NavModel } from '@/lib/platform/navigation';
 import type { Permission } from '@/lib/platform/roles';
-import type { FieldDefinition, Person, Role, Space } from '@/lib/platform/types';
+import type { FieldDefinition, FileStorage, Person, Role, Space } from '@/lib/platform/types';
 
 /** What the client shell knows about the current Workspace. Serializable, built on the server. */
 export type ShellModel = {
@@ -21,9 +21,15 @@ export type ShellModel = {
     name: string;
     kind: Space['kind'];
     brand: Space['brand'];
+    logo?: Space['logo'];
     descriptor: string;
     roleLabel: string;
   }[];
+  /**
+   * Where this person's new files' bytes go: Hyphy's storage, or — Demo Mode — this browser. The
+   * interface says which, so nothing claims a file is stored somewhere it isn't.
+   */
+  fileStorage: FileStorage;
   nav: NavModel;
   inboxCount: number;
   actions: CreateAction[];

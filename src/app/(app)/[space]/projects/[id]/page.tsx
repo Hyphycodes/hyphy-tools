@@ -6,7 +6,9 @@ import { EditRecordFields } from '@/components/fields/record-fields';
 import { ActivityList } from '@/components/records/activity-list';
 import { PinButton } from '@/components/records/pin-button';
 import { QrMini } from '@/components/records/qr-mini';
+import { FilePicture } from '@/components/files/file-media';
 import { FileRow, MileageRow, ReceiptRow, VehicleSwatch } from '@/components/records/rows';
+import { viewsFor } from '@/lib/files/access';
 import { ProjectStatusBadge } from '@/components/records/status';
 import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -85,8 +87,18 @@ export default async function ProjectPage({
   const { space } = workspace;
   const profile = workProfile(space);
   const noun = profile.singular.toLowerCase();
-  const photos = files.filter((file) => file.kind === 'image');
-  const documents = files.filter((file) => file.kind !== 'image');
+  // Photos are image files people took or chose (a QR code image is a document here).
+  const photos = files.filter((file) => file.kind === 'image' && file.source !== 'qr');
+  const documents = files.filter((file) => !photos.includes(file));
+  // Real previews for what this page shows, signed in one request.
+  const fileViews = await viewsFor(
+    workspace,
+    tab === 'photos'
+      ? photos
+      : tab === 'files'
+        ? documents
+        : [...photos.slice(0, 3), ...documents.slice(0, 4)],
+  );
   const projectCodes = codes.filter((code) => code.projectId === id);
   const team = members.filter((member) => project.teamIds.includes(member.personId));
   const guests = members.filter(
@@ -357,9 +369,10 @@ export default async function ProjectPage({
                 <div className="grid grid-cols-3 gap-2 px-4 pb-4">
                   {photos.slice(0, 3).map((file) => (
                     <Link key={file.id} href={`${base}/files?file=${file.id}`} className="group">
-                      <span
-                        className="block aspect-[4/3] rounded-[12px] shadow-[inset_0_0_0_1px_rgb(0_0_0/.08)] transition-transform group-hover:scale-[1.02]"
-                        style={{ background: file.preview }}
+                      <FilePicture
+                        file={file}
+                        view={fileViews[file.id]}
+                        className="aspect-[4/3] w-full rounded-[12px] shadow-[inset_0_0_0_1px_rgb(0_0_0/.08)] transition-transform group-hover:scale-[1.02]"
                       />
                       <span className="mt-1.5 block truncate text-[12px] text-muted">
                         {file.name}
@@ -472,6 +485,7 @@ export default async function ProjectPage({
                       people={people}
                       timezone={tz}
                       context={file.folder}
+                      view={fileViews[file.id]}
                       compact
                     />
                   ))}
@@ -579,6 +593,7 @@ export default async function ProjectPage({
                   people={people}
                   timezone={tz}
                   context={file.folder}
+                  view={fileViews[file.id]}
                 />
               ))}
             </div>
@@ -606,9 +621,11 @@ export default async function ProjectPage({
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
               {photos.map((file) => (
                 <Link key={file.id} href={`${base}/files?file=${file.id}`} className="group">
-                  <span
-                    className="block aspect-[4/3] rounded-[14px] shadow-[inset_0_0_0_1px_rgb(0_0_0/.08)] transition-transform group-hover:scale-[1.02]"
-                    style={{ background: file.preview }}
+                  <FilePicture
+                    file={file}
+                    view={fileViews[file.id]}
+                    iconSize={24}
+                    className="aspect-[4/3] w-full rounded-[14px] shadow-[inset_0_0_0_1px_rgb(0_0_0/.08)] transition-transform group-hover:scale-[1.02]"
                   />
                   <span className="mt-2 block truncate text-[13px] font-medium">{file.name}</span>
                   <span className="block text-[12px] text-muted">

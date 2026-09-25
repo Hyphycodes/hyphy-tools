@@ -106,7 +106,7 @@ export const tools: ToolDefinition[] = [
     name: 'PDF',
     tagline: 'Merge, split and reorder.',
     description:
-      'Combine a stack of PDFs into one file, or pull out just the pages you need. Your files never leave your device.',
+      'Combine a stack of PDFs into one file, or pull out just the pages you need. Your files stay on your device unless you save the result to Files.',
     icon: 'pdf',
     color: '#FF6A3D',
     ink: 'dark',
@@ -119,7 +119,7 @@ export const tools: ToolDefinition[] = [
     bestFor: 'both',
     path: '/tools/pdf',
     highlights: ['Up to 20 files, 500 pages', 'Extract any page range', 'Save the result to Files'],
-    privacy: 'Runs on your device. Nothing is uploaded.',
+    privacy: 'Runs on your device. Only what you save to Files is stored.',
     origin: 'studio',
   },
   {
@@ -183,7 +183,7 @@ export const tools: ToolDefinition[] = [
     bestFor: 'both',
     path: '/tools/images',
     highlights: ['Batch up to 20 images', 'Before and after sizes', 'Strips location data'],
-    privacy: 'Processed on your device. Nothing is uploaded.',
+    privacy: 'Processed on your device. Only what you save to Files is stored.',
     origin: 'studio',
   },
   {

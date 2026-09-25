@@ -1,8 +1,8 @@
 import { headers } from 'next/headers';
 import Link from 'next/link';
 import { AccentPicker, KindChooser, NameForm, TermsForm } from '@/components/settings/basics';
+import { LogoForm } from '@/components/settings/logo-form';
 import { SettingsPage } from '@/components/settings/sections';
-import { Icon } from '@/components/ui/icon';
 import { Panel, PanelHeader } from '@/components/ui/panel';
 import { BASE_PATH } from '@/lib/base-path';
 import { categoryLabel } from '@/lib/insights';
@@ -47,12 +47,12 @@ export default async function BasicsSettings({ params }: PageProps<'/[space]/set
 
         <Panel>
           <PanelHeader title="Accent and mark" />
-          <div className="grid gap-4 px-4 pb-5">
+          <div className="grid gap-5 px-4 pb-5">
             <AccentPicker />
-            <p className="flex items-center gap-2 text-[12.5px] text-muted">
-              <Icon name="image" size={14} /> Logo uploads arrive with file storage. Until then your
-              mark uses your initials.
-            </p>
+            <div className="border-t border-line pt-4">
+              <p className="label mb-3">Logo</p>
+              <LogoForm />
+            </div>
           </div>
         </Panel>
 

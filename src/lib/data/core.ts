@@ -359,6 +359,44 @@ export function createRepository(workspace: Workspace, source: DataSource): Repo
     }
   }
 
+  /** A file this person may rename, move to Trash or delete: theirs, or any if they manage files. */
+  async function changeable(id: string) {
+    const file = (await source.load('files')).find((row) => row.id === id);
+    if (!file || (file.status ?? 'ready') !== 'ready')
+      throw new RuleError('That file isn’t available to you.');
+    if (file.createdBy !== me && !has('files.manage'))
+      throw new RuleError('Only whoever added it, or someone who manages files, can change it.');
+    return file;
+  }
+
+  /**
+   * A receipt's photo: a finished image or PDF this person added, here, not on another receipt.
+   * The database checks the same (`private.check_receipt_photo`).
+   */
+  async function checkPhoto(fileId: string | undefined, receiptId?: string) {
+    if (!fileId) return;
+    const [files, receipts] = await Promise.all([source.load('files'), source.load('receipts')]);
+    const file = files.find((row) => row.id === fileId);
+    if (
+      !file ||
+      file.createdBy !== me ||
+      (file.status ?? 'ready') !== 'ready' ||
+      file.deletedAt ||
+      !(file.kind === 'image' || file.kind === 'pdf')
+    )
+      throw new RuleError('That receipt photo isn’t available. Add it again.');
+    if (receipts.some((row) => row.fileId === fileId && row.id !== receiptId))
+      throw new RuleError('That photo is already on another receipt.');
+  }
+
+  /** An upload of this person's that didn't finish. */
+  async function mineUnfinished(id: string) {
+    const file = (await source.load('files')).find((row) => row.id === id);
+    if (!file || file.createdBy !== me || (file.status ?? 'ready') === 'ready')
+      throw new RuleError('That upload isn’t yours to cancel.');
+    return file;
+  }
+
   async function members() {
     return (await source.load('members')).sort((a, b) => a.joinedAt.localeCompare(b.joinedAt));
   }
@@ -406,9 +444,14 @@ export function createRepository(workspace: Workspace, source: DataSource): Repo
       return (await source.load('files'))
         .filter(
           (file) =>
-            !ref || file.attachedTo.some((item) => item.type === ref.type && item.id === ref.id),
+            (file.status ?? 'ready') === 'ready' &&
+            Boolean(file.deletedAt) === Boolean(filter.trash) &&
+            (!ref || file.attachedTo.some((item) => item.type === ref.type && item.id === ref.id)),
         )
-        .sort(byNewest<FileRecord>('createdAt'));
+        .sort(byNewest<FileRecord>(filter.trash ? 'deletedAt' : 'createdAt'));
+    },
+    async file(id) {
+      return (await source.load('files')).find((file) => file.id === id) ?? null;
     },
     async qrCodes() {
       return [...(await source.load('qrCodes'))].sort(byNewest<QrCode>('createdAt'));
@@ -472,6 +515,7 @@ export function createRepository(workspace: Workspace, source: DataSource): Repo
     },
 
     async createReceipt(input) {
+      await checkPhoto(input.fileId);
       const { draft, ...fields } = input;
       const status = draft ? 'draft' : filedStatus('receipt', input.total);
       const receipt: Receipt = { ...owned('rc'), ...fields, status, ...filedBy(status) };
@@ -511,11 +555,60 @@ export function createRepository(workspace: Workspace, source: DataSource): Repo
       await source.write([insert('vehicles', vehicle)]);
       return vehicle;
     },
-    async addFiles(inputs) {
-      const files: FileRecord[] = inputs.map((input) => ({ ...owned('fl'), ...input }));
-      await source.write(files.map((file) => insert('files', file)));
-      return files;
+    newFileId: () => source.newId('fl'),
+    async startUpload(input) {
+      const file: FileRecord = { ...owned('fl'), ...input, status: 'pending' };
+      await source.write([insert('files', file)]);
+      return file;
     },
+    async myUnfinishedUploads() {
+      return (await source.load('files')).filter(
+        (file) => file.createdBy === me && (file.status ?? 'ready') !== 'ready',
+      );
+    },
+    finishUpload: (id) => source.finishUpload(id),
+    async discardUpload(id) {
+      const file = await mineUnfinished(id);
+      await source.write([{ op: 'delete', table: 'files', id: file.id }]);
+    },
+    async renameFile(id, name) {
+      await changeable(id);
+      await source.write([{ op: 'update', table: 'files', id, patch: { name } }]);
+    },
+    async trashFile(id, trashed) {
+      const file = await changeable(id);
+      if (Boolean(file.deletedAt) === trashed) return;
+      if (trashed && (await source.load('receipts')).some((row) => row.fileId === id))
+        throw new RuleError('This photo belongs to a receipt, so it stays with the receipt.');
+      if (trashed && space.logo?.fileId === id)
+        throw new RuleError('This is the business logo. Change it in Settings.');
+      await source.write([
+        {
+          op: 'update',
+          table: 'files',
+          id,
+          patch: trashed
+            ? { deletedAt: now(), deletedBy: me }
+            : { deletedAt: null, deletedBy: null },
+        },
+      ]);
+    },
+    async deleteFile(id) {
+      const file = await changeable(id);
+      if (!file.deletedAt) throw new RuleError('Move it to Trash first.');
+      await source.write([{ op: 'delete', table: 'files', id }]);
+    },
+    async attachFile(id, ref) {
+      const file = await source.load('files').then((rows) => rows.find((row) => row.id === id));
+      if (!file || (file.status ?? 'ready') !== 'ready' || file.deletedAt)
+        throw new RuleError('That file isn’t available to you.');
+      if (file.createdBy !== me && !has('files.manage'))
+        throw new RuleError('Only whoever added it, or someone who manages files, can attach it.');
+      if (file.attachedTo.some((item) => item.type === ref.type && item.id === ref.id)) return;
+      await source.write([{ op: 'insert', table: 'fileAttachments', row: { fileId: id, ...ref } }]);
+    },
+    setLogo: (fileId) => source.setLogo(fileId),
+    storageBytes: () => source.storageBytes(),
     async saveQrCode(input) {
       const code: QrCode = { ...owned('qr'), ...input };
       await source.write([insert('qrCodes', code)]);
@@ -575,6 +668,7 @@ export function createRepository(workspace: Workspace, source: DataSource): Repo
       return changes.length;
     },
     async resubmitReceipt(id, input) {
+      await checkPhoto(input.fileId, id);
       const fields: Partial<typeof input> = { ...input };
       delete fields.draft;
       const { record, patch } = fixable(await source.load('receipts'), id, 'receipt', input.total);

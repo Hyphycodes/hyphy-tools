@@ -17,7 +17,7 @@ const env = process.env;
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: ['auth.spec.ts', 'business.spec.ts'],
+  testMatch: ['auth.spec.ts', 'business.spec.ts', 'storage.spec.ts', 'files.spec.ts'],
   fullyParallel: false,
   workers: 1,
   timeout: 60_000,

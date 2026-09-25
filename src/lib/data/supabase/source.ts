@@ -2,7 +2,7 @@ import 'server-only';
 import { randomUUID } from 'node:crypto';
 import type { Workspace } from '@/lib/identity/types';
 import type { PinTarget } from '@/lib/platform/types';
-import { DataUnavailableError, RuleError, type Member } from '../repository';
+import { DataUnavailableError, RuleError, type Member, type UploadOutcome } from '../repository';
 import type { Change, DataSource, FieldChange, Visible } from '../source';
 import { asPerson, readAsPerson, uuidLiteral, type Tx } from './db';
 import {
@@ -153,7 +153,21 @@ export function createSupabaseSource(workspace: Workspace): DataSource {
   }
 
   async function apply(tx: Tx, change: Change) {
-    const table = tableName[change.table];
+    if (change.op === 'delete') {
+      const deleted = await tx`
+        delete from files where id = ${change.id} and space_id = ${space.id} returning id`;
+      if (!deleted.length) throw new RuleError('That file isn’t available to you.');
+      return;
+    }
+    if (change.table === 'fileAttachments') {
+      if (change.op !== 'insert') throw new RuleError('Attachments are only added.');
+      const { fileId, type, id } = change.row as { fileId: string; type: string; id: string };
+      await tx`insert into file_attachments (file_id, record_type, record_id)
+               values (${fileId}, ${type}, ${id}) on conflict do nothing`;
+      return;
+    }
+    const kind = change.table as Exclude<typeof change.table, 'fileAttachments'>;
+    const table = tableName[kind];
     // A business's rules live beside its Space row, in `space_settings` (one per Space).
     if (change.op === 'update' && change.table === 'spaces' && 'settings' in change.patch) {
       const { settings, ...rest } = change.patch;
@@ -164,7 +178,7 @@ export function createSupabaseSource(workspace: Workspace): DataSource {
       change = { ...change, patch: rest };
     }
     if (change.op === 'insert') {
-      const values = toColumns(change.table, change.row);
+      const values = toColumns(kind, change.row);
       await tx`insert into ${tx(table)} ${tx(values as Record<string, never>)}`;
       if (change.table === 'files') {
         const refs = (change.row.attachedTo as { type: string; id: string }[] | undefined) ?? [];
@@ -174,7 +188,7 @@ export function createSupabaseSource(workspace: Workspace): DataSource {
       }
       return;
     }
-    const values = toColumns(change.table, change.patch);
+    const values = toColumns(kind, change.patch);
     const updated = await tx`
       update ${tx(table)} set ${tx(values as Record<string, never>)}
       where id = ${change.id} ${change.table === 'spaces' ? tx`` : tx`and space_id = ${space.id}`}
@@ -235,6 +249,30 @@ export function createSupabaseSource(workspace: Workspace): DataSource {
     },
     pins() {
       return read<PinTarget[]>('pins');
+    },
+    async finishUpload(id) {
+      const outcome = await run(
+        async (tx) =>
+          (await tx`select public.finish_upload(${id}) as outcome`)[0].outcome as string,
+      );
+      cache.clear();
+      return outcome as UploadOutcome;
+    },
+    async setLogo(fileId) {
+      const previous = await run(
+        async (tx) =>
+          (await tx`select public.set_space_logo(${space.id}, ${fileId}) as previous`)[0]
+            .previous as string | null,
+      );
+      cache.clear();
+      return previous ?? null;
+    },
+    async storageBytes() {
+      const [row] = await readAsPerson<{ bytes: string | null }>(
+        me,
+        `select public.space_storage_bytes(${S}) as bytes`,
+      );
+      return row?.bytes === null || row?.bytes === undefined ? null : Number(row.bytes);
     },
     async setPins(pins) {
       await run(async (tx) => {

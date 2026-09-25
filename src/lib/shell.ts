@@ -1,4 +1,5 @@
 import 'server-only';
+import { storageFor } from '@/lib/files/storage';
 import type { ShellModel } from '@/components/shell/model';
 import type { Repository } from '@/lib/data';
 import type { Workspace } from '@/lib/identity/types';
@@ -79,9 +80,11 @@ export async function buildShellModel(workspace: Workspace, repo: Repository): P
       name: item.space.name,
       kind: item.space.kind,
       brand: item.space.brand,
+      logo: item.space.logo,
       descriptor: item.space.descriptor,
       roleLabel: item.space.kind === 'personal' ? 'Personal' : roles[item.role].label,
     })),
+    fileStorage: storageFor(workspace).storage,
     nav,
     inboxCount: inbox.length,
     actions: createActionsFor(space, membership),

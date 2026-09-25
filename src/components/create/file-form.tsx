@@ -1,34 +1,25 @@
 'use client';
-import { useId, useState, type DragEvent } from 'react';
-import { addFiles } from '@/app/(app)/[space]/actions';
-import { cn } from '@/components/ui/cn';
+import { useRouter } from 'next/navigation';
+import { useId, useState } from 'react';
+import { DropZone, UploadList, useUploadQueue } from '@/components/files/uploader';
+import { Button } from '@/components/ui/button';
 import { Field, Input, Select } from '@/components/ui/form';
-import { Icon } from '@/components/ui/icon';
+import { useToast } from '@/components/ui/toast';
 import { useWorkspace } from '@/components/shell/workspace-context';
-import { formatBytes } from '@/lib/platform/format';
-import type { FileKind } from '@/lib/platform/types';
-import { useSubmit, type FormProps } from './create-sheets';
-import { FormFooter, Section, SubmitButton } from './parts';
-
-function kindOf(file: File): FileKind {
-  if (file.type.startsWith('image/') || /\.(hei[cf]|jpe?g|png|webp)$/i.test(file.name))
-    return 'image';
-  if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) return 'pdf';
-  if (/\.(zip|rar|7z)$/i.test(file.name)) return 'archive';
-  if (/\.(xlsx?|csv|numbers)$/i.test(file.name)) return 'sheet';
-  return 'doc';
-}
+import { MAX_FILES_AT_ONCE } from '@/lib/files/rules';
+import type { FormProps } from './create-sheets';
+import { FormFooter, Section } from './parts';
 
 /**
- * Files and photos. In the preview the bytes stay on this device: Hyphy records the name, type
- * and size so Files, projects and activity behave exactly as they will with real storage.
+ * Upload files (or photos) and say what they belong to. Each file goes through the one upload
+ * pipeline (lib/files/upload.ts) with its own progress, Cancel and Try again; the sheet closes
+ * once they're all in.
  */
 export function FileForm({ request, onDone, formId, photos }: FormProps & { photos?: boolean }) {
   const workspace = useWorkspace();
   const id = useId();
-  const { pending, error, submit } = useSubmit(onDone);
-  const [files, setFiles] = useState<File[]>([]);
-  const [over, setOver] = useState(false);
+  const router = useRouter();
+  const toast = useToast();
   const guest = workspace.role === 'guest';
   const activeProjects = workspace.options.projects.filter((project) => project.status !== 'done');
   const defaultTarget = request.attachTo
@@ -40,108 +31,66 @@ export function FileForm({ request, onDone, formId, photos }: FormProps & { phot
       : '';
   const [target, setTarget] = useState(defaultTarget);
   const [folder, setFolder] = useState('');
+  const [error, setError] = useState('');
+  const [type, targetId] = target.split(':');
+  const queue = useUploadQueue(workspace.space.slug, {
+    purpose: photos ? 'photo' : 'file',
+    attachTo:
+      type && targetId ? { type: type as 'project' | 'vehicle' | 'person', id: targetId } : null,
+    folder: folder || undefined,
+  });
+  const waiting = queue.items.filter((item) => item.stage === 'waiting');
+  const failed = queue.items.filter((item) => item.stage === 'failed');
+  const device = workspace.fileStorage === 'device';
 
-  const add = (list: FileList | null) => {
-    if (!list) return;
-    const incoming = Array.from(list).filter((file) => !photos || kindOf(file) === 'image');
-    setFiles((current) => [...current, ...incoming].slice(0, 20));
-  };
-  const hasFiles = (event: DragEvent) => Array.from(event.dataTransfer.types).includes('Files');
+  async function upload() {
+    setError('');
+    if (guest && !target) return setError('Choose the project these belong to.');
+    if (!waiting.length) return setError('Choose at least one file.');
+    const done = await queue.start(waiting);
+    if (!done.length) return;
+    router.refresh();
+    toast({
+      title: done.length === 1 ? done[0].name : `${done.length} files uploaded`,
+      description: done.length === 1 ? 'Uploaded' : undefined,
+      href:
+        done.length === 1
+          ? workspace.href(`/files?file=${done[0].fileId}`)
+          : workspace.href('/files'),
+    });
+    // Anything that didn't make it stays in the list, with its reason and Try again.
+    if (done.length === waiting.length) onDone();
+  }
 
   return (
     <form
       id={formId}
       onSubmit={(event) => {
         event.preventDefault();
-        const [type, targetId] = target.split(':');
-        submit(
-          () =>
-            addFiles(workspace.space.slug, {
-              files: files.map((file) => ({
-                name: file.name,
-                size: file.size,
-                kind: kindOf(file),
-              })),
-              attachTo:
-                type && targetId ? { type: type as 'project' | 'vehicle', id: targetId } : null,
-              folder,
-            }),
-          {
-            title: files.length === 1 ? files[0].name : `${files.length} files`,
-            href: workspace.href('/files'),
-          },
-        );
+        void upload();
       }}
     >
-      <input
-        id={`${id}-input`}
-        type="file"
-        multiple
-        accept={photos ? 'image/*' : undefined}
-        capture={photos ? 'environment' : undefined}
-        className="sr-only"
-        onChange={(event) => {
-          add(event.target.files);
-          event.target.value = '';
+      <DropZone
+        purpose={photos ? 'photo' : 'file'}
+        capture={photos}
+        icon={photos ? 'camera' : 'upload'}
+        title={photos ? 'Take or choose photos' : 'Choose files'}
+        hint={
+          photos
+            ? `Up to ${MAX_FILES_AT_ONCE} at a time · JPG, PNG, WebP or HEIC up to 20 MB`
+            : `or drag them here · up to ${MAX_FILES_AT_ONCE} · PDF up to 50 MB, photos 20 MB`
+        }
+        onFiles={(files) => {
+          setError('');
+          queue.add(files);
         }}
       />
-      <label
-        htmlFor={`${id}-input`}
-        onDragEnter={(event) => {
-          if (!hasFiles(event)) return;
-          event.preventDefault();
-          setOver(true);
-        }}
-        onDragOver={(event) => hasFiles(event) && event.preventDefault()}
-        onDragLeave={() => setOver(false)}
-        onDrop={(event) => {
-          event.preventDefault();
-          setOver(false);
-          add(event.dataTransfer.files);
-        }}
-        className={cn(
-          'mt-1 flex flex-col items-center gap-2 rounded-[18px] border-[1.5px] border-dashed px-4 py-8 text-center transition-colors',
-          over ? 'border-signal bg-signal-soft' : 'border-line-strong bg-subtle hover:bg-well/60',
-        )}
-      >
-        <span className="grid size-12 place-items-center rounded-full bg-ink text-white">
-          <Icon name={photos ? 'camera' : 'upload'} size={21} />
-        </span>
-        <span className="text-[15px] font-semibold text-ink">
-          {over ? 'Drop to add' : photos ? 'Take or choose photos' : 'Choose files'}
-        </span>
-        <span className="text-[13px] text-muted">
-          {photos ? 'Up to 20 at a time' : 'or drag them here · up to 20'}
-        </span>
-      </label>
-
-      {files.length > 0 && (
-        <ul className="row-divide mt-3 rounded-[14px] bg-surface shadow-card">
-          {files.map((file, index) => (
-            <li key={`${file.name}-${index}`} className="flex items-center gap-3 px-3 py-2.5">
-              <Icon
-                name={
-                  kindOf(file) === 'image' ? 'image' : kindOf(file) === 'pdf' ? 'pdf' : 'file-text'
-                }
-                size={18}
-                className="text-muted"
-              />
-              <span className="min-w-0 flex-1 truncate text-[14px]">{file.name}</span>
-              <span className="mono-num text-[11.5px] text-faint">{formatBytes(file.size)}</span>
-              <button
-                type="button"
-                aria-label={`Remove ${file.name}`}
-                onClick={() =>
-                  setFiles((current) => current.filter((_, position) => position !== index))
-                }
-                className="grid size-8 place-items-center rounded-full text-muted hover:bg-ink/5 hover:text-ink"
-              >
-                <Icon name="x" size={15} />
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      <UploadList
+        items={queue.items}
+        onCancel={queue.cancel}
+        onRetry={(key) => void queue.retry(key).then((file) => file && router.refresh())}
+        onRemove={queue.remove}
+      />
 
       <Section title="Attach to">
         <Field
@@ -152,6 +101,7 @@ export function FileForm({ request, onDone, formId, photos }: FormProps & { phot
           <Select
             id={`${id}-target`}
             value={target}
+            disabled={queue.busy}
             onChange={(event) => setTarget(event.target.value)}
           >
             {!guest && <option value="">Nothing — just Files</option>}
@@ -165,13 +115,19 @@ export function FileForm({ request, onDone, formId, photos }: FormProps & { phot
               </optgroup>
             )}
             {!guest && workspace.options.vehicles.length > 0 && (
-              <optgroup label="Vehicles">
+              <optgroup label={workspace.labels.vehicles}>
                 {workspace.options.vehicles.map((vehicle) => (
                   <option key={vehicle.id} value={`vehicle:${vehicle.id}`}>
                     {vehicle.name}
                   </option>
                 ))}
               </optgroup>
+            )}
+            {request.attachTo?.type === 'person' && (
+              <option value={`person:${request.attachTo.id}`}>
+                {workspace.options.people.find((person) => person.id === request.attachTo!.id)
+                  ?.name ?? 'This person'}
+              </option>
             )}
           </Select>
         </Field>
@@ -180,6 +136,7 @@ export function FileForm({ request, onDone, formId, photos }: FormProps & { phot
             <Input
               id={`${id}-folder`}
               value={folder}
+              disabled={queue.busy}
               onChange={(event) => setFolder(event.target.value)}
               placeholder="Uploads"
               list={`${id}-folders`}
@@ -195,11 +152,23 @@ export function FileForm({ request, onDone, formId, photos }: FormProps & { phot
 
       <FormFooter
         error={error}
-        note="Preview: files stay on this device; Hyphy records the name and size."
+        note={
+          device
+            ? 'Preview: the files stay in this browser; Hyphy keeps their details.'
+            : 'Private to this Space. Only people who can see what they belong to can open them.'
+        }
       >
-        <SubmitButton pending={pending}>
-          {files.length > 1 ? `Add ${files.length} files` : photos ? 'Add photos' : 'Add file'}
-        </SubmitButton>
+        <Button type="submit" variant="primary" disabled={queue.busy || !waiting.length}>
+          {queue.busy
+            ? 'Uploading…'
+            : failed.length && !waiting.length
+              ? 'Fix or remove the files above'
+              : waiting.length > 1
+                ? `Upload ${waiting.length} files`
+                : photos
+                  ? 'Upload photos'
+                  : 'Upload'}
+        </Button>
       </FormFooter>
     </form>
   );

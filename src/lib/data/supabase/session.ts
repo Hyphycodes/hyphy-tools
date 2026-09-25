@@ -19,7 +19,10 @@ export async function loadSession(
     personId,
     `select (select to_json(p) from profiles p where p.id = ${ME}) as profile,
             (select coalesce(json_agg(x), '[]'::json) from (
-               select m.*, to_jsonb(s) || jsonb_build_object('settings', ss.settings) as space
+               select m.*, to_jsonb(s) || jsonb_build_object('settings', ss.settings,
+                        -- Where the logo's bytes are (every member may see the logo's record).
+                        'logo_storage', (select f.storage_bucket from files f
+                                         where f.id = s.logo_file_id and f.status = 'ready')) as space
                from space_members m
                join spaces s on s.id = m.space_id
                -- The business's rules; Row Level Security leaves them out for guests.

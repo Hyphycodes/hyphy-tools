@@ -25,6 +25,10 @@ const verbs: Record<ActivityVerb, string> = {
   added: 'added',
   changed: 'changed',
   archived: 'stopped using',
+  deleted: 'deleted',
+  restored: 'restored',
+  renamed: 'renamed',
+  attached: 'attached',
 };
 
 const verbIcon: Partial<Record<ActivityVerb, IconName>> = {
@@ -41,6 +45,10 @@ const verbIcon: Partial<Record<ActivityVerb, IconName>> = {
   added: 'plus',
   changed: 'settings',
   archived: 'archive',
+  deleted: 'trash',
+  restored: 'restore',
+  renamed: 'pencil',
+  attached: 'paperclip',
 };
 
 /** Where an activity's object lives inside the Space. */

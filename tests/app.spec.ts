@@ -693,7 +693,7 @@ test('a link page makes its own QR code, saved with the page', async ({
   await reset(page);
 });
 
-test('a PDF made with the tool lands in Files, on its project, with its origin', async ({
+test('a PDF made with the tool is saved as a real PDF, on its project, with its origin', async ({
   page,
   context,
   baseURL,
@@ -705,11 +705,254 @@ test('a PDF made with the tool lands in Files, on its project, with its origin',
   await page.getByLabel('Attach to').selectOption({ label: 'Oak Brook Remodel' });
   await page.getByRole('button', { name: 'Save to Files' }).click();
   await page.getByRole('link', { name: /Saved to Files · Open/ }).click();
-  await expect(page.getByText(/Made with the PDF tool/)).toBeVisible();
+  const detail = page.getByRole('complementary', { name: /^File:/ });
+  await expect(detail.getByRole('link', { name: 'PDF tool', exact: true })).toBeVisible();
   await expect(
     page.getByRole('list', { name: 'Belongs to' }).getByRole('link', { name: 'Oak Brook Remodel' }),
   ).toBeVisible();
+  // The bytes are real: after a reload the saved file still downloads, and it's the PDF.
+  await page.reload({ waitUntil: 'networkidle' });
+  const pdf = await download(page, detail);
+  expect(pdf.name).toMatch(/\.pdf$/);
+  expect(pdf.text.startsWith('%PDF-')).toBe(true);
   await reset(page);
+});
+
+/** Clicks Download in a file's panel; the saved file's name and contents. */
+async function download(page: Page, within: Locator) {
+  const waiting = page.waitForEvent('download');
+  await within
+    .getByRole('button', { name: 'Download' })
+    .or(within.getByRole('link', { name: 'Download' }))
+    .click();
+  const file = await waiting;
+  const stream = await file.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(chunk as Buffer);
+  return { name: file.suggestedFilename(), text: Buffer.concat(chunks).toString('latin1') };
+}
+
+/** A real 1×1 PNG, small enough to write down. */
+const PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
+const PDF_BYTES = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n');
+
+test.describe('files in Demo Mode', () => {
+  test('a project upload: Dana adds plans to Oak Brook, Mike opens them', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await previewAs(context, 'dana', baseURL!);
+    await visit(page, '/abc-construction/files');
+    await page.getByRole('button', { name: 'Upload', exact: true }).click();
+    const sheet = page.getByRole('dialog', { name: 'Upload files' });
+    await sheet.locator('input[type=file]').setInputFiles({
+      name: 'Oak Brook Plans.pdf',
+      mimeType: 'application/pdf',
+      buffer: PDF_BYTES,
+    });
+    await sheet.getByLabel('Belongs to').selectOption({ label: 'Oak Brook Remodel' });
+    await sheet.getByRole('button', { name: 'Upload', exact: true }).click();
+    await expect(sheet).toBeHidden();
+    await expect(page.getByRole('link', { name: /Oak Brook Plans\.pdf/ }).first()).toBeVisible();
+
+    // Mike is on Oak Brook's team: he sees it on the project and can download the real bytes.
+    await previewAs(context, 'mike', baseURL!);
+    await visit(page, `/abc-construction/projects/${id('prj_oakbrook')}?tab=files`);
+    await page
+      .getByRole('link', { name: /Oak Brook Plans\.pdf/ })
+      .first()
+      .click();
+    const detail = page.getByRole('complementary', { name: /Oak Brook Plans/ });
+    const file = await download(page, detail);
+    expect(file.name).toBe('Oak Brook Plans.pdf');
+    expect(file.text).toBe(PDF_BYTES.toString('latin1'));
+    // It says what it is and where it came from.
+    await expect(detail.getByText('Uploaded', { exact: true })).toBeVisible();
+    await expect(detail.getByText(`PDF · ${PDF_BYTES.length} B · Uploads`)).toBeVisible();
+    await reset(page);
+  });
+
+  test('what Hyphy won’t take is refused before anything is sent', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await previewAs(context, 'dana', baseURL!);
+    await visit(page, '/abc-construction/files');
+    await page.getByRole('button', { name: 'Upload', exact: true }).click();
+    const sheet = page.getByRole('dialog', { name: 'Upload files' });
+    await sheet.locator('input[type=file]').setInputFiles([
+      // A program renamed to look like an invoice.
+      {
+        name: 'invoice.pdf',
+        mimeType: 'application/pdf',
+        buffer: Buffer.from('MZ\x90\x00\x03\x00'),
+      },
+      { name: 'page.html', mimeType: 'text/html', buffer: Buffer.from('<html></html>') },
+    ]);
+    // Its name says what it isn't: refused on sight.
+    await expect(
+      sheet.getByText('Hyphy doesn’t take .html files here.', { exact: false }),
+    ).toBeVisible();
+    // Its name says PDF; its first bytes say program. Caught before anything is stored.
+    await sheet.getByRole('button', { name: 'Upload', exact: true }).click();
+    await expect(sheet.getByText(/isn’t really a PDF file/).first()).toBeVisible();
+    await page.keyboard.press('Escape');
+    await visit(page, '/abc-construction/files?q=invoice');
+    await expect(page.getByText('No files match')).toBeVisible();
+  });
+
+  test('a receipt photo: Mike takes it, Dana sees the real image and approves', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await previewAs(context, 'mike', baseURL!);
+    await visit(page, '/abc-construction/tools/receipts');
+    await page
+      .getByRole('button', { name: /Submit receipt/ })
+      .first()
+      .click();
+    const sheet = page.getByRole('dialog');
+    await sheet.getByLabel('Choose a photo or PDF').setInputFiles({
+      name: 'shell-receipt.png',
+      mimeType: 'image/png',
+      buffer: PNG,
+    });
+    await expect(sheet.getByText(/Saved in this browser|Uploaded/)).toBeVisible();
+    await expect(sheet.getByRole('img', { name: 'Receipt photo' })).toBeVisible();
+    await sheet.getByLabel('Where').fill('Shell');
+    await sheet.getByLabel('Total').fill('64.18');
+    await sheet.getByRole('button', { name: 'Submit for approval' }).click();
+    await expect(sheet).toBeHidden();
+
+    await previewAs(context, 'dana', baseURL!);
+    await visit(page, '/abc-construction/tools/receipts');
+    await page
+      .getByRole('link', { name: /Shell.*\$64\.18/ })
+      .first()
+      .click();
+    const photo = page.getByRole('figure', { name: 'Receipt photo' });
+    await expect(photo.locator('img')).toBeVisible();
+    expect(await photo.locator('img').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(
+      1,
+    );
+    await page.getByRole('dialog').getByRole('button', { name: 'Approve', exact: true }).click();
+    await expect(page.getByText('Approved').first()).toBeVisible();
+    await page.keyboard.press('Escape');
+    await reset(page);
+  });
+
+  test('a business can require the photo', async ({ page, context, baseURL }) => {
+    await previewAs(context, 'dana', baseURL!);
+    await visit(page, '/abc-construction/settings/receipts');
+    await page
+      .getByRole('group', { name: 'A photo of the receipt' })
+      .getByText('Required', { exact: true })
+      .click();
+    await page.getByRole('button', { name: 'Save receipt rules' }).click();
+    await expect(page.getByText('Receipt rules saved').first()).toBeVisible();
+    await previewAs(context, 'mike', baseURL!);
+    await visit(page, '/abc-construction/tools/receipts');
+    await page
+      .getByRole('button', { name: /Submit receipt/ })
+      .first()
+      .click();
+    const sheet = page.getByRole('dialog');
+    await expect(sheet.getByText(/needs a photo of every receipt/)).toBeVisible();
+    await sheet.getByLabel('Where').fill('Menards');
+    await sheet.getByLabel('Total').fill('12');
+    await sheet.getByRole('button', { name: 'Submit for approval' }).click();
+    await expect(sheet.getByRole('alert')).toContainText('Add a photo of the receipt.');
+    await page.keyboard.press('Escape');
+    await reset(page);
+  });
+
+  test('image and QR results are saved as real images', async ({ page, context, baseURL }) => {
+    await previewAs(context, 'jerry', baseURL!);
+    await visit(page, '/personal/tools/images');
+    await page.getByRole('button', { name: /Try a sample photo/ }).click();
+    await expect(page.getByRole('button', { name: /Save 1 to Files/ })).toBeVisible({
+      timeout: 20_000,
+    });
+    await page.getByRole('button', { name: /Save 1 to Files/ }).click();
+    await page.getByRole('link', { name: /Saved to Files · Open/ }).click();
+    await expect(page).toHaveURL(/\/files\?file=/);
+    await page.reload({ waitUntil: 'networkidle' });
+    const detail = page.getByRole('complementary', { name: /^File:/ });
+    await expect(detail.getByRole('link', { name: 'Image tool', exact: true })).toBeVisible();
+    // The preview is the stored image itself.
+    await expect(detail.locator('img').first()).toBeVisible();
+    expect(
+      await detail
+        .locator('img')
+        .first()
+        .evaluate((img: HTMLImageElement) => img.naturalWidth),
+    ).toBeGreaterThan(100);
+
+    await visit(page, '/personal/tools/qr');
+    await page.getByLabel('Link or text').fill('https://example.com/menu');
+    await page.getByRole('button', { name: 'Save image to Files' }).click();
+    await page.getByRole('link', { name: 'Open' }).last().click();
+    const qr = page.getByRole('complementary', { name: /^File:/ });
+    await expect(qr.getByRole('link', { name: 'QR tool', exact: true })).toBeVisible();
+    const png = await download(page, qr);
+    expect(png.name).toMatch(/\.png$/);
+    expect(png.text.slice(1, 4)).toBe('PNG');
+    await reset(page);
+  });
+
+  test('Trash: out of sight, then back, then gone for good', async ({ page, context, baseURL }) => {
+    await previewAs(context, 'jerry', baseURL!);
+    await visit(page, '/personal/files');
+    await page.getByRole('button', { name: 'Upload', exact: true }).click();
+    const sheet = page.getByRole('dialog', { name: 'Upload files' });
+    await sheet.locator('input[type=file]').setInputFiles({
+      name: 'Old lease.pdf',
+      mimeType: 'application/pdf',
+      buffer: PDF_BYTES,
+    });
+    await sheet.getByRole('button', { name: 'Upload', exact: true }).click();
+    await expect(sheet).toBeHidden();
+    await page
+      .getByRole('link', { name: /Old lease\.pdf/ })
+      .first()
+      .click();
+    const detail = page.getByRole('complementary', { name: /Old lease/ });
+    await detail.getByRole('button', { name: 'Rename' }).click();
+    await detail.getByLabel('Name').fill('Lease 2024');
+    await detail.getByRole('button', { name: 'Save name' }).click();
+    await expect(page.getByRole('heading', { name: 'Lease 2024.pdf' })).toBeVisible();
+    await page.getByRole('button', { name: 'Move to Trash' }).click();
+    await page
+      .getByRole('dialog', { name: 'Move to Trash?' })
+      .getByRole('button', { name: 'Move to Trash' })
+      .click();
+    await expect(page.getByRole('link', { name: /Lease 2024\.pdf/ })).toHaveCount(0);
+    await visit(page, '/personal/files?view=trash');
+    await page.getByRole('link', { name: /Lease 2024\.pdf/ }).click();
+    await page.getByRole('button', { name: 'Restore' }).click();
+    await visit(page, '/personal/files');
+    await expect(page.getByRole('link', { name: /Lease 2024\.pdf/ })).toBeVisible();
+    await reset(page);
+  });
+
+  test('the business logo shows on its mark', async ({ page, context, baseURL }) => {
+    await previewAs(context, 'dana', baseURL!);
+    await visit(page, '/abc-construction/settings/basics');
+    await page
+      .getByLabel('Upload logo')
+      .setInputFiles({ name: 'abc.png', mimeType: 'image/png', buffer: PNG });
+    await expect(page.getByText('Logo updated')).toBeVisible();
+    await visit(page, '/abc-construction');
+    // The switcher's mark now carries the logo image.
+    await expect(page.locator('img[src^="blob:"]').first()).toBeAttached();
+    await reset(page);
+  });
 });
 
 test.describe('phones', () => {

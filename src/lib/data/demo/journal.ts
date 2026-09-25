@@ -23,7 +23,10 @@ function decode(value: string): JournalOp[] {
   try {
     const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
     return Array.isArray(parsed)
-      ? parsed.filter((op) => op && (op.k === 'add' || op.k === 'set') && typeof op.t === 'string')
+      ? parsed.filter(
+          (op) =>
+            op && (op.k === 'add' || op.k === 'set' || op.k === 'del') && typeof op.t === 'string',
+        )
       : [];
   } catch {
     return [];
