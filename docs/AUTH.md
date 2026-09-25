@@ -201,8 +201,9 @@ This is a checklist, not something done yet.
 1. **Finish the hosted verification.** A Vercel deployment connected to hosted Supabase with
    `HYPHY_DATA=supabase` must be verified end to end first. Real accounts have not been tested on
    hosted Supabase Auth (the development container can't reach it).
-2. **Migrations.** `20260928000000_real_accounts.sql`, `20260929000000_business_spaces.sql` and
-   `20260929010000_team_indexes.sql` are applied to `hyphy-tools-dev`, and `supabase/tests/accounts.sql` and `teams.sql` pass there. A production project gets every migration with
+2. **Migrations.** Every migration through `20260930020000_setup_rule_fixes.sql` (Phase 2C) is
+   applied to `hyphy-tools-dev`, and `supabase/tests/accounts.sql`, `teams.sql` and
+   `customization.sql` pass there. A production project gets every migration with
    `supabase db push` — never `supabase/dev/`.
 3. **Supabase Auth settings** (dashboard → Authentication):
    - Email provider on, **Confirm email on**, minimum password length **8**, **leaked password
