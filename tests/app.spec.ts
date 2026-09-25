@@ -1,9 +1,25 @@
-import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Locator, type Page } from '@playwright/test';
 
 /* The product, end to end, through Demo Mode. */
 
 async function previewAs(context: BrowserContext, person: string, baseURL: string) {
   await context.addCookies([{ name: 'hyphy_preview_as', value: person, url: baseURL }]);
+}
+
+/** Opens a page once it's interactive: scripts loaded and the page hydrated. */
+async function visit(page: Page, path: string) {
+  await page.goto(path, { waitUntil: 'networkidle' });
+}
+
+/**
+ * Presses a keyboard shortcut until it takes effect. Shortcut listeners attach just after the
+ * page hydrates, so on a slow machine the first press can land before they exist.
+ */
+async function shortcut(page: Page, key: string, until: Locator) {
+  await expect(async () => {
+    if (!(await until.isVisible())) await page.keyboard.press(key);
+    await expect(until).toBeVisible({ timeout: 1000 });
+  }).toPass({ timeout: 15_000 });
 }
 
 async function noHorizontalScroll(page: Page) {
@@ -20,7 +36,7 @@ test.beforeEach(async ({ context, baseURL }) => {
 });
 
 test('opens straight into the product, no sign-in', async ({ page }) => {
-  await page.goto('/');
+  await visit(page, '/');
   await expect(page).toHaveURL(/\/hyphy$/);
   await expect(page.getByRole('heading', { level: 1 })).toContainText('Jerry');
   await expect(
@@ -90,7 +106,7 @@ for (const view of perspectives) {
     baseURL,
   }) => {
     await previewAs(context, view.person, baseURL!);
-    await page.goto(view.path);
+    await visit(page, view.path);
     await expect(page.getByRole('heading', { level: 1 })).toContainText(view.heading);
     const nav = page.getByRole('complementary', { name: 'Main' });
     for (const label of view.sees)
@@ -108,7 +124,7 @@ test('pages outside your role are refused', async ({ page, context, baseURL }) =
     '/abc-construction/projects/prj_elmhurst',
     '/hyphy',
   ]) {
-    await page.goto(path);
+    await visit(page, path);
     await expect(
       page.getByText(/Not available to you here|This isn’t in your Spaces/),
     ).toBeVisible();
@@ -116,7 +132,7 @@ test('pages outside your role are refused', async ({ page, context, baseURL }) =
 });
 
 test('Preview As switches the person and their Space', async ({ page }) => {
-  await page.goto('/hyphy');
+  await visit(page, '/hyphy');
   await page
     .getByRole('button', { name: /Preview as someone else/ })
     .filter({ visible: true })
@@ -127,10 +143,9 @@ test('Preview As switches the person and their Space', async ({ page }) => {
 });
 
 test('Shift+D opens Preview As from anywhere', async ({ page }) => {
-  await page.goto('/personal/tools');
-  await page.keyboard.press('Shift+D');
+  await visit(page, '/personal/tools');
   const sheet = page.getByRole('dialog', { name: 'Preview as' });
-  await expect(sheet).toBeVisible();
+  await shortcut(page, 'Shift+D', sheet);
   await expect(
     sheet.getByRole('button', { name: /Preview as Jerry, Manager in Salt & Ember/ }),
   ).toBeVisible();
@@ -138,11 +153,11 @@ test('Shift+D opens Preview As from anywhere', async ({ page }) => {
 
 test('everyone agrees on what Mike is working on', async ({ page, context, baseURL }) => {
   await previewAs(context, 'mike', baseURL!);
-  await page.goto('/abc-construction');
+  await visit(page, '/abc-construction');
   await expect(page.getByText('You’re on Oak Brook Remodel.')).toBeVisible();
   await expect(page.getByRole('heading', { level: 2, name: 'Oak Brook Remodel' })).toBeVisible();
   await previewAs(context, 'dana', baseURL!);
-  await page.goto('/abc-construction/people/mike');
+  await visit(page, '/abc-construction/people/mike');
   const current = page.getByText('Current project').locator('..');
   await expect(current).toContainText('Oak Brook Remodel');
 });
@@ -153,7 +168,7 @@ test('a receipt opens with its details, and approving it updates the status', as
   baseURL,
 }) => {
   await previewAs(context, 'dana', baseURL!);
-  await page.goto('/abc-construction/tools/receipts');
+  await visit(page, '/abc-construction/tools/receipts');
   await page.getByRole('link', { name: /Shell/ }).first().click();
   const sheet = page.getByRole('dialog', { name: 'Shell' });
   await expect(sheet).toBeVisible();
@@ -161,7 +176,7 @@ test('a receipt opens with its details, and approving it updates the status', as
   await expect(sheet.getByRole('link', { name: 'Truck 24' })).toBeVisible();
   await sheet.getByRole('button', { name: 'Approve' }).click();
   await expect(sheet.getByText(/Approved by Dana/)).toBeVisible();
-  await page.goto('/abc-construction/tools/receipts');
+  await visit(page, '/abc-construction/tools/receipts');
   await page
     .getByRole('button', { name: /Reset demo/ })
     .filter({ visible: true })
@@ -174,7 +189,7 @@ test('the inbox groups what needs you, and links from the dashboard land on appr
   baseURL,
 }) => {
   await previewAs(context, 'dana', baseURL!);
-  await page.goto('/abc-construction');
+  await visit(page, '/abc-construction');
   await page.getByRole('link', { name: /Waiting on approval/ }).click();
   await expect(page).toHaveURL(/\/inbox\?view=approvals$/);
   await expect(page.getByRole('region', { name: 'Approvals' })).toBeVisible();
@@ -182,7 +197,7 @@ test('the inbox groups what needs you, and links from the dashboard land on appr
 });
 
 test('the Space switcher moves between Spaces', async ({ page }) => {
-  await page.goto('/hyphy');
+  await visit(page, '/hyphy');
   await page
     .getByRole('complementary', { name: 'Main' })
     .getByRole('button', { name: /Hyphy LLC/ })
@@ -196,8 +211,8 @@ test('the Space switcher moves between Spaces', async ({ page }) => {
 
 test('command search finds records and navigates', async ({ page, context, baseURL }) => {
   await previewAs(context, 'dana', baseURL!);
-  await page.goto('/abc-construction');
-  await page.keyboard.press('Control+k');
+  await visit(page, '/abc-construction');
+  await shortcut(page, 'Control+k', page.getByRole('combobox', { name: 'Search' }));
   await page.getByRole('combobox', { name: 'Search' }).fill('truck 24');
   await expect(page.getByRole('option', { name: /Truck 24/ }).first()).toBeVisible();
   await page.keyboard.press('Enter');
@@ -207,8 +222,8 @@ test('command search finds records and navigates', async ({ page, context, baseU
 
 test('a member submits a trip and a manager approves it', async ({ page, context, baseURL }) => {
   await previewAs(context, 'mike', baseURL!);
-  await page.goto('/abc-construction');
-  await page.keyboard.press('c');
+  await visit(page, '/abc-construction');
+  await shortcut(page, 'c', page.getByRole('menu', { name: 'Create' }));
   await page.getByRole('menuitem', { name: /Log mileage/ }).click();
   await page.getByLabel('Miles one way').fill('4.4');
   await page.getByLabel('To', { exact: true }).fill('Lumber yard');
@@ -216,7 +231,7 @@ test('a member submits a trip and a manager approves it', async ({ page, context
   await expect(page.getByText('4.4 mi logged')).toBeVisible();
 
   await previewAs(context, 'dana', baseURL!);
-  await page.goto('/abc-construction/inbox');
+  await visit(page, '/abc-construction/inbox');
   const item = page.getByRole('listitem').filter({ hasText: '4.4 mi' });
   await expect(item).toBeVisible();
   await item.getByRole('button', { name: 'Approve' }).click();
@@ -232,11 +247,11 @@ test('a member submits a trip and a manager approves it', async ({ page, context
 
 test('turning a tool off hides it for the Space', async ({ page, context, baseURL }) => {
   await previewAs(context, 'dana', baseURL!);
-  await page.goto('/abc-construction/settings');
+  await visit(page, '/abc-construction/settings');
   await page.getByRole('switch', { name: /Mileage on/ }).click();
   await expect(page.getByRole('switch', { name: /Mileage off/ })).toBeVisible();
   await expect(page.getByText('Mileage off')).toBeVisible();
-  await page.goto('/abc-construction');
+  await visit(page, '/abc-construction');
   await expect(
     page.getByRole('complementary', { name: 'Main' }).getByRole('link', { name: 'Mileage' }),
   ).toHaveCount(0);
@@ -247,7 +262,7 @@ test('turning a tool off hides it for the Space', async ({ page, context, baseUR
 });
 
 test('QR codes draw as you type', async ({ page }) => {
-  await page.goto('/personal/tools/qr');
+  await visit(page, '/personal/tools/qr');
   const input = page.getByLabel(/Link or text/);
   await input.fill('https://example.com/menu');
   await expect(
@@ -257,7 +272,7 @@ test('QR codes draw as you type', async ({ page }) => {
 });
 
 test('a Wi-Fi code carries the network, with a printed caption', async ({ page }) => {
-  await page.goto('/personal/tools/qr');
+  await visit(page, '/personal/tools/qr');
   await page.getByText('Wi-Fi', { exact: true }).click();
   await page.getByLabel('Network name').fill('Studio-Guest');
   await page.getByLabel('Password').fill('espresso');
@@ -276,7 +291,7 @@ test('PDFs show their pages, merge, and extract by tapping pages', async ({ page
     for (let index = 0; index < pages; index += 1) doc.addPage([300, 400]);
     return Buffer.from(await doc.save());
   };
-  await page.goto('/personal/tools/pdf');
+  await visit(page, '/personal/tools/pdf');
   await page.locator('input[type=file]').setInputFiles([
     { name: 'one.pdf', mimeType: 'application/pdf', buffer: await make(2) },
     { name: 'two.pdf', mimeType: 'application/pdf', buffer: await make(3) },
@@ -309,14 +324,14 @@ test.describe('phones', () => {
   ]) {
     test(`${person} ${path} fits the screen`, async ({ page, context, baseURL }) => {
       await previewAs(context, person, baseURL!);
-      await page.goto(path);
+      await visit(page, path);
       await expect(page.getByRole('navigation', { name: 'Tabs' })).toBeVisible();
       await noHorizontalScroll(page);
     });
   }
   test('create opens as a sheet of big targets', async ({ page, context, baseURL }) => {
     await previewAs(context, 'mike', baseURL!);
-    await page.goto('/abc-construction');
+    await visit(page, '/abc-construction');
     await page.getByRole('button', { name: 'Create', exact: true }).click();
     const sheet = page.getByRole('dialog', { name: 'Create' });
     await expect(sheet.getByRole('button', { name: /Submit receipt/ })).toBeVisible();
