@@ -12,7 +12,9 @@ import { getWorkspace, PermissionError, requirePermission } from '@/lib/identity
 import type { Workspace } from '@/lib/identity/types';
 import type { SubmissionKind, SubmissionRef } from '@/lib/platform/approvals';
 import type { Permission } from '@/lib/platform/roles';
-import { ROLE_ORDER } from '@/lib/platform/roles';
+import { grantableRoles, roles } from '@/lib/platform/roles';
+import { isBusinessType } from '@/lib/platform/business-types';
+import { teamFor } from '@/lib/teams';
 import { availability, tools } from '@/lib/platform/tools';
 import type {
   AttachmentRef,
@@ -32,7 +34,8 @@ import type {
  */
 
 export type ActionResult =
-  { ok: true; id?: string; message?: string } | { ok: false; error: string };
+  | { ok: true; id?: string; message?: string; link?: string; href?: string }
+  | { ok: false; error: string };
 
 class InputError extends Error {}
 
@@ -262,11 +265,10 @@ export async function createProject(slug: string, input: Input) {
 export async function invitePerson(slug: string, input: Input) {
   return run(slug, async () => {
     const { repo, workspace } = await open(slug, 'people.manage');
-    const role = oneOf<Role>(input, 'role', ROLE_ORDER);
-    // Only an owner can hand out owner or admin.
-    if ((role === 'owner' || role === 'admin') && workspace.membership.role !== 'owner')
-      throw new InputError('Only an owner can add owners or admins.');
-    const email = text(input, 'email', { max: 120 })!;
+    if (workspace.space.kind !== 'business')
+      throw new InputError('Your Personal Space is just for you. Invite people to a business.');
+    const role = oneOf<Role>(input, 'role', grantableRoles(workspace.membership.role));
+    const email = text(input, 'email', { max: 254 })!.toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new InputError('Check the email address.');
     const projects = await repo.projects();
     const projectIds = Array.isArray(input.projectIds)
@@ -274,20 +276,146 @@ export async function invitePerson(slug: string, input: Input) {
       : [];
     if (role === 'guest' && projectIds.length === 0)
       throw new InputError('Pick at least one project a guest can see.');
-    const member = await repo.invite({
-      name: text(input, 'name', { max: 80 })!,
+    const team = teamFor(workspace);
+    const { invitation, emailed } = await team.invite({
+      // A name is how Demo Mode shows its fictional person; real people name themselves.
+      name: text(input, 'name', { max: 80, required: !team.real }),
       email,
       role,
-      title:
-        text(input, 'title', { max: 80, required: false }) ??
-        (role === 'guest' ? 'Guest' : 'Team member'),
+      title: text(input, 'title', { max: 80, required: false }),
       projectIds: projectIds.length ? projectIds : undefined,
+      note: text(input, 'note', { max: 280, required: false }),
     });
     return {
       ok: true,
-      id: member.personId,
-      message: `Invite ready for ${member.person.firstName}`,
+      id: invitation.id,
+      message: !team.real
+        ? `Invite ready for ${invitation.name.split(' ')[0]}`
+        : emailed
+          ? `Invitation sent to ${invitation.email}`
+          : `Invitation ready for ${invitation.email} — share its link from People`,
     };
+  });
+}
+
+/* ---------- the team: invitations and memberships (checked again by the database) ---------- */
+
+async function team(slug: string, permission?: Permission) {
+  const { workspace } = await open(slug, permission);
+  return { workspace, team: teamFor(workspace) };
+}
+
+function id(value: unknown) {
+  const text = String(value ?? '');
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(text)) throw new InputError('That isn’t available to you.');
+  return text;
+}
+
+export async function resendInvitation(slug: string, invitationId: string) {
+  return run(slug, async () => {
+    const { team: t } = await team(slug, 'people.manage');
+    const { emailed } = await t.resend(id(invitationId));
+    return {
+      ok: true,
+      message: emailed ? 'Sent again, with a new link' : 'New link ready — copy it to share',
+    };
+  });
+}
+
+export async function shareInvitationLink(slug: string, invitationId: string) {
+  return run(slug, async () => {
+    const { team: t } = await team(slug, 'people.manage');
+    return { ok: true, link: await t.shareLink(id(invitationId)), message: 'Link copied' };
+  });
+}
+
+export async function revokeInvitation(slug: string, invitationId: string) {
+  return run(slug, async () => {
+    const { team: t } = await team(slug, 'people.manage');
+    await t.revoke(id(invitationId));
+    return { ok: true, message: 'Invitation revoked' };
+  });
+}
+
+export async function setInvitationRole(slug: string, invitationId: string, role: string) {
+  return run(slug, async () => {
+    const { team: t, workspace } = await team(slug, 'people.manage');
+    const next = oneOf<Role>({ role }, 'role', grantableRoles(workspace.membership.role));
+    await t.setInvitationRole(id(invitationId), next);
+    return { ok: true, message: `They’ll join as ${roles[next].label}` };
+  });
+}
+
+export async function setMemberRole(slug: string, personId: string, role: string) {
+  return run(slug, async () => {
+    const { team: t, workspace } = await team(slug, 'people.manage');
+    const next = oneOf<Role>({ role }, 'role', grantableRoles(workspace.membership.role));
+    await t.setMemberRole(id(personId), next);
+    return { ok: true, message: `Now ${roles[next].label}` };
+  });
+}
+
+export async function removeMember(slug: string, personId: string) {
+  return run(slug, async () => {
+    const { team: t, workspace } = await team(slug, 'people.manage');
+    await t.removeMember(id(personId));
+    return {
+      ok: true,
+      message: `Removed from ${workspace.space.name}`,
+      href: `/${workspace.space.slug}/people`,
+    };
+  });
+}
+
+export async function leaveSpace(slug: string) {
+  return run(slug, async () => {
+    const { team: t, workspace } = await team(slug);
+    await t.leave();
+    return { ok: true, message: `You left ${workspace.space.name}`, href: '/personal' };
+  });
+}
+
+export async function transferOwnership(slug: string, personId: string, confirmName: string) {
+  return run(slug, async () => {
+    const { team: t, workspace } = await team(slug);
+    if (workspace.membership.role !== 'owner')
+      throw new InputError('Only the owner can transfer the business.');
+    // The owner types the business's name: this is never a slip of a dropdown.
+    if (confirmName.trim().toLowerCase() !== workspace.space.name.trim().toLowerCase())
+      throw new InputError(`Type ${workspace.space.name} to confirm.`);
+    await t.transferOwnership(id(personId));
+    return { ok: true, message: 'Ownership transferred. You’re an admin now.' };
+  });
+}
+
+/* ---------- the business itself ---------- */
+
+export async function updateBusiness(slug: string, input: Input) {
+  return run(slug, async () => {
+    const { repo, workspace } = await open(slug, 'space.manage');
+    if (workspace.space.kind !== 'business') throw new InputError('That’s for business Spaces.');
+    const name = text(input, 'name', { max: 80 })!;
+    const type = isBusinessType(input.type) ? input.type : workspace.space.businessType;
+    const singular = text(input, 'singular', { max: 30, required: false });
+    const plural = text(input, 'plural', { max: 30, required: false });
+    await repo.updateSpace({
+      name,
+      ...(type ? { businessType: type } : {}),
+      ...(singular && plural
+        ? { labels: { ...workspace.space.labels, projects: { singular, plural } } }
+        : {}),
+    });
+    return { ok: true, message: 'Business details saved' };
+  });
+}
+
+/** The end of the short setup after creating a business: its tools, then (optionally) its team. */
+export async function finishSetup(slug: string) {
+  return run(slug, async () => {
+    const { repo, workspace } = await open(slug, 'space.manage');
+    if (!workspace.space.setupDoneAt)
+      await repo.updateSpace({ setupDoneAt: new Date().toISOString() });
+    return { ok: true, href: `/${workspace.space.slug}` };
   });
 }
 

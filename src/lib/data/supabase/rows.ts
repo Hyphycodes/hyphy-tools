@@ -85,6 +85,8 @@ export function spaceFrom(row: Row): Space {
     customFields: Object.keys(json(row.custom_fields, {})).length
       ? json(row.custom_fields, {})
       : undefined,
+    businessType: (row.business_type as Space['businessType']) ?? undefined,
+    setupDoneAt: iso(row.setup_done_at),
     createdAt: iso(row.created_at)!,
   });
 }
@@ -450,6 +452,8 @@ export const columns = {
     ownerId: 'owner_id',
     workStyle: 'work_style',
     mileageRate: 'mileage_rate',
+    businessType: 'business_type',
+    setupDoneAt: 'setup_done_at',
     createdAt: 'created_at',
   },
 } as const;

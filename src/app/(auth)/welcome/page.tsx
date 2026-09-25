@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import { AuthCard, AuthColumn, AuthHeading } from '@/components/auth/frame';
 import { DisplayNameForm } from '@/components/auth/forms';
 import { Starters } from '@/components/auth/starters';
+import { Icon } from '@/components/ui/icon';
 import { SpaceMark } from '@/components/ui/marks';
 import { authRoutes } from '@/lib/auth/routes';
 import { getWorkspace, requireSession } from '@/lib/identity';
@@ -48,6 +49,21 @@ export default async function WelcomePage() {
 
       <h2 className="label mb-3 px-1">What would you like to do first?</h2>
       <Starters workspace={workspace} />
+      <Link
+        href="/create-business"
+        className="mt-6 flex items-center gap-3.5 rounded-[16px] bg-ink p-4 text-white shadow-lift transition-transform active:scale-[.99]"
+      >
+        <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-white/10">
+          <Icon name="building" size={19} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[15px] font-semibold">Running a business?</span>
+          <span className="block text-[13px] text-white/65">
+            Create a shared Space for your team — it takes a few seconds.
+          </span>
+        </span>
+        <Icon name="arrow-right" size={17} />
+      </Link>
       <p className="mt-7 text-center">
         <Link
           href="/personal"

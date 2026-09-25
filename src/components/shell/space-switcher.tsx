@@ -88,7 +88,19 @@ export function SpaceSwitcher({ compact }: { compact?: boolean }) {
                 })}
               </div>
             ))}
-          <p className="mx-1 mt-1 border-t border-line px-2 pt-2.5 pb-1 text-[12px] leading-snug text-faint">
+          <div className="mx-1 mt-1 border-t border-line pt-1.5">
+            <Link
+              href="/create-business"
+              onClick={close}
+              className="flex items-center gap-3 rounded-[10px] px-2 py-2.5 text-[15px] font-medium text-ink transition-colors hover:bg-ink/[.05] lg:gap-2.5 lg:py-2 lg:text-[13.5px]"
+            >
+              <span className="grid size-8 place-items-center rounded-[9px] shadow-[inset_0_0_0_1px_var(--color-line-strong)]">
+                <Icon name="plus" size={16} />
+              </span>
+              Create a business
+            </Link>
+          </div>
+          <p className="mx-1 px-2 pt-1.5 pb-1 text-[12px] leading-snug text-faint">
             One person, many Spaces. Your role changes with the Space you’re in.
           </p>
         </div>

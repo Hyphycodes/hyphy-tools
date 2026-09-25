@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { DisplayNameForm, NewPasswordForm } from '@/components/auth/forms';
 import { signOut } from '@/lib/auth/actions';
+import { LeaveBusiness } from '@/components/team/member-manage';
 import { Button } from '@/components/ui/button';
 import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -61,13 +62,20 @@ export default async function ProfilePage({ params }: PageProps<'/[space]/profil
         </div>
       )}
       <Panel>
-        <PanelHeader title="Your Spaces" count={session.memberships.length} />
+        <PanelHeader title="Your Spaces" count={session.memberships.length}>
+          <Link
+            href="/create-business"
+            className="text-[13px] font-medium text-signal-ink hover:underline"
+          >
+            Create a business
+          </Link>
+        </PanelHeader>
         <ul className="row-divide">
           {session.memberships.map((membership) => (
-            <li key={membership.id}>
+            <li key={membership.id} className="flex items-center">
               <Link
                 href={`/${membership.space.slug}`}
-                className="flex items-center gap-3 px-4 py-3 hover:bg-subtle"
+                className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 hover:bg-subtle"
               >
                 <SpaceMark space={membership.space} size="lg" />
                 <span className="min-w-0 flex-1">
@@ -90,6 +98,11 @@ export default async function ProfilePage({ params }: PageProps<'/[space]/profil
                 </Badge>
                 <Icon name="chevron-right" size={16} className="text-faint" />
               </Link>
+              {account && membership.space.kind === 'business' && membership.role !== 'owner' && (
+                <span className="shrink-0 pr-3">
+                  <LeaveBusiness slug={membership.space.slug} spaceName={membership.space.name} />
+                </span>
+              )}
             </li>
           ))}
         </ul>

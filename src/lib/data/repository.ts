@@ -17,6 +17,7 @@ import type {
   Project,
   QrCode,
   Receipt,
+  Space,
   Vehicle,
 } from '@/lib/platform/types';
 
@@ -112,6 +113,10 @@ export type LinkPageInput = Pick<LinkPage, 'title' | 'handle' | 'bio' | 'theme' 
   id?: string;
 };
 
+export type SpacePatch = Partial<
+  Pick<Space, 'name' | 'descriptor' | 'businessType' | 'workStyle' | 'labels' | 'setupDoneAt'>
+>;
+
 export type ActivityFilter = {
   limit?: number;
   /** Events whose object or context is this record. */
@@ -176,4 +181,6 @@ export interface Repository {
   resolveInbox(id: string): Promise<void>;
   setPinned(target: PinTarget, pinned: boolean): Promise<void>;
   setModules(modules: ModuleId[]): Promise<void>;
+  /** The Space's own details: name, type, words, setup. Its address never changes. */
+  updateSpace(patch: SpacePatch): Promise<void>;
 }

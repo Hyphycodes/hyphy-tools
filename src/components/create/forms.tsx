@@ -617,6 +617,9 @@ export function PersonForm({ onDone, formId }: FormProps) {
   const [email, setEmail] = useState('');
   const [title, setTitle] = useState('');
   const [projects, setProjects] = useState<string[]>([]);
+  const [note, setNote] = useState('');
+  // Real accounts name themselves; Demo Mode needs a name for its fictional person.
+  const real = Boolean(workspace.account);
 
   return (
     <form
@@ -625,7 +628,14 @@ export function PersonForm({ onDone, formId }: FormProps) {
         event.preventDefault();
         submit(
           () =>
-            invitePerson(workspace.space.slug, { name, email, role, title, projectIds: projects }),
+            invitePerson(workspace.space.slug, {
+              name,
+              email,
+              role,
+              title,
+              projectIds: projects,
+              note,
+            }),
           {
             title: `${name.split(' ')[0] || 'They'} can join ${workspace.space.name}`,
             href: workspace.href('/people'),
@@ -634,17 +644,25 @@ export function PersonForm({ onDone, formId }: FormProps) {
       }}
     >
       <Section>
-        <Field label="Name" htmlFor={`${id}-name`}>
+        <Field label="Name" htmlFor={`${id}-name`} optional={real}>
           <Input
             id={`${id}-name`}
             value={name}
             onChange={(event) => setName(event.target.value)}
-            required
+            required={!real}
             data-autofocus
             autoComplete="off"
           />
         </Field>
-        <Field label="Email" htmlFor={`${id}-email`} hint="In the preview, no email is sent.">
+        <Field
+          label="Email"
+          htmlFor={`${id}-email`}
+          hint={
+            real
+              ? 'We’ll email them a link to join. They accept with this address.'
+              : 'In the preview, no email is sent.'
+          }
+        >
           <Input
             id={`${id}-email`}
             type="email"
@@ -663,6 +681,17 @@ export function PersonForm({ onDone, formId }: FormProps) {
             placeholder="Field Employee, Server…"
           />
         </Field>
+        {real && (
+          <Field label="A note for them" htmlFor={`${id}-note`} optional>
+            <Textarea
+              id={`${id}-note`}
+              value={note}
+              maxLength={280}
+              onChange={(event) => setNote(event.target.value)}
+              placeholder="See you Monday at the shop."
+            />
+          </Field>
+        )}
       </Section>
       <Section title="What can they see?">
         <div role="radiogroup" className="grid gap-2">
@@ -754,7 +783,7 @@ export function PersonForm({ onDone, formId }: FormProps) {
         )}
       </Section>
       <FormFooter error={error}>
-        <SubmitButton pending={pending}>Add person</SubmitButton>
+        <SubmitButton pending={pending}>{real ? 'Send invite' : 'Add person'}</SubmitButton>
       </FormFooter>
     </form>
   );

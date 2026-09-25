@@ -93,6 +93,8 @@ export function worldRows(now = Date.now()): World {
       owner_id: u(space.ownerId),
       work_style: v(space.workStyle),
       mileage_rate: v(space.mileageRate),
+      business_type: v(space.businessType),
+      setup_done_at: t(space.setupDoneAt),
       created_at: t(space.createdAt),
     })),
   );

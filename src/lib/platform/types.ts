@@ -10,6 +10,8 @@
  * `supabase/migrations/` so a real repository can return them unchanged.
  */
 
+import type { BusinessType } from './business-types';
+
 export type ISODate = string;
 
 /* ---------- identity ---------- */
@@ -76,6 +78,10 @@ export type Space = {
   /** Owner of a personal Space. */
   ownerId?: string;
   customFields?: Partial<Record<'projects' | 'vehicles' | 'people', FieldDefinition[]>>;
+  /** What kind of business it is (business Spaces); sets starting words and tools. */
+  businessType?: BusinessType;
+  /** When its owner finished (or skipped) setup after creating it. */
+  setupDoneAt?: ISODate;
   createdAt: ISODate;
 };
 
@@ -90,7 +96,8 @@ export type Membership = {
   role: Role;
   /** Their job in this Space: "Field Employee", "Electrical subcontractor". */
   title: string;
-  status: 'active' | 'invited';
+  /** `invited`: Demo Mode's placeholder; `removed`: a former member (kept so names resolve). */
+  status: 'active' | 'invited' | 'removed';
   joinedAt: ISODate;
   /** Guests (and members) can be limited to specific projects. */
   projectIds?: string[];
@@ -290,6 +297,8 @@ export type ActivityVerb =
   | 'assigned'
   | 'joined'
   | 'invited'
+  | 'removed'
+  | 'left'
   | 'commented'
   | 'completed'
   | 'merged'

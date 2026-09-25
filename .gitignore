@@ -45,3 +45,6 @@ next-env.d.ts
 /playwright-report/
 
 /artifacts/
+
+# Captured development email (HYPHY_EMAIL=capture)
+/.hyphy-mail/

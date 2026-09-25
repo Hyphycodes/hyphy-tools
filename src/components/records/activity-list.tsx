@@ -16,6 +16,8 @@ const verbs: Record<ActivityVerb, string> = {
   assigned: 'assigned',
   joined: 'joined',
   invited: 'invited',
+  removed: 'removed',
+  left: 'left',
   commented: 'commented on',
   completed: 'completed',
   merged: 'merged',
@@ -54,6 +56,8 @@ export function refHref(base: string, ref: Pick<ObjectRef, 'type' | 'id'>) {
       return `${base}/tools/qr`;
     case 'link':
       return `${base}/tools/links`;
+    case 'space':
+      return base;
     default:
       return `${base}/settings`;
   }

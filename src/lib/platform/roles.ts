@@ -57,31 +57,31 @@ export const roles: Record<
 > = {
   owner: {
     label: 'Owner',
-    summary: 'Runs the Space, including its plan.',
+    summary: 'Controls the business, including its plan and who owns it.',
     can: ['Everything in this Space', 'Change the plan', 'Add and remove anyone'],
     cannot: [],
   },
   admin: {
     label: 'Admin',
-    summary: 'Manages people, settings and all records.',
+    summary: 'Can help manage the business and its team.',
     can: ['Manage people and roles', 'Turn tools on and off', 'See and approve everything'],
     cannot: ['Change the plan'],
   },
   manager: {
     label: 'Manager',
-    summary: 'Runs day-to-day work for the team.',
+    summary: 'Can manage day-to-day work and approvals.',
     can: ['Create projects', 'Approve receipts and mileage', 'Manage vehicles and files'],
     cannot: ['Change settings or the plan', 'Change anyone’s role'],
   },
   member: {
     label: 'Member',
-    summary: 'Does the work and submits it.',
+    summary: 'Can submit and work with the business information they’re given.',
     can: ['Submit receipts and mileage', 'Upload photos and files', 'See their projects'],
     cannot: ['See other people’s submissions', 'Approve anything'],
   },
   guest: {
     label: 'Guest',
-    summary: 'Sees only what’s shared with them.',
+    summary: 'Limited access to the projects and information shared with them.',
     can: ['Open shared projects', 'Upload files to them'],
     cannot: ['See the rest of the Space', 'See people or money'],
   },
@@ -101,4 +101,22 @@ export function can(membership: Pick<Membership, 'role'>, permission: Permission
 /** Owners, admins and managers run the Space; members and guests use it. */
 export function isOperator(role: Role) {
   return role === 'owner' || role === 'admin' || role === 'manager';
+}
+
+/**
+ * The roles this person can hand out in a Space (invitations and role changes): people managers
+ * give manager, member and guest; only the owner adds admins. Nobody hands out owner — ownership
+ * moves by transfer. The database checks the same (`private.check_grantable`).
+ */
+export function grantableRoles(actor: Role): Role[] {
+  if (actor === 'owner') return ['admin', 'manager', 'member', 'guest'];
+  if (actor === 'admin') return ['manager', 'member', 'guest'];
+  return [];
+}
+
+/** Whether `actor` may change or remove `target`'s membership (never their own, never the owner). */
+export function canManageMember(actor: Role, target: Role, self: boolean) {
+  if (self || target === 'owner') return false;
+  if (target === 'admin') return actor === 'owner';
+  return actor === 'owner' || actor === 'admin';
 }

@@ -28,7 +28,8 @@ import {
   formatNumber,
   plural,
 } from '@/lib/platform/format';
-import { roles } from '@/lib/platform/roles';
+import { canManageMember, grantableRoles, roles } from '@/lib/platform/roles';
+import { MemberManage } from '@/components/team/member-manage';
 
 export async function generateMetadata({ params }: PageProps<'/[space]/people/[id]'>) {
   const { repo } = await openPage(params);
@@ -71,6 +72,10 @@ export default async function PersonPage({ params }: PageProps<'/[space]/people/
   const monthSpend = monthReceipts.reduce((sum, item) => sum + item.total, 0);
   const monthMiles = Math.round(monthTrips.reduce((sum, item) => sum + item.miles, 0) * 10) / 10;
   const role = roles[member.role];
+  // Presentation only: the database decides again (set_member_role, transfer_ownership).
+  const manageable =
+    can('people.manage') && canManageMember(workspace.membership.role, member.role, self);
+  const transferable = workspace.membership.role === 'owner' && !self && member.role !== 'guest';
   const refs = [
     ...waitingReceipts.map((item) => ({ kind: 'receipt' as const, id: item.id })),
     ...waitingTrips.map((item) => ({ kind: 'mileage' as const, id: item.id })),
@@ -115,7 +120,7 @@ export default async function PersonPage({ params }: PageProps<'/[space]/people/
           </div>
           <h1 className="display text-[32px] sm:text-[40px]">{member.person.name}</h1>
           <p className="text-[15px] text-muted">
-            {member.title} · {workspace.space.name}
+            {[member.title, workspace.space.name].filter(Boolean).join(' · ')}
           </p>
           <p className="mt-1 text-[13px] text-faint">{role.summary}</p>
         </div>
@@ -128,6 +133,21 @@ export default async function PersonPage({ params }: PageProps<'/[space]/people/
           </dl>
         )}
       </header>
+
+      {workspace.space.kind === 'business' &&
+        member.status === 'active' &&
+        (manageable || transferable) && (
+          <MemberManage
+            slug={workspace.space.slug}
+            spaceName={workspace.space.name}
+            personId={member.personId}
+            firstName={member.person.firstName}
+            role={member.role}
+            grantable={grantableRoles(workspace.membership.role)}
+            canManage={manageable}
+            canTransfer={transferable}
+          />
+        )}
 
       {/* An operational read, not an HR file: where they are, what they drive, what's moving. */}
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">

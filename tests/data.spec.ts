@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
@@ -618,5 +618,162 @@ test.describe('real accounts', () => {
         title: '',
       }),
     ).rejects.toThrow(RuleError);
+  });
+});
+
+test.describe('businesses and invitations under pressure', () => {
+  const admin = () => postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} });
+  const token = () => randomBytes(32).toString('base64url');
+  const created: string[] = [];
+  let sql: postgres.Sql;
+
+  test.beforeAll(() => {
+    if (process.env.DATABASE_ADMIN_URL) sql = admin();
+  });
+  test.beforeEach(() => {
+    test.skip(!process.env.DATABASE_ADMIN_URL, 'Needs DATABASE_ADMIN_URL to act as Supabase Auth.');
+  });
+  test.afterAll(async () => {
+    if (!sql) return;
+    await sql`delete from spaces where kind = 'business' and slug like 'race-%'`;
+    if (created.length) await sql`delete from auth.users where id = any(${created}::uuid[])`;
+    await sql.end();
+  });
+
+  /** A confirmed account, as Supabase Auth leaves it. */
+  async function account(who: string) {
+    const id = randomUUID();
+    created.push(id);
+    await sql`insert into auth.users (id, email, raw_user_meta_data, email_confirmed_at)
+              values (${id}, ${`${who}-${id.slice(0, 6)}.race-test@hyphy-tools.example`},
+                      ${sql.json({ name: who })}, now())`;
+    const [row] = await sql`select email from auth.users where id = ${id}`;
+    return { id, email: String(row.email) };
+  }
+  async function business(owner: string, key = randomUUID()) {
+    const [row] = await asPerson(
+      owner,
+      (tx) => tx`select * from public.create_business('Race Co', ${`race-${key.slice(0, 8)}`},
+                   'other', false, ${key}::uuid, array['projects'], 'engagements', '{}', '{}', '')`,
+    );
+    return String(row.space_id);
+  }
+  const invite = (owner: string, space: string, email: string, secret: string) =>
+    asPerson(
+      owner,
+      (tx) => tx`select public.create_invitation(${space}, ${email}, 'member', '', '', '{}', null,
+                   ${secret}) as id`,
+    ).then(([row]) => String(row.id));
+  const accept = (person: string, secret: string) =>
+    asPerson(person, (tx) => tx`select * from public.accept_invitation(${secret})`).then(([row]) =>
+      String(row.outcome),
+    );
+  const memberships = async (space: string, person: string) =>
+    (
+      await sql`select count(*)::int as n from space_members
+                where space_id = ${space} and person_id = ${person}`
+    )[0].n as number;
+
+  test('the same request twice at once makes one business', async () => {
+    const owner = await account('owner');
+    const key = randomUUID();
+    const [a, b] = await Promise.all([business(owner.id, key), business(owner.id, key)]);
+    expect(a).toBe(b);
+    const [row] = await sql`select count(*)::int as n from spaces where creation_key = ${key}`;
+    expect(row.n).toBe(1);
+  });
+
+  test('two acceptances at once: one membership, one "joined"', async () => {
+    const owner = await account('owner');
+    const invitee = await account('invitee');
+    const space = await business(owner.id);
+    const secret = token();
+    await invite(owner.id, space, invitee.email, secret);
+    const outcomes = await Promise.all([
+      accept(invitee.id, secret),
+      accept(invitee.id, secret),
+      accept(invitee.id, secret),
+    ]);
+    expect(outcomes.filter((outcome) => outcome === 'joined')).toHaveLength(1);
+    expect(outcomes.every((outcome) => ['joined', 'already_member'].includes(outcome))).toBe(true);
+    expect(await memberships(space, invitee.id)).toBe(1);
+  });
+
+  test('revoking and accepting at once: one or the other, never both', async () => {
+    for (let round = 0; round < 5; round++) {
+      const owner = await account('owner');
+      const invitee = await account('invitee');
+      const space = await business(owner.id);
+      const secret = token();
+      const invitation = await invite(owner.id, space, invitee.email, secret);
+      const [accepted] = await Promise.all([
+        accept(invitee.id, secret),
+        asPerson(owner.id, (tx) => tx`select public.revoke_invitation(${invitation})`).catch(
+          (error: Error) => error.message,
+        ),
+      ]);
+      const [row] = await sql`select status from space_invitations where id = ${invitation}`;
+      const joined = await memberships(space, invitee.id);
+      if (accepted === 'joined') expect([row.status, joined]).toEqual(['accepted', 1]);
+      else expect([accepted, row.status, joined]).toEqual(['revoked', 'revoked', 0]);
+    }
+  });
+
+  test('resending while the old link is being accepted: the old link works only if it won', async () => {
+    for (let round = 0; round < 5; round++) {
+      const owner = await account('owner');
+      const invitee = await account('invitee');
+      const space = await business(owner.id);
+      const first = token();
+      const invitation = await invite(owner.id, space, invitee.email, first);
+      const [accepted, renewed] = await Promise.all([
+        accept(invitee.id, first),
+        asPerson(
+          owner.id,
+          (tx) => tx`select public.renew_invitation(${invitation}, ${token()}, false)`,
+        ).then(
+          () => 'renewed',
+          (error: Error) => error.message,
+        ),
+      ]);
+      const joined = await memberships(space, invitee.id);
+      if (accepted === 'joined') {
+        expect(renewed).toMatch(/already accepted/);
+        expect(joined).toBe(1);
+      } else {
+        expect([accepted, renewed, joined]).toEqual(['invalid', 'renewed', 0]);
+      }
+    }
+  });
+
+  test('a role changed just before acceptance is the role they get', async () => {
+    const owner = await account('owner');
+    const invitee = await account('invitee');
+    const space = await business(owner.id);
+    const secret = token();
+    const invitation = await invite(owner.id, space, invitee.email, secret);
+    await asPerson(
+      owner.id,
+      (tx) => tx`select public.set_invitation_role(${invitation}, 'manager', null)`,
+    );
+    expect(await accept(invitee.id, secret)).toBe('joined');
+    const session = await loadSession(invitee.id, 'supabase');
+    expect(session?.memberships.map((m) => [m.space.kind, m.role])).toEqual([
+      ['personal', 'owner'],
+      ['business', 'manager'],
+    ]);
+  });
+
+  test('removed: the next page load no longer has the business', async () => {
+    const owner = await account('owner');
+    const invitee = await account('invitee');
+    const space = await business(owner.id);
+    const secret = token();
+    await invite(owner.id, space, invitee.email, secret);
+    await accept(invitee.id, secret);
+    expect((await loadSession(invitee.id, 'supabase'))?.memberships).toHaveLength(2);
+    await asPerson(owner.id, (tx) => tx`select public.remove_member(${space}, ${invitee.id})`);
+    const after = await loadSession(invitee.id, 'supabase');
+    expect(after?.memberships.map((m) => m.space.kind)).toEqual(['personal']);
   });
 });

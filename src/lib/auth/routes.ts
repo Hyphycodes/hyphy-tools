@@ -12,16 +12,20 @@ export const authRoutes = {
   confirm: '/auth/confirm',
   authError: '/auth/error',
   welcome: '/welcome',
+  createBusiness: '/create-business',
 } as const;
 
-/** Open to everyone: the pages that let someone in. */
-const PUBLIC = [
+/** The pages that let someone in: never somewhere to be sent back to afterwards. */
+const ACCOUNT_PAGES = [
   authRoutes.signIn,
   authRoutes.signUp,
   authRoutes.forgotPassword,
   authRoutes.resetPassword,
   '/auth',
 ];
+
+/** Open to everyone: the account pages, and invitation links (read before signing in). */
+const PUBLIC = [...ACCOUNT_PAGES, '/invite'];
 
 /** Only for people who aren't signed in; a signed-in visit goes home. */
 const SIGNED_OUT_ONLY = [authRoutes.signIn, authRoutes.signUp, authRoutes.forgotPassword];
@@ -48,6 +52,13 @@ export const reservedSlugs = [
   'account',
   'api',
   'platform',
+  'invite',
+  'invites',
+  'create-business',
+  'new',
+  'dev',
+  'settings',
+  'help',
 ] as const;
 
 /** `/abc/projects` → `abc`, for remembering the last Space someone used. */
@@ -78,7 +89,7 @@ export function safeNext(raw: unknown, fallback = '/'): string {
   let path = url.pathname;
   if (under(path, BASE_PATH)) path = path.slice(BASE_PATH.length) || '/';
   // `/..//evil.example` resolves to `//evil.example`: another origin once it's a Location.
-  if (path.startsWith('//') || isPublicPath(path)) return fallback;
+  if (path.startsWith('//') || ACCOUNT_PAGES.some((prefix) => under(path, prefix))) return fallback;
   return `${path}${url.search}${url.hash}`;
 }
 

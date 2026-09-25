@@ -531,5 +531,8 @@ export function createRepository(workspace: Workspace, source: DataSource): Repo
     async setModules(modules) {
       await source.write([{ op: 'update', table: 'spaces', id: space.id, patch: { modules } }]);
     },
+    async updateSpace(patch) {
+      await source.write([{ op: 'update', table: 'spaces', id: space.id, patch }]);
+    },
   };
 }

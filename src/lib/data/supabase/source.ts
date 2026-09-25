@@ -93,7 +93,8 @@ export function createSupabaseSource(workspace: Workspace): DataSource {
     members: {
       sql: list(`
         select m.*, to_jsonb(p) as person from space_members m
-        join profiles p on p.id = m.person_id where m.space_id = ${S}`),
+        join profiles p on p.id = m.person_id
+        where m.space_id = ${S} and m.status <> 'removed'`),
       map: (r) =>
         r.map(
           (row) => ({ ...membershipFrom(row), person: personFrom(row.person as Row) }) as Member,
@@ -207,7 +208,7 @@ export function createSupabaseSource(workspace: Workspace): DataSource {
 }
 
 /** Database refusals become product messages; an unreachable database says so. */
-function translate(error: unknown): never {
+export function translate(error: unknown): never {
   if (error instanceof RuleError) throw error;
   const code = (error as { code?: string })?.code;
   const message = (error as { message?: string })?.message ?? '';

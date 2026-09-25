@@ -96,8 +96,8 @@ const definitions: CreateActionDefinition[] = [
   {
     id: 'person',
     toolId: 'people',
-    label: 'Add person',
-    hint: 'Invite and pick a role',
+    label: 'Invite someone',
+    hint: 'By email, with a role',
     group: 'setup',
     icon: 'user-plus',
     permission: 'people.manage',

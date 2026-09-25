@@ -6,21 +6,24 @@ or on plain Postgres (with `tests/prelude.sql` standing in for what Supabase pro
 
 ## What's here
 
-| Path                                                | What it is                                                                                                                                                                                   |
-| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `migrations/20260925000000_platform_foundation.sql` | Profiles, Spaces, memberships and every Space-owned table; `can(space, permission)` mirroring `src/lib/platform/roles.ts`; Row Level Security on all of it                                   |
-| `migrations/20260925100000_connected_systems.sql`   | One review shape for receipts and trips, project value and allowance, work style, pins                                                                                                       |
-| `migrations/20260926000000_real_persistence.sql`    | Approval history, activity written by triggers, review guards, invitations, the Space directory, indexes, policy fixes found in review                                                       |
-| `migrations/20260927000000_hosted_hardening.sql`    | Found deploying to hosted Supabase: no `anon` access to anything, internal helpers not callable, seeding mode not usable by a person, the `hyphy_app` role, guests' directory narrowed       |
-| `migrations/20260927100000_advisor_fixes.sql`       | Supabase's database advisor: trigger functions not offered as RPCs, a fixed search path                                                                                                      |
-| `migrations/20260927200000_no_truncate.sql`         | No TRUNCATE (which bypasses Row Level Security), TRIGGER or REFERENCES for people or the public API                                                                                          |
-| `migrations/20260928000000_real_accounts.sql`       | Real accounts: every new Supabase Auth user gets a profile, Personal Space and owner membership, once; profile email follows Auth; Personal Spaces hold only their owner; reserved addresses |
-| `tests/accounts.sql`                                | The account bootstrap: once and idempotent, nobody bootstraps or edits anyone else, personas untouched; always rolled back                                                                   |
-| `dev/dev_tools.sql`                                 | **Development only.** The development marker, Demo Mode's personas, and the guarded `dev.reset_world` / `dev.changes_since_seed`                                                             |
-| `tests/isolation.sql`                               | RLS attack suite: real people trying what must fail (other Spaces, ids from elsewhere, self-approval, guest enumeration, `anon`)                                                             |
-| `tests/fingerprint.sql`                             | What every persona can see, hashed — identical on every database holding the development world                                                                                               |
-| `tests/flows.sql`                                   | The product's write paths as real people, checking what the triggers record; always rolled back                                                                                              |
-| `tests/prelude.sql`                                 | Stand-ins for Supabase's `auth` schema and roles, so the migrations run on plain Postgres                                                                                                    |
+| Path                                                | What it is                                                                                                                                                                                                  |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `migrations/20260925000000_platform_foundation.sql` | Profiles, Spaces, memberships and every Space-owned table; `can(space, permission)` mirroring `src/lib/platform/roles.ts`; Row Level Security on all of it                                                  |
+| `migrations/20260925100000_connected_systems.sql`   | One review shape for receipts and trips, project value and allowance, work style, pins                                                                                                                      |
+| `migrations/20260926000000_real_persistence.sql`    | Approval history, activity written by triggers, review guards, invitations, the Space directory, indexes, policy fixes found in review                                                                      |
+| `migrations/20260927000000_hosted_hardening.sql`    | Found deploying to hosted Supabase: no `anon` access to anything, internal helpers not callable, seeding mode not usable by a person, the `hyphy_app` role, guests' directory narrowed                      |
+| `migrations/20260927100000_advisor_fixes.sql`       | Supabase's database advisor: trigger functions not offered as RPCs, a fixed search path                                                                                                                     |
+| `migrations/20260927200000_no_truncate.sql`         | No TRUNCATE (which bypasses Row Level Security), TRIGGER or REFERENCES for people or the public API                                                                                                         |
+| `migrations/20260928000000_real_accounts.sql`       | Real accounts: every new Supabase Auth user gets a profile, Personal Space and owner membership, once; profile email follows Auth; Personal Spaces hold only their owner; reserved addresses                |
+| `migrations/20260929000000_business_spaces.sql`     | Businesses and teams: create_business, invitations (hashed links, confirmed-email acceptance), role changes, removal, leaving, ownership transfer, one owner always, current membership required everywhere |
+| `migrations/20260929010000_team_indexes.sql`        | Indexes for who revoked an invitation and who removed a member (advisor follow-up)                                                                                                                          |
+| `tests/teams.sql`                                   | Businesses, invitations and team management as real accounts — including everything that must fail; always rolled back                                                                                      |
+| `tests/accounts.sql`                                | The account bootstrap: once and idempotent, nobody bootstraps or edits anyone else, personas untouched; always rolled back                                                                                  |
+| `dev/dev_tools.sql`                                 | **Development only.** The development marker, Demo Mode's personas, and the guarded `dev.reset_world` / `dev.changes_since_seed`                                                                            |
+| `tests/isolation.sql`                               | RLS attack suite: real people trying what must fail (other Spaces, ids from elsewhere, self-approval, guest enumeration, `anon`)                                                                            |
+| `tests/fingerprint.sql`                             | What every persona can see, hashed — identical on every database holding the development world                                                                                                              |
+| `tests/flows.sql`                                   | The product's write paths as real people, checking what the triggers record; always rolled back                                                                                                             |
+| `tests/prelude.sql`                                 | Stand-ins for Supabase's `auth` schema and roles, so the migrations run on plain Postgres                                                                                                                   |
 
 ### Tables
 
@@ -47,6 +50,10 @@ and its creator (`created_by`). **No Storage buckets yet** — see "Files" below
 - **Accounts.** A new Supabase Auth user gets exactly one profile, Personal Space and owner
   membership (`private.ensure_person`, callable by nobody). People edit only their own name and
   details — never an id or email. A Personal Space holds only its owner.
+- **Teams.** Memberships change only through checked functions; invitations are readable only by
+  the people who manage that business's team and never include the link's hash; every business has
+  exactly one owner; a removed member keeps nothing — every Space-owned table requires a current
+  membership (docs/BUSINESS.md).
 - **The public API gets nothing.** Hosted Supabase publishes `public` to anyone holding the
   publishable key, as `anon`; `anon` has no table or function at all. Hyphy Tools doesn't use that
   API. Signed-in people can call only the policy helpers (which answer about their own access),
@@ -91,8 +98,8 @@ psql "$DATABASE_ADMIN_URL" -f supabase/tests/isolation.sql     # attack suite, r
 HYPHY_DATA=supabase HYPHY_DEMO_RESET=on npm run dev
 ```
 
-**`hyphy-tools-dev`** (hosted, `jgvrqdausbjkfsspjgce`) holds all seven migrations (the seventh,
-`real_accounts`, checked there with `tests/accounts.sql`), the dev tools
+**`hyphy-tools-dev`** (hosted, `jgvrqdausbjkfsspjgce`) holds all nine migrations (`real_accounts` and
+`business_spaces` checked there with `tests/accounts.sql` and `tests/teams.sql`), the dev tools
 and the seeded world. It was checked with the same files: `tests/isolation.sql` (every attack
 refused), `tests/flows.sql` (every write path as real people) and `tests/fingerprint.sql`, whose
 hash is identical to the local database's — every persona sees exactly the same rows on hosted

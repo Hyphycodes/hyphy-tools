@@ -69,7 +69,7 @@ export function SignInForm({ next, email }: { next?: string; email?: string }) {
 
 /* ---------- sign up ---------- */
 
-export function SignUpForm() {
+export function SignUpForm({ next, email }: { next?: string; email?: string }) {
   const [state, action, pending] = useActionState(signUp, initialAuthState);
   const form = useFormRef();
   const problemId = useId();
@@ -78,6 +78,7 @@ export function SignUpForm() {
   return (
     <form ref={form} action={action} noValidate className="grid gap-4">
       <Problem problem={state.problem} id={problemId} />
+      {next && <input type="hidden" name="next" value={next} />}
       <AuthField
         label="Name"
         name="name"
@@ -98,7 +99,7 @@ export function SignUpForm() {
         autoCapitalize="none"
         spellCheck={false}
         required
-        defaultValue={state.values?.email}
+        defaultValue={state.values?.email ?? email}
         invalid={on(state, 'email')}
         problemId={problemId}
       />
@@ -130,8 +131,9 @@ function CheckEmail({ email }: { email: string }) {
       </span>
       <h2 className="text-[19px] font-semibold tracking-[-0.01em]">Check your email</h2>
       <p role="status" className="mt-1.5 text-[15px] leading-relaxed text-muted sm:text-[14.5px]">
-        We sent a link to <span className="font-medium break-all text-ink">{email}</span>. Open it
-        to confirm your account and step into your Personal Space.
+        We sent a link to{' '}
+        <span className="font-medium [overflow-wrap:anywhere] text-ink">{email}</span>. Open it to
+        confirm your account and step into your Personal Space.
       </p>
       <p className="mt-3 text-[13.5px] leading-relaxed text-muted">
         Already have an account with this email?{' '}
@@ -173,8 +175,10 @@ export function ForgotPasswordForm() {
         <h2 className="text-[19px] font-semibold tracking-[-0.01em]">Check your email</h2>
         <p role="status" className="mt-1.5 text-[15px] leading-relaxed text-muted sm:text-[14.5px]">
           If there’s an account for{' '}
-          <span className="font-medium break-all text-ink">{state.values?.email}</span>, a link to
-          choose a new password is on its way. It works once, for a short while.
+          <span className="font-medium [overflow-wrap:anywhere] text-ink">
+            {state.values?.email}
+          </span>
+          , a link to choose a new password is on its way. It works once, for a short while.
         </p>
       </div>
     );

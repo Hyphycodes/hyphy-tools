@@ -1,11 +1,11 @@
 'use server';
 import { revalidatePath } from 'next/cache';
-import { cookies, headers } from 'next/headers';
+import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { BASE_PATH } from '@/lib/base-path';
 import { renameSelf } from '@/lib/data/supabase/profile';
 import { getSession } from '@/lib/identity';
-import { IdentityConfigError, identityMode } from '@/lib/identity/mode';
+import { identityMode } from '@/lib/identity/mode';
+import { appUrl } from '@/lib/site';
 import { createSupabaseServerClient, verifiedIdentity } from '@/lib/supabase/server';
 import {
   authProblem,
@@ -42,26 +42,9 @@ function report(error: unknown, intent: AuthIntent, values?: AuthFormState['valu
   return fail(authProblem(error, intent), values);
 }
 
-/**
- * Where links in Hyphy's emails point. HYPHY_SITE_URL in production (the address people use,
- * e.g. https://hyphy-studio.com — the base path is added here); a Vercel deployment's own address
- * otherwise; the request's host only in development. Supabase also checks every link against the
- * project's allowed redirect URLs.
- */
-async function siteOrigin() {
-  const configured = process.env.HYPHY_SITE_URL?.trim().replace(/\/+$/, '');
-  if (configured) return configured;
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  if (process.env.NODE_ENV !== 'production') {
-    const list = await headers();
-    const host = list.get('host');
-    if (host) return `${list.get('x-forwarded-proto') ?? 'http'}://${host}`;
-  }
-  throw new IdentityConfigError('Set HYPHY_SITE_URL so account emails can link back.');
-}
-
+/** Where links in account emails land. Supabase also checks them against its allowed URLs. */
 async function confirmUrl(next: string) {
-  return `${await siteOrigin()}${BASE_PATH}${authRoutes.confirm}?next=${encodeURIComponent(next)}`;
+  return appUrl(`${authRoutes.confirm}?next=${encodeURIComponent(next)}`);
 }
 
 /* ---------- sign in / sign up ---------- */
@@ -89,6 +72,8 @@ export async function signUp(_: AuthFormState, form: FormData): Promise<AuthForm
   const email = text(form, 'email').trim();
   const password = text(form, 'password');
   const values = { name, email };
+  // Where they were headed (an invitation, say), kept through the confirmation email.
+  const next = safeNext(text(form, 'next'), authRoutes.welcome);
   if (identityMode() !== 'supabase') return fail(preview, values);
   const invalid = checkName(name) ?? checkEmail(email) ?? checkNewPassword(password);
   if (invalid) return fail(invalid, values);
@@ -99,7 +84,7 @@ export async function signUp(_: AuthFormState, form: FormData): Promise<AuthForm
       email,
       password,
       options: {
-        emailRedirectTo: await confirmUrl(authRoutes.welcome),
+        emailRedirectTo: await confirmUrl(next),
         // Only a display name: the bootstrap uses it for the profile. Nothing about access is ever
         // read from user metadata.
         data: { name },
@@ -111,7 +96,7 @@ export async function signUp(_: AuthFormState, form: FormData): Promise<AuthForm
   } catch (error) {
     return report(error, 'sign-up', values);
   }
-  if (signedIn) redirect(authRoutes.welcome);
+  if (signedIn) redirect(next);
   // Confirmation on: "check your email" — also what an existing address gets, on purpose, so the
   // form can't be used to find out who has an account.
   return { done: true, values, at: Date.now() };
@@ -209,7 +194,9 @@ export async function updateDisplayName(_: AuthFormState, form: FormData): Promi
  * Ends this session: Supabase revokes it and the cookies are cleared. The person, their Spaces
  * and their work are untouched — signing out is not deleting anything.
  */
-export async function signOut() {
+export async function signOut(form?: FormData) {
+  // Where to sign back in to (e.g. an invitation meant for another account).
+  const next = form ? safeNext(String(form.get('next') ?? ''), '') : '';
   if (identityMode() !== 'supabase') redirect('/');
   try {
     const supabase = await createSupabaseServerClient();
@@ -223,5 +210,5 @@ export async function signOut() {
       if (cookie.name.startsWith('sb-')) store.delete(cookie.name);
   }
   revalidatePath('/', 'layout');
-  redirect(authRoutes.signIn);
+  redirect(next ? `${authRoutes.signIn}?next=${encodeURIComponent(next)}` : authRoutes.signIn);
 }

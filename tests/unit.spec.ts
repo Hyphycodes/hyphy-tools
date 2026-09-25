@@ -23,8 +23,8 @@ import { createActionsFor, groupActions } from '@/lib/platform/actions';
 import { validateField } from '@/lib/platform/custom-fields';
 import { dashboardFor } from '@/lib/platform/dashboard';
 import { navigationFor } from '@/lib/platform/navigation';
-import { can, permissionsFor } from '@/lib/platform/roles';
-import { availability, getTool } from '@/lib/platform/tools';
+import { can, permissionsFor, roles } from '@/lib/platform/roles';
+import { availability, getTool, tools } from '@/lib/platform/tools';
 import type { Space } from '@/lib/platform/types';
 import { formatRange, parseRange } from '@/lib/tools/pdf';
 import { authProblem, checkEmail, checkName, checkNewPassword } from '@/lib/auth/errors';
@@ -40,6 +40,19 @@ import { homeFor } from '@/lib/identity/active-space';
 import { identityMode } from '@/lib/identity/mode';
 import type { Session } from '@/lib/identity/types';
 import { assertPublishable } from '@/lib/supabase/config';
+import { emailProviderName } from '@/lib/email/choose';
+import { invitationEmail } from '@/lib/email/invitation';
+import {
+  brandFor,
+  BUSINESS_TYPES,
+  businessTypes,
+  checkAddress,
+  presetLabels,
+  presetModules,
+  slugify,
+} from '@/lib/platform/business-types';
+import { canManageMember, grantableRoles } from '@/lib/platform/roles';
+import { describeInvitation } from '@/lib/teams/describe';
 import { kindOf, parseWifi, wifiPayload } from '@/lib/tools/qr';
 
 /* Pure rules, no browser. Run with `npm test`. */
@@ -725,5 +738,131 @@ test.describe('account problems, in plain words', () => {
     expect(checkName('  ')).toMatchObject({ field: 'name' });
     expect(checkName('x'.repeat(81))).toMatchObject({ field: 'name' });
     expect(checkName('Ada')).toBeNull();
+  });
+});
+
+/* ---------- businesses and teams (Phase 2B) ---------- */
+
+test.describe('business types', () => {
+  test('every type starts with People and Files, words that fit, and no unknown tool', () => {
+    const known = new Set(tools.flatMap((tool) => (tool.module ? [tool.module] : [])));
+    for (const type of BUSINESS_TYPES) {
+      const modules = presetModules(type);
+      expect(modules).toContain('people');
+      expect(modules).toContain('files');
+      for (const id of modules) expect(known.has(id), `${type}: ${id}`).toBe(true);
+    }
+    expect(presetLabels('construction')).toEqual({ projects: { singular: 'Job', plural: 'Jobs' } });
+    expect(businessTypes.hospitality.workStyle).toBe('events');
+    expect(presetLabels('real-estate')?.projects?.plural).toBe('Properties');
+    expect(presetModules('construction')).toEqual(
+      expect.arrayContaining(['projects', 'vehicles', 'receipts', 'mileage', 'qr']),
+    );
+    expect(presetModules('retail')).not.toContain('projects');
+  });
+  test('addresses come from the name and stay readable', () => {
+    expect(slugify('ABC Construction')).toBe('abc-construction');
+    expect(slugify('Salt & Ember')).toBe('salt-and-ember');
+    expect(slugify('  Café Olé!! ')).toBe('cafe-ole');
+    expect(slugify('X')).toBe('x-co');
+    expect(slugify('!!!')).toBe('');
+    expect(slugify('a'.repeat(80))).toHaveLength(48);
+    expect(checkAddress('abc-construction')).toBeNull();
+    for (const bad of ['a', '-abc', 'abc-', 'a--b', 'ABC', 'a b', 'a'.repeat(49)])
+      expect(checkAddress(bad), bad).not.toBeNull();
+    // The app's own paths are never a business's address.
+    for (const path of ['invite', 'create-business', 'sign-in', 'welcome', 'auth'])
+      expect(reservedSlugs).toContain(path);
+  });
+  test('a starting mark from the name', () => {
+    expect(brandFor('Harbor Build')).toMatchObject({ monogram: 'H', ink: 'light' });
+    expect(brandFor('Harbor Build')).toEqual(brandFor('Harbor Build'));
+    expect(brandFor('  9 Lives').monogram).toBe('9');
+  });
+});
+
+test.describe('who hands out which role', () => {
+  test('owners add admins; admins add managers, members and guests; nobody adds owners', () => {
+    expect(grantableRoles('owner')).toEqual(['admin', 'manager', 'member', 'guest']);
+    expect(grantableRoles('admin')).toEqual(['manager', 'member', 'guest']);
+    for (const role of ['manager', 'member', 'guest'] as const)
+      expect(grantableRoles(role)).toEqual([]);
+    for (const role of ['owner', 'admin', 'manager', 'member', 'guest'] as const)
+      expect(grantableRoles(role)).not.toContain('owner');
+  });
+  test('nobody manages the owner or themselves; only the owner manages admins', () => {
+    expect(canManageMember('owner', 'admin', false)).toBe(true);
+    expect(canManageMember('admin', 'admin', false)).toBe(false);
+    expect(canManageMember('admin', 'member', false)).toBe(true);
+    expect(canManageMember('admin', 'owner', false)).toBe(false);
+    expect(canManageMember('owner', 'owner', false)).toBe(false);
+    expect(canManageMember('owner', 'member', true)).toBe(false);
+    expect(canManageMember('manager', 'member', false)).toBe(false);
+  });
+  test('roles read as plain promises', () => {
+    expect(roles.admin.summary).toBe('Can help manage the business and its team.');
+    expect(roles.manager.summary).toBe('Can manage day-to-day work and approvals.');
+  });
+});
+
+test.describe('the invitation email', () => {
+  const base = {
+    to: 'mike@example.com',
+    spaceName: 'ABC Construction',
+    brand: { color: '#F2A516', ink: 'dark' as const, monogram: 'AB' },
+    inviterName: 'Jerry Sanchez',
+    role: 'member' as const,
+    link: 'https://hyphy-studio.com/platform/invite/abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG',
+    expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(),
+  };
+  test('says who, where, which role and has one clear way in', () => {
+    const email = invitationEmail(base);
+    expect(email.subject).toBe('Jerry invited you to ABC Construction on Hyphy');
+    expect(email.html).toContain('>Join ABC Construction</a>');
+    expect(email.html).toContain(`href="${base.link}"`);
+    expect(email.html).toContain('mike@example.com');
+    expect(email.text).toContain(`Accept: ${base.link}`);
+    expect(email.text).toContain('Your role: Member');
+    expect(email.text).toContain('works for 7 days');
+  });
+  test('escapes everything a person typed', () => {
+    const email = invitationEmail({
+      ...base,
+      spaceName: '<script>alert(1)</script>',
+      inviterName: 'Eve "Quotes"',
+      note: '<img src=x onerror=alert(1)>',
+    });
+    expect(email.html).not.toContain('<script>');
+    expect(email.html).not.toContain('<img src=x');
+    expect(email.html).toContain('&lt;script&gt;');
+  });
+  test('who delivers it: captured in development, nothing by default in production', () => {
+    expect(emailProviderName({ NODE_ENV: 'development' })).toBe('capture');
+    expect(emailProviderName({ NODE_ENV: 'production' })).toBe('none');
+    expect(emailProviderName({ NODE_ENV: 'production', HYPHY_EMAIL: 'resend' })).toBe('resend');
+    expect(emailProviderName({ NODE_ENV: 'development', HYPHY_EMAIL: 'none' })).toBe('none');
+  });
+  test('People says how long a link still works', () => {
+    const now = Date.UTC(2026, 8, 25, 18);
+    const invitation = {
+      id: 'i',
+      spaceId: 's',
+      email: 'a@b.co',
+      name: '',
+      role: 'member' as const,
+      title: '',
+      projectIds: [],
+      status: 'pending' as const,
+      invitedBy: 'p',
+      createdAt: new Date(now - 86_400_000).toISOString(),
+      sentAt: new Date(now - 86_400_000).toISOString(),
+      expiresAt: new Date(now + 6 * 86_400_000).toISOString(),
+    };
+    expect(describeInvitation(invitation, 'America/Chicago', now)).toMatch(
+      /link works 6 more days$/,
+    );
+    expect(
+      describeInvitation({ ...invitation, expiresAt: new Date(now - 1).toISOString() }, 'UTC', now),
+    ).toMatch(/link expired$/);
   });
 });

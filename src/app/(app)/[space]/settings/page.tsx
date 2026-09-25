@@ -1,4 +1,6 @@
+import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
+import { BusinessDetailsForm } from '@/components/business/details-form';
 import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -9,11 +11,11 @@ import { Panel, PanelHeader } from '@/components/ui/panel';
 import { openPage } from '@/lib/page';
 import { fieldTypes } from '@/lib/platform/custom-fields';
 import { formatDate } from '@/lib/platform/format';
-import { planFor, plans } from '@/lib/platform/plans';
+import { plans } from '@/lib/platform/plans';
 import { ROLE_ORDER, roles } from '@/lib/platform/roles';
-import { toolName, tools } from '@/lib/platform/tools';
 import { workProfile } from '@/lib/platform/work';
-import { ModuleToggles, type ToggleRow } from './module-toggles';
+import { ModuleToggles } from './module-toggles';
+import { toggleRowsFor } from './rows';
 
 export const metadata = { title: 'Settings' };
 
@@ -24,24 +26,9 @@ export default async function SettingsPage({ params }: PageProps<'/[space]/setti
   const plan = plans[space.plan];
   const members = await repo.members();
   const personal = space.kind === 'personal';
+  const host = (await headers()).get('host')?.replace(/:\d+$/, '') ?? 'hyphy-studio.com';
 
-  const rows: ToggleRow[] = tools
-    .filter((tool) => tool.module && tool.status !== 'soon' && tool.spaceKinds.includes(space.kind))
-    .map((tool) => {
-      const inPlan = plan.includes.includes(tool.module!);
-      return {
-        module: tool.module!,
-        name: toolName(tool, space),
-        tagline: tool.tagline,
-        color: tool.color,
-        ink: tool.ink,
-        icon: tool.icon,
-        locked: inPlan
-          ? undefined
-          : `Included with ${planFor(tool.module!, space.kind)?.name ?? 'a higher plan'}`,
-        required: tool.module === 'files' || (!personal && tool.module === 'people'),
-      };
-    });
+  const rows = toggleRowsFor(space);
   const customFields = Object.entries(space.customFields ?? {}).filter(([, list]) => list?.length);
 
   return (
@@ -55,19 +42,32 @@ export default async function SettingsPage({ params }: PageProps<'/[space]/setti
         }
       />
 
-      <Panel className="mb-5 flex flex-col gap-4 p-5 sm:flex-row sm:items-center">
-        <SpaceMark space={space} size="xl" />
-        <div className="min-w-0 flex-1">
-          <h2 className="text-[20px] font-semibold tracking-[-0.01em]">{space.name}</h2>
-          <p className="text-[13.5px] text-muted">
-            {space.descriptor} · {personal ? 'Personal Space' : 'Business Space'} · since{' '}
-            {formatDate(space.createdAt, tz, true)}
-          </p>
-        </div>
-        <Button size="sm" disabled title="Editing arrives with accounts">
-          <Icon name="pencil" size={14} /> Edit
-        </Button>
-      </Panel>
+      {!personal && can('space.manage') && (
+        <Panel className="mb-5">
+          <PanelHeader title="Business details" />
+          <BusinessDetailsForm
+            space={space}
+            words={{ singular: workProfile(space).singular, plural: workProfile(space).plural }}
+            host={host}
+          />
+        </Panel>
+      )}
+
+      {personal && (
+        <Panel className="mb-5 flex flex-col gap-4 p-5 sm:flex-row sm:items-center">
+          <SpaceMark space={space} size="xl" />
+          <div className="min-w-0 flex-1">
+            <h2 className="text-[20px] font-semibold tracking-[-0.01em]">{space.name}</h2>
+            <p className="text-[13.5px] text-muted">
+              {space.descriptor} · {personal ? 'Personal Space' : 'Business Space'} · since{' '}
+              {formatDate(space.createdAt, tz, true)}
+            </p>
+          </div>
+          <Button size="sm" disabled title="Editing arrives with accounts">
+            <Icon name="pencil" size={14} /> Edit
+          </Button>
+        </Panel>
+      )}
 
       <div className="mb-5 rounded-[16px] bg-signal-soft/70 p-4 text-[13.5px] leading-relaxed text-signal-ink shadow-[inset_0_0_0_1px_rgb(50_64_255/.12)]">
         <p className="font-semibold">Three separate switches</p>

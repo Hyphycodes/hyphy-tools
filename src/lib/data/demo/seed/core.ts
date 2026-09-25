@@ -99,6 +99,7 @@ export function spaces(t: Clock): Space[] {
     {
       id: 'sp_hyphy',
       slug: 'hyphy',
+      businessType: 'creative',
       kind: 'business',
       name: 'Hyphy LLC',
       descriptor: 'Design & software studio · Chicago',
@@ -119,6 +120,7 @@ export function spaces(t: Clock): Space[] {
       brand: { color: '#3240FF', ink: 'light', monogram: 'H' },
       timezone: DEMO_TZ,
       createdAt: t.ago(200),
+      setupDoneAt: t.ago(200),
       customFields: {
         projects: [
           {
@@ -134,6 +136,7 @@ export function spaces(t: Clock): Space[] {
     {
       id: 'sp_abc',
       slug: 'abc-construction',
+      businessType: 'construction',
       kind: 'business',
       name: 'ABC Construction',
       descriptor: 'Remodeling & additions · Oak Brook, IL',
@@ -154,6 +157,7 @@ export function spaces(t: Clock): Space[] {
       brand: { color: '#F2A516', ink: 'dark', monogram: 'AB' },
       timezone: DEMO_TZ,
       createdAt: t.ago(160),
+      setupDoneAt: t.ago(160),
       customFields: {
         projects: [
           { id: 'permit', label: 'Permit #', type: 'text' },
@@ -179,6 +183,7 @@ export function spaces(t: Clock): Space[] {
     {
       id: 'sp_se',
       slug: 'salt-and-ember',
+      businessType: 'hospitality',
       kind: 'business',
       name: 'Salt & Ember',
       descriptor: 'Restaurant & bar · West Loop, Chicago',
@@ -189,6 +194,7 @@ export function spaces(t: Clock): Space[] {
       brand: { color: '#E0492F', ink: 'light', monogram: 'SE' },
       timezone: DEMO_TZ,
       createdAt: t.ago(140),
+      setupDoneAt: t.ago(140),
       customFields: {
         projects: [
           { id: 'guests', label: 'Guests', type: 'number' },

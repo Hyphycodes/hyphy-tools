@@ -188,6 +188,8 @@ without passwords, so nobody can sign in as them), and no constraint was added t
 | `NEXT_PUBLIC_SUPABASE_URL`             | public | the project URL                                                      |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | public | the `sb_publishable_…` key (never a secret key)                      |
 | `HYPHY_SITE_URL`                       | server | origin people use (e.g. `https://hyphy-studio.com`); links in emails |
+| `HYPHY_EMAIL`                          | server | `resend` to send invitations (docs/BUSINESS.md, Email); unset = none |
+| `RESEND_API_KEY`, `HYPHY_EMAIL_FROM`   | server | the invitation sender, with `HYPHY_EMAIL=resend` — never public      |
 
 Set the `NEXT_PUBLIC_` values at build time as well (Next.js inlines them). None are needed for Demo
 Mode.
@@ -199,8 +201,8 @@ This is a checklist, not something done yet.
 1. **Finish the hosted verification.** A Vercel deployment connected to hosted Supabase with
    `HYPHY_DATA=supabase` must be verified end to end first. Real accounts have not been tested on
    hosted Supabase Auth (the development container can't reach it).
-2. **Migration.** `20260928000000_real_accounts.sql` is applied to `hyphy-tools-dev` and its
-   `supabase/tests/accounts.sql` passes there. A production project gets every migration with
+2. **Migrations.** `20260928000000_real_accounts.sql`, `20260929000000_business_spaces.sql` and
+   `20260929010000_team_indexes.sql` are applied to `hyphy-tools-dev`, and `supabase/tests/accounts.sql` and `teams.sql` pass there. A production project gets every migration with
    `supabase db push` — never `supabase/dev/`.
 3. **Supabase Auth settings** (dashboard → Authentication):
    - Email provider on, **Confirm email on**, minimum password length **8**, **leaked password
@@ -213,11 +215,14 @@ This is a checklist, not something done yet.
      - Confirm signup: `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email&next=/welcome`
      - Reset password: `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=recovery&next=/reset-password`
    - Custom SMTP (the built-in sender is rate-limited and only for team addresses).
+   - Add `https://hyphy-studio.com/platform/invite/**` to the Redirect URLs: invited people sign up
+     with `next=/invite/…` and come back there after confirming.
    - Consider turning off the Data API for `public`: the app never uses it, and with real JWTs in
      people's browsers it's a second door (RLS still guards it — the same policies apply).
 4. **Vercel (Hyphy Tools project only):** `HYPHY_IDENTITY=supabase`, `HYPHY_DATA=supabase`,
    `DATABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`,
-   `HYPHY_SITE_URL`. Preview first.
+   `HYPHY_SITE_URL`, and for invitation email `HYPHY_EMAIL=resend`, `RESEND_API_KEY`,
+   `HYPHY_EMAIL_FROM` (a verified sending domain). Preview first.
 5. Run `npm run test:auth` against that environment's Auth (a development project only).
 6. Remove Demo Mode from that deployment (DEMO-MODE.md, "Removing it").
 
@@ -245,19 +250,17 @@ AUTH_E2E_ADMIN_DATABASE_URL=postgres://postgres@localhost:54322/hyphy_auth \
 AUTH_E2E_MAILPIT_URL=http://localhost:8025 npm run test:auth
 ```
 
-It creates only `…auth-test@hyphy-tools.example` accounts and deletes them afterwards. Without
+`test:auth` also runs `tests/business.spec.ts` (Phase 2B), with the app's invitation emails
+captured to `.hyphy-mail/e2e` (`HYPHY_EMAIL=capture`). It creates only
+`…auth-test@hyphy-tools.example` accounts and deletes them (and their businesses) afterwards. Without
 those variables it skips.
 
 ## Later
 
-**Invitations (Phase 2B).** Accepting must work for someone who signs up afterwards. Today
-`invite_member` creates a placeholder `auth.users` row for an unknown address — fine on the
-development database, but in production that would reserve the address in Supabase Auth and block
-the person's own sign-up. Phase 2B should replace it with a `space_invitations` table (email, Space,
-role, token, expiry) sent through Supabase's invite email or our own; on sign-up/confirmation the
-invitation is matched to the verified email and becomes an `invited` membership, accepted
-explicitly. The bootstrap above already gives the person their profile and Personal Space, so
-nothing here needs to change. Personal Spaces can't receive invitations (guarded in the database).
+**Invitations — built in Phase 2B** (docs/BUSINESS.md). Invitations are their own table, not
+memberships and not Auth users: accepting needs a signed-in person whose _confirmed_ Auth email is
+the invited one, so an invitation can never reserve or impersonate an address. `invite_member` (the
+placeholder that created `auth.users` rows) now refuses outside the development database.
 
 **Account deletion (not built).** Deleting must be deliberate, never a raw `delete from
 auth.users`: Business Spaces they own need an ownership transfer or closure; their Personal Space

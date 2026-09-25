@@ -38,6 +38,9 @@ app/(app)/[space]/…      pages (server components) and actions.ts (server acti
 lib/identity             IdentitySource: demo-source.ts | dev-source.ts (personas on the dev
                          database) | supabase-source.ts (real accounts); mode.ts is the switch
 lib/supabase, lib/auth   Supabase Auth clients, the session-refreshing proxy, account actions
+lib/business, lib/teams  creating a Business; its team (invitations, roles, removal, ownership):
+                         teamFor(workspace) → real (database functions) or Demo Mode's story
+lib/email                one EmailProvider (capture | resend | none) and the invitation email
 lib/data                 Repository = core.ts (shared rules) over a DataSource:
                            demo/source.ts      seed + journal, visibility in code (demo/visibility.ts)
                            supabase/source.ts  the database, queried as the person; RLS decides
@@ -65,7 +68,8 @@ components/*             UI; client components read the Workspace through useWor
   in the same tick goes to the database as one statement — one round trip, with the person's
   claims in the same message. A page is 3–5 round trips in total (session, then data and the
   Demo Mode count in parallel); at a 40 ms round trip pages render in ~0.15–0.25 s. Set
-  `HYPHY_DB_DEBUG=1` to log statements with timestamps.
+  `HYPHY_DB_DEBUG=1` to log statements with timestamps — development only: it also makes failed
+  queries' parameters (which can include an invitation link's secret) visible in logged errors.
 - **Changes.** Every server action in `actions.ts` resolves the Workspace from the URL, calls
   `requirePermission`, validates input, checks that referenced projects and vehicles are visible,
   and writes through the repository. The UI hides what a role can't do; the server refuses it.

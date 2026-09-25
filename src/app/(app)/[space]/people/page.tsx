@@ -9,7 +9,17 @@ import { Panel, PanelHeader } from '@/components/ui/panel';
 import { Chips } from '@/components/ui/tabs';
 import { currentProjectFor } from '@/lib/insights';
 import { openPage } from '@/lib/page';
-import { can as roleCan, ROLE_ORDER, roles, type Permission } from '@/lib/platform/roles';
+import { plural } from '@/lib/platform/format';
+import { describeInvitation } from '@/lib/teams/describe';
+import {
+  can as roleCan,
+  grantableRoles,
+  ROLE_ORDER,
+  roles,
+  type Permission,
+} from '@/lib/platform/roles';
+import { teamFor } from '@/lib/teams';
+import { InvitationList } from '@/components/team/invitations';
 import type { Role } from '@/lib/platform/types';
 
 export const metadata = { title: 'People' };
@@ -26,22 +36,44 @@ const matrix: { label: string; permission: Permission }[] = [
 ];
 
 export default async function PeoplePage({ params, searchParams }: PageProps<'/[space]/people'>) {
-  const { workspace, repo, base, can } = await openPage(params, 'people');
+  const { workspace, repo, base, can, tz } = await openPage(params, 'people');
   const view = String((await searchParams).role ?? 'all');
-  const [members, projects, vehicles, activity, receipts, mileage] = await Promise.all([
-    repo.members(),
-    repo.projects(),
-    repo.vehicles(),
-    repo.activity({ limit: 80 }),
-    repo.receipts(),
-    repo.mileage(),
-  ]);
+  const [everyone, invitations, projects, vehicles, activity, receipts, mileage] =
+    await Promise.all([
+      repo.members(),
+      // Only people who manage the team see who's been invited.
+      can('people.manage') ? teamFor(workspace).invitations() : Promise.resolve([]),
+      repo.projects(),
+      repo.vehicles(),
+      repo.activity({ limit: 80 }),
+      repo.receipts(),
+      repo.mileage(),
+    ]);
   // What each person has waiting on an approver: the operational fact a manager scans People for.
   const waiting = new Map<string, number>();
   if (can('expenses.approve'))
     for (const item of [...receipts, ...mileage])
       if (item.status === 'submitted')
         waiting.set(item.createdBy, (waiting.get(item.createdBy) ?? 0) + 1);
+  // Members are the people in the business now; invitations are just that until accepted.
+  const members = everyone.filter((member) => member.status === 'active');
+  const when = Object.fromEntries(
+    invitations.map((invitation) => [invitation.id, describeInvitation(invitation, tz)]),
+  );
+  const invitedPanel = invitations.length > 0 && (view === 'all' || view === 'invited') && (
+    <Panel className="self-start" aria-label="Invited">
+      <PanelHeader title="Invited" count={invitations.length} />
+      <p className="-mt-1 px-4 pb-2 text-[12.5px] text-muted">
+        They become members when they accept. Change the role, resend or revoke until then.
+      </p>
+      <InvitationList
+        slug={workspace.space.slug}
+        invitations={invitations}
+        grantable={grantableRoles(workspace.membership.role)}
+        when={when}
+      />
+    </Panel>
+  );
   const shown = members
     .filter((member) => view === 'all' || member.role === view)
     .sort(
@@ -57,11 +89,17 @@ export default async function PeoplePage({ params, searchParams }: PageProps<'/[
     <Page wide>
       <PageHeader
         title="People"
-        description={`Everyone in ${workspace.space.name}, and what each of them can see.`}
+        description={
+          invitations.length
+            ? `${plural(members.length, 'active member')} · ${invitations.length} invited`
+            : `Everyone in ${workspace.space.name}, and what each of them can see.`
+        }
         actions={
-          <CreateButton request="person" variant="primary" icon="user-plus">
-            Add person
-          </CreateButton>
+          can('people.manage') && (
+            <CreateButton request="person" variant="primary" icon="user-plus">
+              Invite someone
+            </CreateButton>
+          )
         }
       />
       <div className="mb-5">
@@ -75,98 +113,114 @@ export default async function PeoplePage({ params, searchParams }: PageProps<'/[
               href: `${base}/people?role=${role}`,
               count: counts.get(role),
             })),
+            ...(invitations.length
+              ? [
+                  {
+                    id: 'invited',
+                    label: 'Invited',
+                    href: `${base}/people?role=invited`,
+                    count: invitations.length,
+                  },
+                ]
+              : []),
           ]}
         />
       </div>
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <Panel className="self-start overflow-hidden">
-          <div className="hidden grid-cols-[minmax(0,1.45fr)_minmax(0,1.15fr)_90px_96px] gap-4 border-b border-line bg-subtle px-4 py-2.5 lg:grid">
-            {['Person', 'Working on', 'Vehicle', 'Role'].map((heading) => (
-              <span key={heading} className="label">
-                {heading}
-              </span>
-            ))}
-          </div>
-          <ul className="row-divide">
-            {shown.map((member) => {
-              const working = projects.filter(
-                (project) =>
-                  project.status !== 'done' &&
-                  (project.teamIds.includes(member.personId) ||
-                    member.projectIds?.includes(project.id)),
-              );
-              // Lead with the project they're on now (the same rule as their Home), then “+N”.
-              const current = currentProjectFor(member.personId, projects, activity) ?? working[0];
-              const more = working.filter((project) => project.id !== current?.id).length;
-              const pending = waiting.get(member.personId) ?? 0;
-              const vehicle = vehicles.find((item) => item.assignedTo === member.personId);
-              return (
-                <li key={member.id}>
-                  <Link
-                    href={`${base}/people/${member.personId}`}
-                    className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-3 transition-colors hover:bg-subtle lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1.15fr)_90px_96px]"
-                  >
-                    <span className="flex min-w-0 items-center gap-3">
-                      <Avatar person={member.person} size="md" />
-                      <span className="min-w-0">
-                        <span className="flex items-center gap-2 text-[14px] font-medium text-ink">
-                          <span className="truncate">{member.person.name}</span>
-                          {member.personId === workspace.person.id && (
-                            <span className="text-[12px] font-normal text-faint">You</span>
+        <div className="grid min-w-0 content-start gap-5">
+          {view !== 'invited' && (
+            <Panel className="self-start overflow-hidden">
+              <div className="hidden grid-cols-[minmax(0,1.45fr)_minmax(0,1.15fr)_90px_96px] gap-4 border-b border-line bg-subtle px-4 py-2.5 lg:grid">
+                {['Person', 'Working on', 'Vehicle', 'Role'].map((heading) => (
+                  <span key={heading} className="label">
+                    {heading}
+                  </span>
+                ))}
+              </div>
+              <ul className="row-divide">
+                {shown.map((member) => {
+                  const working = projects.filter(
+                    (project) =>
+                      project.status !== 'done' &&
+                      (project.teamIds.includes(member.personId) ||
+                        member.projectIds?.includes(project.id)),
+                  );
+                  // Lead with the project they're on now (the same rule as their Home), then “+N”.
+                  const current =
+                    currentProjectFor(member.personId, projects, activity) ?? working[0];
+                  const more = working.filter((project) => project.id !== current?.id).length;
+                  const pending = waiting.get(member.personId) ?? 0;
+                  const vehicle = vehicles.find((item) => item.assignedTo === member.personId);
+                  return (
+                    <li key={member.id}>
+                      <Link
+                        href={`${base}/people/${member.personId}`}
+                        className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-3 transition-colors hover:bg-subtle lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1.15fr)_90px_96px]"
+                      >
+                        <span className="flex min-w-0 items-center gap-3">
+                          <Avatar person={member.person} size="md" />
+                          <span className="min-w-0">
+                            <span className="flex items-center gap-2 text-[14px] font-medium text-ink">
+                              <span className="truncate">{member.person.name}</span>
+                              {member.personId === workspace.person.id && (
+                                <span className="text-[12px] font-normal text-faint">You</span>
+                              )}
+                            </span>
+                            <span className="block truncate text-[12.5px] text-muted">
+                              {member.title}
+                              {member.status === 'invited' && ' · Invited'}
+                              {pending > 0 && (
+                                <span className="text-signal-ink"> · {pending} waiting on you</span>
+                              )}
+                            </span>
+                          </span>
+                        </span>
+                        <span className="hidden min-w-0 items-center gap-2 text-[13px] text-ink-2 lg:flex">
+                          {current ? (
+                            <>
+                              <span
+                                className="size-2 shrink-0 rounded-full"
+                                style={{ background: current.color }}
+                                aria-hidden="true"
+                              />
+                              <span className="truncate">{current.name}</span>
+                              {more > 0 && (
+                                <span className="shrink-0 text-[12px] text-faint">+{more}</span>
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-faint">—</span>
                           )}
                         </span>
-                        <span className="block truncate text-[12.5px] text-muted">
-                          {member.title}
-                          {member.status === 'invited' && ' · Invited'}
-                          {pending > 0 && (
-                            <span className="text-signal-ink"> · {pending} waiting on you</span>
+                        <span className="hidden truncate text-[13px] text-ink-2 lg:block">
+                          {vehicle?.name ?? <span className="text-faint">—</span>}
+                        </span>
+                        <span className="flex justify-end lg:justify-start">
+                          {member.status === 'invited' ? (
+                            <Badge tone="outline">Invited</Badge>
+                          ) : (
+                            <Badge
+                              tone={
+                                member.role === 'guest'
+                                  ? 'signal'
+                                  : member.role === 'owner'
+                                    ? 'ink'
+                                    : 'neutral'
+                              }
+                            >
+                              {roles[member.role].label}
+                            </Badge>
                           )}
                         </span>
-                      </span>
-                    </span>
-                    <span className="hidden min-w-0 items-center gap-2 text-[13px] text-ink-2 lg:flex">
-                      {current ? (
-                        <>
-                          <span
-                            className="size-2 shrink-0 rounded-full"
-                            style={{ background: current.color }}
-                            aria-hidden="true"
-                          />
-                          <span className="truncate">{current.name}</span>
-                          {more > 0 && (
-                            <span className="shrink-0 text-[12px] text-faint">+{more}</span>
-                          )}
-                        </>
-                      ) : (
-                        <span className="text-faint">—</span>
-                      )}
-                    </span>
-                    <span className="hidden truncate text-[13px] text-ink-2 lg:block">
-                      {vehicle?.name ?? <span className="text-faint">—</span>}
-                    </span>
-                    <span className="flex justify-end lg:justify-start">
-                      {member.status === 'invited' ? (
-                        <Badge tone="outline">Invited</Badge>
-                      ) : (
-                        <Badge
-                          tone={
-                            member.role === 'guest'
-                              ? 'signal'
-                              : member.role === 'owner'
-                                ? 'ink'
-                                : 'neutral'
-                          }
-                        >
-                          {roles[member.role].label}
-                        </Badge>
-                      )}
-                    </span>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        </Panel>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </Panel>
+          )}
+          {invitedPanel}
+        </div>
 
         <Panel className="self-start">
           <PanelHeader title="Who can do what" />

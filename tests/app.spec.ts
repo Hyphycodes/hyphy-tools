@@ -784,3 +784,31 @@ test.describe('phones', () => {
     await reset(page);
   });
 });
+
+test('Demo Mode: business creation and invitation links are previews that change nothing', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  await previewAs(context, 'jerry', baseURL!);
+  await visit(page, '/create-business');
+  await expect(page.getByText('Creating a business needs a real account')).toBeVisible();
+  await page.getByLabel('Business name').fill('Preview Co');
+  await page.getByText('Retail').click();
+  await page.getByRole('button', { name: 'Create business' }).click();
+  await expect(page.locator('form').getByRole('alert')).toContainText('needs a real account');
+  await expect(page).toHaveURL(`${BASE_PATH}/create-business`);
+
+  await visit(page, '/invite/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+  await expect(
+    page.getByRole('heading', { name: 'Invitations work with real accounts.' }),
+  ).toBeVisible();
+
+  // Managing the demo team explains itself instead of changing the story.
+  await previewAs(context, 'dana', baseURL!);
+  await visit(page, `/abc-construction/people/${id('mike')}`);
+  await page.getByRole('radio', { name: /Manager/ }).click();
+  await expect(page.getByText(/In Demo Mode the team is part of the story/)).toBeVisible();
+  await visit(page, '/abc-construction/people');
+  await expect(page.getByRole('region', { name: 'Invited' })).toBeVisible();
+});

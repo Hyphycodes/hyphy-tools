@@ -58,6 +58,14 @@ dock through one CSS rule in `globals.css`, keyed on the dock's `data-demo-dock`
 goes away with the dock.) The command bar's "Preview as" results come
 from the same demo model and disappear with it.
 
+## Businesses and invitations in Demo Mode
+
+Creating a business and invitation links are real-account features (docs/BUSINESS.md). In Demo
+Mode `/create-business` and `/invite/…` open as previews that say so; inviting still adds the
+demo's fictional "invited" person, shown under People → Invited; changing roles, removing and
+transferring explain that they work with real accounts. The demo businesses and people stay as
+they are.
+
 ## Removing it
 
 1. Set `HYPHY_IDENTITY=supabase` and `HYPHY_DATA=supabase` (the Supabase identity source is built;

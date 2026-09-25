@@ -213,6 +213,9 @@ function ProfileMenu({ compact }: { compact?: boolean }) {
             <Link href={workspace.href('/profile')} className={menuItemClass}>
               <Icon name="user" size={17} className="text-muted" /> Profile & Spaces
             </Link>
+            <Link href="/create-business" className={menuItemClass}>
+              <Icon name="building" size={17} className="text-muted" /> Create a business
+            </Link>
             {workspace.account ? (
               <form action={signOut}>
                 <button type="submit" className={menuItemClass}>

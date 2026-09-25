@@ -19,7 +19,10 @@ export default async function SignInPage({ searchParams }: PageProps<'/sign-in'>
       </AuthCard>
       <AuthAside>
         New to Hyphy?{' '}
-        <Link href={authRoutes.signUp} className={inlineLink}>
+        <Link
+          href={next ? `${authRoutes.signUp}?next=${encodeURIComponent(next)}` : authRoutes.signUp}
+          className={inlineLink}
+        >
           Create an account
         </Link>
       </AuthAside>

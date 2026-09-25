@@ -6,7 +6,7 @@ export default defineConfig({
   testDir: './tests',
   // The database and real-account suites have their own configs (playwright.data.config.ts,
   // playwright.auth.config.ts).
-  testIgnore: ['data.spec.ts', 'auth.spec.ts'],
+  testIgnore: ['data.spec.ts', 'auth.spec.ts', 'business.spec.ts'],
   fullyParallel: false,
   workers: 1,
   timeout: 45_000,

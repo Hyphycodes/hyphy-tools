@@ -4,6 +4,9 @@ import { cn } from '@/components/ui/cn';
 import { Page } from '@/components/ui/page';
 import { Panel } from '@/components/ui/panel';
 import { Starters } from '@/components/auth/starters';
+import { BusinessStarters } from '@/components/business/starters';
+import { Icon } from '@/components/ui/icon';
+import Link from 'next/link';
 import { getRepository } from '@/lib/data';
 import { requireWorkspace } from '@/lib/identity';
 import {
@@ -111,6 +114,18 @@ export default async function Home({ params }: PageProps<'/[space]'>) {
     [activity, receipts, mileage, files, qrCodes, linkPages, projects].every(
       (rows) => !rows.length,
     );
+  // A business with nothing in it yet: first steps instead of empty panels, no invented activity.
+  // Only for the people who run it: members and guests always get their own role's Home.
+  const freshBusiness =
+    space.kind === 'business' &&
+    workspace.permissions.includes('space.manage') &&
+    [projects, vehicles, receipts, mileage, files, qrCodes, linkPages].every(
+      (rows) => !rows.length,
+    );
+  const unfinishedSetup =
+    space.kind === 'business' &&
+    !space.setupDoneAt &&
+    workspace.permissions.includes('space.manage');
   const can = (permission: (typeof workspace.permissions)[number]) =>
     workspace.permissions.includes(permission);
   const urgent = inbox.find((item) => item.priority === 'high');
@@ -118,6 +133,8 @@ export default async function Home({ params }: PageProps<'/[space]'>) {
   // A few plain sentences about today, written for this person. Specific beats clever.
   const briefing = (() => {
     if (fresh) return 'What would you like to do first? Everything you make here is kept for you.';
+    if (freshBusiness)
+      return `${space.name} is ready. Start with one of these — Home fills in as your team works.`;
     if (layout.hero === 'personal') {
       const month =
         receipts.length || mileage.length
@@ -197,14 +214,14 @@ export default async function Home({ params }: PageProps<'/[space]'>) {
             {briefing}
           </p>
         </div>
-        {layout.hero === 'operator' && (
+        {layout.hero === 'operator' && !freshBusiness && (
           <div className="hidden shrink-0 lg:block">
             <QuickActions count={3} variant="inline" />
           </div>
         )}
       </header>
 
-      {(layout.hero === 'member' || layout.hero === 'guest') && (
+      {!freshBusiness && (layout.hero === 'member' || layout.hero === 'guest') && (
         <section
           aria-label={layout.bigActions ? 'Your actions' : 'Quick actions'}
           className="mb-6 lg:mb-8"
@@ -228,7 +245,27 @@ export default async function Home({ params }: PageProps<'/[space]'>) {
         </div>
       )}
 
-      {!fresh && layout.top.length > 0 && (
+      {unfinishedSetup && (
+        <Link
+          href={`/${space.slug}/setup`}
+          className="mb-5 flex items-center gap-3 rounded-[16px] bg-signal-soft/70 px-4 py-3 text-[14px] text-signal-ink shadow-[inset_0_0_0_1px_rgb(50_64_255/.12)] transition-colors hover:bg-signal-soft"
+        >
+          <Icon name="sparkles" size={17} />
+          <span className="min-w-0 flex-1">
+            <span className="font-semibold">Finish setting up {space.name}</span>
+            <span className="text-signal-ink/80"> — choose its tools and invite your team.</span>
+          </span>
+          <Icon name="arrow-right" size={16} />
+        </Link>
+      )}
+
+      {freshBusiness && (
+        <section aria-label="Start here" className="mb-6">
+          <BusinessStarters />
+        </section>
+      )}
+
+      {!fresh && !freshBusiness && layout.top.length > 0 && (
         <div className="mb-5 grid gap-4 lg:mb-6 lg:gap-5">
           {layout.top.map((id) => (
             <Widget key={id} id={id} data={data} />
@@ -236,7 +273,7 @@ export default async function Home({ params }: PageProps<'/[space]'>) {
         </div>
       )}
 
-      {!fresh && (
+      {!fresh && !freshBusiness && (
         <div className="grid gap-4 lg:gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
           <div className="grid min-w-0 content-start gap-4 lg:gap-5">
             {layout.main.map((id) => (

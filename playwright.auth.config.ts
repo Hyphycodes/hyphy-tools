@@ -1,7 +1,7 @@
 import { defineConfig } from '@playwright/test';
 
 /*
- * Real accounts, end to end (tests/auth.spec.ts): the app in HYPHY_IDENTITY=supabase mode against
+ * Real accounts, end to end (tests/auth.spec.ts, tests/business.spec.ts): the app in HYPHY_IDENTITY=supabase mode against
  * a Supabase Auth server, a database with the Hyphy migrations and a mail catcher. docs/AUTH.md
  * describes the local stack; never point this at production.
  *
@@ -17,7 +17,7 @@ const env = process.env;
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: 'auth.spec.ts',
+  testMatch: ['auth.spec.ts', 'business.spec.ts'],
   fullyParallel: false,
   workers: 1,
   timeout: 60_000,
@@ -41,6 +41,9 @@ export default defineConfig({
       NEXT_PUBLIC_SUPABASE_URL: env.AUTH_E2E_SUPABASE_URL ?? '',
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: env.AUTH_E2E_PUBLISHABLE_KEY ?? '',
       HYPHY_SITE_URL: `http://localhost:${port}`,
+      // Hyphy's own emails (invitations) are written to disk for the tests to open.
+      HYPHY_EMAIL: 'capture',
+      HYPHY_MAIL_DIR: env.AUTH_E2E_MAIL_DIR ?? '.hyphy-mail/e2e',
     },
   },
 });

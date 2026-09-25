@@ -6,7 +6,7 @@ is the product.
 
 **Demo Mode is the default.** There is no sign-in: open it and you're in, as one of the Demo Mode
 people, in one of their Spaces. Real accounts (Supabase Auth: sign-up, sign-in, recovery, a
-Personal Space for every new account) are built and tested but switched off until the hosted
+Personal Space for every new account; businesses, invitations and teams) are built and tested but switched off until the hosted
 setup is verified — see [docs/AUTH.md](docs/AUTH.md). The account pages (`/sign-in`, `/sign-up`, …)
 can be opened in Demo Mode as a preview.
 
@@ -76,6 +76,7 @@ tests/                     unit (rules) and end-to-end (personas, access, flows,
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — Spaces, roles vs plans vs modules, the registries, data flow.
 - [docs/DEMO-MODE.md](docs/DEMO-MODE.md) — how the preview works and how to remove it.
 - [docs/AUTH.md](docs/AUTH.md) — real accounts: how they work, what's tested, how to switch them on.
+- [docs/BUSINESS.md](docs/BUSINESS.md) — businesses, teams, invitations, roles and ownership.
 - [docs/DESIGN.md](docs/DESIGN.md) — the visual system.
 - [docs/STUDIO-INVENTORY.md](docs/STUDIO-INVENTORY.md) — what came from Hyphy Studio and what stays there.
 
