@@ -1,6 +1,7 @@
 import type {
   ActivityEvent,
   ApprovalEvent,
+  FieldDefinition,
   FileRecord,
   InboxItem,
   LinkPage,
@@ -30,6 +31,8 @@ export type Dataset = {
   activity: ActivityEvent[];
   inbox: InboxItem[];
   approvalEvents: ApprovalEvent[];
+  /** What each business asks for beyond Hyphy's own fields (custom field definitions). */
+  fields: FieldDefinition[];
   /** Default pins; a visitor's own choices are kept beside the journal (see prefs.ts). */
   pins: Pin[];
 };
@@ -37,5 +40,5 @@ export type Dataset = {
 export type TableName = keyof Dataset;
 
 export type SeedSlice = Partial<
-  Omit<Dataset, 'people' | 'spaces' | 'memberships' | 'pins' | 'approvalEvents'>
+  Omit<Dataset, 'people' | 'spaces' | 'memberships' | 'pins' | 'approvalEvents' | 'fields'>
 >;

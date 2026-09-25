@@ -1,9 +1,12 @@
 import type { Submission, SubmissionKind, SubmissionRef } from '@/lib/platform/approvals';
+import type { SpaceSettings } from '@/lib/platform/business-settings';
 import type {
   ActivityEvent,
   ApprovalEvent,
   ApprovalStatus,
   AttachmentRef,
+  FieldDefinition,
+  FieldValue,
   FileRecord,
   InboxItem,
   LinkPage,
@@ -17,6 +20,7 @@ import type {
   Project,
   QrCode,
   Receipt,
+  RecordType,
   Space,
   Vehicle,
 } from '@/lib/platform/types';
@@ -62,11 +66,12 @@ export type ReceiptInput = Pick<
   | 'projectId'
   | 'paymentMethod'
   | 'notes'
+  | 'custom'
 > & { draft?: boolean };
 
 export type MileageInput = Pick<
   MileageEntry,
-  'date' | 'from' | 'to' | 'miles' | 'roundTrip' | 'purpose' | 'vehicleId' | 'projectId'
+  'date' | 'from' | 'to' | 'miles' | 'roundTrip' | 'purpose' | 'vehicleId' | 'projectId' | 'custom'
 >;
 
 export type ProjectInput = Pick<
@@ -81,6 +86,7 @@ export type ProjectInput = Pick<
   | 'value'
   | 'costAllowance'
   | 'status'
+  | 'custom'
 > & {
   /** An event's day; jobs start the day they're created. */
   startDate?: string;
@@ -96,7 +102,7 @@ export type InviteInput = {
 
 export type VehicleInput = Pick<
   Vehicle,
-  'name' | 'year' | 'make' | 'model' | 'plate' | 'fuel' | 'assignedTo' | 'odometer'
+  'name' | 'year' | 'make' | 'model' | 'plate' | 'fuel' | 'assignedTo' | 'odometer' | 'custom'
 >;
 
 export type FileInput = Pick<
@@ -114,7 +120,28 @@ export type LinkPageInput = Pick<LinkPage, 'title' | 'handle' | 'bio' | 'theme' 
 };
 
 export type SpacePatch = Partial<
-  Pick<Space, 'name' | 'descriptor' | 'businessType' | 'workStyle' | 'labels' | 'setupDoneAt'>
+  Pick<
+    Space,
+    | 'name'
+    | 'descriptor'
+    | 'businessType'
+    | 'workStyle'
+    | 'labels'
+    | 'setupDoneAt'
+    | 'brand'
+    | 'mileageRate'
+    | 'modules'
+  >
+>;
+
+/** A new field: the key is made from its name by the repository. */
+export type FieldInput = Pick<
+  FieldDefinition,
+  'appliesTo' | 'label' | 'type' | 'options' | 'required' | 'help' | 'showInList'
+> & { id?: string };
+
+export type FieldPatch = Partial<
+  Pick<FieldDefinition, 'label' | 'type' | 'options' | 'required' | 'help' | 'showInList'>
 >;
 
 export type ActivityFilter = {
@@ -183,4 +210,30 @@ export interface Repository {
   setModules(modules: ModuleId[]): Promise<void>;
   /** The Space's own details: name, type, words, setup. Its address never changes. */
   updateSpace(patch: SpacePatch): Promise<void>;
+
+  /* ---------- the business's own setup (Phase 2C) ---------- */
+
+  /** The business's fields, archived ones too, in order. Only what this person may know about. */
+  fields(appliesTo?: RecordType): Promise<FieldDefinition[]>;
+  /** Keys of this record type's fields that some record already has an answer for. */
+  fieldsInUse(appliesTo: RecordType): Promise<Set<string>>;
+  addField(input: FieldInput): Promise<FieldDefinition>;
+  /** Changes a field. Its type is fixed once used; a used dropdown only gains choices. */
+  updateField(appliesTo: RecordType, id: string, patch: FieldPatch): Promise<FieldDefinition>;
+  /** Stops asking for it (`archived`) or asks again. Saved values stay either way. */
+  setFieldArchived(appliesTo: RecordType, id: string, archived: boolean): Promise<void>;
+  /** Removes a field nothing has used. A used field can only be archived. */
+  removeField(appliesTo: RecordType, id: string): Promise<void>;
+  /** One step up or down among the fields in use. */
+  moveField(appliesTo: RecordType, id: string, direction: -1 | 1): Promise<void>;
+  /** Changes some of the business's rules; the rest keep their current answers. */
+  updateSettings(patch: SpaceSettings): Promise<SpaceSettings>;
+  /** The business's field answers on a project or vehicle. */
+  setRecordFields(
+    type: 'projects' | 'vehicles',
+    id: string,
+    custom: Record<string, FieldValue>,
+  ): Promise<void>;
+  /** The business's field answers about a person here. */
+  setMemberFields(personId: string, custom: Record<string, FieldValue>): Promise<void>;
 }

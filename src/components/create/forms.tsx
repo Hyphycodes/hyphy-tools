@@ -7,12 +7,18 @@ import {
   invitePerson,
   resubmitMileage,
 } from '@/app/(app)/[space]/actions';
+import {
+  answerProblems,
+  answersOf,
+  FieldInputs,
+  firstProblem,
+} from '@/components/fields/field-inputs';
 import { Avatar } from '@/components/ui/avatar';
 import { cn } from '@/components/ui/cn';
 import { Field, Input, Segmented, Select, Textarea } from '@/components/ui/form';
 import { Icon } from '@/components/ui/icon';
 import { useWorkspace } from '@/components/shell/workspace-context';
-import { formatMiles } from '@/lib/platform/format';
+import { formatCurrency, formatMiles } from '@/lib/platform/format';
 import { roles } from '@/lib/platform/roles';
 import { workProfile } from '@/lib/platform/work';
 import type { ProjectStatus, Role } from '@/lib/platform/types';
@@ -24,12 +30,21 @@ import { dateInput, EditNote, FormFooter, Section, SubmitButton, todayInput } fr
 export function MileageForm({ request, onDone, formId }: FormProps) {
   const workspace = useWorkspace();
   const id = useId();
-  const { pending, error, submit } = useSubmit(onDone);
+  const { pending, error, submit, fail } = useSubmit(onDone);
   const mine = workspace.options.vehicles.find(
     (vehicle) => vehicle.assignedTo === workspace.person.id,
   );
+  // What this business asks of a trip: its rules and its own fields.
+  const rules = workspace.setup.rules.mileage;
+  const fields = workspace.setup.fields.filter((field) => field.appliesTo === 'mileage');
+  const vehicles = workspace.options.vehicles;
+  const showVehicles = vehicles.length > 0 && workspace.space.modules.includes('vehicles');
   // Fixing a returned trip starts from what was sent, not from a blank form.
   const editing = request.edit?.kind === 'mileage' ? request.edit.record : undefined;
+  const [answers, setAnswers] = useState(() =>
+    answersOf(fields, editing?.custom, workspace.space.timezone),
+  );
+  const [problems, setProblems] = useState<Record<string, string>>({});
   const [mode, setMode] = useState<'miles' | 'odometer'>('miles');
   const [date, setDate] = useState(() =>
     editing
@@ -90,12 +105,32 @@ export function MileageForm({ request, onDone, formId }: FormProps) {
         ? oneWay * 2
         : oneWay
       : 0;
-  const needsApproval = workspace.space.kind === 'business' && !workspace.can('expenses.approve');
+  const needsApproval = workspace.setup.approval.mileage?.mode === 'always';
   const places = workspace.options.places;
+  const business = workspace.space.kind === 'business';
+  // A personal car is paid back at the business's own rate — never a tax table's. A trip being
+  // fixed keeps the rate it was logged at.
+  const rate = business && !vehicleId ? (editing?.rate ?? workspace.space.mileageRate) : undefined;
+  const noCompanyVehicle = !rules.personalVehicle && !showVehicles;
+  const missing = () => {
+    const found = answerProblems(fields, 'mileage', answers);
+    setProblems(found);
+    if (!from.trim() || !to.trim()) return 'Add where the trip started and ended.';
+    if (noCompanyVehicle)
+      return `Trips here are logged in a company ${workspace.labels.vehicle.toLowerCase()}, and none is assigned to you yet.`;
+    if (!rules.personalVehicle && !vehicleId)
+      return `Choose the company ${workspace.labels.vehicle.toLowerCase()} you drove.`;
+    if (rules.project === 'required' && !projectId)
+      return `Choose the ${workspace.labels.project.toLowerCase()} this trip was for.`;
+    if (rules.purpose === 'required' && !purpose.trim()) return 'Add what the trip was for.';
+    return firstProblem(fields, found);
+  };
 
   return (
     <form
       id={formId}
+      // The business's requirements are said in Hyphy's words, not the browser's bubble.
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const values = {
@@ -107,7 +142,10 @@ export function MileageForm({ request, onDone, formId }: FormProps) {
           purpose,
           vehicleId,
           projectId,
+          custom: answers,
         };
+        const problem = missing();
+        if (problem) return fail(problem);
         submit(
           () =>
             editing
@@ -219,13 +257,19 @@ export function MileageForm({ request, onDone, formId }: FormProps) {
               ))}
             </div>
           )}
-          <p className="ml-auto text-[13px] text-ink/65" aria-live="polite">
+          <p className="ml-auto text-right text-[13px] text-ink/65" aria-live="polite">
             {total ? (
               <>
                 <span className="num font-semibold text-ink">
                   {formatMiles(Math.round(total * 10) / 10)}
                 </span>{' '}
                 {mode === 'miles' && roundTrip ? 'there and back' : 'this trip'}
+                {rate ? (
+                  <span className="block text-[12px]" data-mileage-payback>
+                    {formatCurrency(Math.round(total * rate * 100) / 100)} back at{' '}
+                    {formatCurrency(rate)} a mile
+                  </span>
+                ) : null}
               </>
             ) : mode === 'odometer' && end && Number(end) <= Number(start) ? (
               'End is below the start'
@@ -335,19 +379,31 @@ export function MileageForm({ request, onDone, formId }: FormProps) {
             required
           />
         </Field>
-        {workspace.options.vehicles.length > 0 && (
+        {noCompanyVehicle && (
+          <p
+            role="note"
+            className="rounded-[12px] bg-caution-soft/70 px-3.5 py-3 text-[13.5px] leading-snug text-ink"
+          >
+            {workspace.space.name} logs trips in company {workspace.labels.vehicles.toLowerCase()},
+            and none is assigned to you yet. Ask whoever manages them.
+          </p>
+        )}
+        {showVehicles && (
           <Field
-            label="Vehicle"
+            label={workspace.labels.vehicle}
             htmlFor={`${id}-vehicle`}
             hint={
               mine && !vehicleId
                 ? `${mine.name} is assigned to you. Personal vehicle trips are paid back by the mile.`
-                : undefined
+                : !rules.personalVehicle
+                  ? `Trips here are in a company ${workspace.labels.vehicle.toLowerCase()}.`
+                  : undefined
             }
           >
             <Select
               id={`${id}-vehicle`}
               value={vehicleId}
+              required={!rules.personalVehicle}
               onChange={(event) => {
                 setVehicleId(event.target.value);
                 const next = workspace.options.vehicles.find(
@@ -356,7 +412,7 @@ export function MileageForm({ request, onDone, formId }: FormProps) {
                 if (next) setStart(String(next.odometer));
               }}
             >
-              <option value="">Personal vehicle</option>
+              <option value="">{rules.personalVehicle ? 'Personal vehicle' : 'Choose one'}</option>
               {workspace.options.vehicles.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.name}
@@ -365,14 +421,19 @@ export function MileageForm({ request, onDone, formId }: FormProps) {
             </Select>
           </Field>
         )}
-        {workspace.options.projects.length > 0 && (
-          <Field label={workspace.labels.project} htmlFor={`${id}-project`} optional>
+        {rules.project !== 'off' && workspace.options.projects.length > 0 && (
+          <Field
+            label={workspace.labels.project}
+            htmlFor={`${id}-project`}
+            optional={rules.project !== 'required'}
+          >
             <Select
               id={`${id}-project`}
               value={projectId}
+              required={rules.project === 'required'}
               onChange={(event) => setProjectId(event.target.value)}
             >
-              <option value="">None</option>
+              <option value="">{rules.project === 'required' ? 'Choose one' : 'None'}</option>
               {workspace.options.projects
                 .filter((project) => project.status !== 'done')
                 .map((project) => (
@@ -383,19 +444,37 @@ export function MileageForm({ request, onDone, formId }: FormProps) {
             </Select>
           </Field>
         )}
-        <Field label="Purpose" htmlFor={`${id}-purpose`}>
+        <Field
+          label="Purpose"
+          htmlFor={`${id}-purpose`}
+          optional={business && rules.purpose !== 'required'}
+        >
           <Input
             id={`${id}-purpose`}
             value={purpose}
+            required={rules.purpose === 'required'}
             onChange={(event) => setPurpose(event.target.value)}
             placeholder="Material pickup, site visit…"
           />
         </Field>
+        <FieldInputs
+          fields={fields}
+          answers={answers}
+          errors={problems}
+          idPrefix={id}
+          onChange={(key, value) => setAnswers((current) => ({ ...current, [key]: value }))}
+        />
       </Section>
 
       <FormFooter
         error={error}
-        note={needsApproval ? 'Goes to your managers for approval' : undefined}
+        note={
+          needsApproval
+            ? 'Goes to your managers for approval'
+            : workspace.setup.approval.mileage
+              ? 'Filed right away — no approval needed'
+              : undefined
+        }
       >
         <SubmitButton pending={pending}>
           {editing ? 'Resubmit trip' : needsApproval ? 'Submit trip' : 'Save trip'}
@@ -410,7 +489,10 @@ export function MileageForm({ request, onDone, formId }: FormProps) {
 export function ProjectForm({ onDone, formId }: FormProps) {
   const workspace = useWorkspace();
   const id = useId();
-  const { pending, error, submit } = useSubmit(onDone);
+  const { pending, error, submit, fail } = useSubmit(onDone);
+  const fields = workspace.setup.fields.filter((field) => field.appliesTo === 'projects');
+  const [answers, setAnswers] = useState(() => answersOf(fields, {}, workspace.space.timezone));
+  const [problems, setProblems] = useState<Record<string, string>>({});
   const profile = workProfile(workspace.space);
   const events = profile.style === 'events';
   const [name, setName] = useState('');
@@ -431,6 +513,9 @@ export function ProjectForm({ onDone, formId }: FormProps) {
       id={formId}
       onSubmit={(event) => {
         event.preventDefault();
+        const found = answerProblems(fields, 'projects', answers);
+        setProblems(found);
+        if (Object.keys(found).length) return fail(firstProblem(fields, found)!);
         submit(
           () =>
             createProject(workspace.space.slug, {
@@ -444,6 +529,7 @@ export function ProjectForm({ onDone, formId }: FormProps) {
               value,
               costAllowance: withAllowance ? allowance : '',
               summary,
+              custom: answers,
             }),
           { title: `${name} created`, href: workspace.href('/projects') },
         );
@@ -593,6 +679,17 @@ export function ProjectForm({ onDone, formId }: FormProps) {
           />
         </Field>
       </Section>
+      {fields.length > 0 && (
+        <Section title="Details">
+          <FieldInputs
+            fields={fields}
+            answers={answers}
+            errors={problems}
+            idPrefix={id}
+            onChange={(key, value) => setAnswers((current) => ({ ...current, [key]: value }))}
+          />
+        </Section>
+      )}
       <FormFooter error={error}>
         <SubmitButton pending={pending}>
           Create {workspace.labels.project.toLowerCase()}
@@ -794,7 +891,10 @@ export function PersonForm({ onDone, formId }: FormProps) {
 export function VehicleForm({ onDone, formId }: FormProps) {
   const workspace = useWorkspace();
   const id = useId();
-  const { pending, error, submit } = useSubmit(onDone);
+  const { pending, error, submit, fail } = useSubmit(onDone);
+  const fields = workspace.setup.fields.filter((field) => field.appliesTo === 'vehicles');
+  const [answers, setAnswers] = useState(() => answersOf(fields, {}, workspace.space.timezone));
+  const [problems, setProblems] = useState<Record<string, string>>({});
   const [values, setValues] = useState({
     name: '',
     year: '2024',
@@ -815,7 +915,10 @@ export function VehicleForm({ onDone, formId }: FormProps) {
       id={formId}
       onSubmit={(event) => {
         event.preventDefault();
-        submit(() => createVehicle(workspace.space.slug, { ...values, fuel }), {
+        const found = answerProblems(fields, 'vehicles', answers);
+        setProblems(found);
+        if (Object.keys(found).length) return fail(firstProblem(fields, found)!);
+        submit(() => createVehicle(workspace.space.slug, { ...values, fuel, custom: answers }), {
           title: `${values.name} added`,
           href: workspace.href('/vehicles'),
         });
@@ -905,8 +1008,19 @@ export function VehicleForm({ onDone, formId }: FormProps) {
           </Select>
         </Field>
       </Section>
+      {fields.length > 0 && (
+        <Section title="Details">
+          <FieldInputs
+            fields={fields}
+            answers={answers}
+            errors={problems}
+            idPrefix={id}
+            onChange={(key, value) => setAnswers((current) => ({ ...current, [key]: value }))}
+          />
+        </Section>
+      )}
       <FormFooter error={error}>
-        <SubmitButton pending={pending}>Add vehicle</SubmitButton>
+        <SubmitButton pending={pending}>Add {workspace.labels.vehicle.toLowerCase()}</SubmitButton>
       </FormFooter>
     </form>
   );

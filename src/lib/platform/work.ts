@@ -6,7 +6,8 @@ import type { Space, WorkStyle } from './types';
  * A builder's job has a contract value, costs, trips and trucks; a restaurant's event has a date,
  * a team, files and QR codes, and no "percent complete".
  *
- * Words come from `space.labels` when a Space names things itself, else from the style.
+ * Words come from `space.labels` when a Space chose its own (`lib/platform/terms.ts`), else from
+ * the style.
  */
 export type WorkProfile = {
   style: WorkStyle;
@@ -72,6 +73,7 @@ export function workProfile(space: Pick<Space, 'workStyle' | 'labels'>): WorkPro
     ...base,
     singular: labels?.singular ?? base.singular,
     plural: labels?.plural ?? base.plural,
+    client: space.labels?.customer?.singular ?? base.client,
   };
 }
 
@@ -82,3 +84,10 @@ export function keyDate(
 ) {
   return profile.schedule === 'on' ? project.startDate : project.dueDate;
 }
+
+/** How a way of working changes the project pages, for asking before switching. */
+export const workStyleLines: Record<WorkStyle, string> = {
+  jobs: 'Run them as jobs: due dates, progress, job sites, trucks and trips',
+  events: 'Run them as events: each on its day, with a room and a host, no progress',
+  engagements: 'Run them as client work: due dates and progress',
+};

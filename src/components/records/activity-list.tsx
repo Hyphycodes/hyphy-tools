@@ -22,6 +22,9 @@ const verbs: Record<ActivityVerb, string> = {
   completed: 'completed',
   merged: 'merged',
   generated: 'made',
+  added: 'added',
+  changed: 'changed',
+  archived: 'stopped using',
 };
 
 const verbIcon: Partial<Record<ActivityVerb, IconName>> = {
@@ -35,6 +38,9 @@ const verbIcon: Partial<Record<ActivityVerb, IconName>> = {
   merged: 'pdf',
   generated: 'sparkles',
   completed: 'check-circle',
+  added: 'plus',
+  changed: 'settings',
+  archived: 'archive',
 };
 
 /** Where an activity's object lives inside the Space. */
@@ -58,6 +64,8 @@ export function refHref(base: string, ref: Pick<ObjectRef, 'type' | 'id'>) {
       return `${base}/tools/links`;
     case 'space':
       return base;
+    case 'setting':
+      return `${base}/settings`;
     default:
       return `${base}/settings`;
   }

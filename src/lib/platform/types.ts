@@ -11,6 +11,7 @@
  */
 
 import type { BusinessType } from './business-types';
+import type { SpaceSettings } from './business-settings';
 
 export type ISODate = string;
 
@@ -53,6 +54,17 @@ export type ModuleId =
 export type ModuleLabel = { singular: string; plural: string };
 
 /**
+ * The words a business chose for the few things Hyphy lets it rename, each from a short curated
+ * list (`lib/platform/terms.ts`): its work (Jobs, Events, Properties), the people it works for
+ * (Customer, Client) and its vehicles (Trucks, Units). Nothing else is renamed.
+ */
+export type SpaceLabels = {
+  projects?: ModuleLabel;
+  vehicles?: ModuleLabel;
+  customer?: ModuleLabel;
+};
+
+/**
  * How a Space's work is shaped. One Projects module underneath; the words and what a project
  * page emphasises follow the business (see `lib/platform/work.ts`). A builder runs jobs with a
  * contract and costs, a restaurant runs events on a date, a studio runs engagements.
@@ -69,7 +81,7 @@ export type Space = {
   descriptor: string;
   plan: PlanId;
   modules: ModuleId[];
-  labels?: Partial<Record<ModuleId, ModuleLabel>>;
+  labels?: SpaceLabels;
   workStyle?: WorkStyle;
   /** Paid back per mile driven in someone's own car. Counts toward a project's tracked costs. */
   mileageRate?: number;
@@ -77,7 +89,12 @@ export type Space = {
   timezone: string;
   /** Owner of a personal Space. */
   ownerId?: string;
-  customFields?: Partial<Record<'projects' | 'vehicles' | 'people', FieldDefinition[]>>;
+  /**
+   * How this business runs its receipts, mileage and approvals (`lib/platform/business-settings.ts`).
+   * Only what the business changed is stored; everything else is Hyphy's default. Guests never
+   * receive it.
+   */
+  settings?: SpaceSettings;
   /** What kind of business it is (business Spaces); sets starting words and tools. */
   businessType?: BusinessType;
   /** When its owner finished (or skipped) setup after creating it. */
@@ -106,7 +123,10 @@ export type Membership = {
   custom?: Record<string, FieldValue>;
 };
 
-/* ---------- custom fields (architecture only; see custom-fields.ts) ---------- */
+/* ---------- custom fields (see custom-fields.ts) ---------- */
+
+/** The records a business can add its own fields to. */
+export type RecordType = 'projects' | 'vehicles' | 'receipts' | 'mileage' | 'people';
 
 export type FieldType =
   | 'text'
@@ -120,13 +140,33 @@ export type FieldType =
   | 'vehicle'
   | 'file';
 
+/**
+ * Something a business asks for beyond what Hyphy already knows about a record: a Cost Code on
+ * receipts, a Job Number on jobs. Hyphy owns the record (amount, date, who sent it, its status);
+ * the business owns these.
+ */
 export type FieldDefinition = {
+  /**
+   * The field's key: unique per Space and record type, made from its first name and never changed,
+   * so values saved under it stay readable whatever the label becomes.
+   */
   id: string;
+  spaceId: string;
+  appliesTo: RecordType;
   label: string;
   type: FieldType;
+  /** Dropdown choices. Once a record uses the field, choices can be added but not taken away. */
   options?: string[];
   help?: string;
   required?: boolean;
+  /** Order on forms and pages, lowest first. */
+  position: number;
+  /** Shown on list rows too (a couple at most). */
+  showInList?: boolean;
+  /** Stopped using: gone from forms, kept (and shown) on the records that have a value. */
+  archivedAt?: ISODate;
+  createdBy?: string;
+  createdAt?: ISODate;
 };
 
 export type FieldValue = string | number | boolean | null;
@@ -219,6 +259,7 @@ export type Receipt = Owned &
     projectId?: string;
     fileId?: string;
     notes?: string;
+    custom?: Record<string, FieldValue>;
   };
 
 export type MileageEntry = Owned &
@@ -232,6 +273,12 @@ export type MileageEntry = Owned &
     /** Empty means the person's own vehicle, which the business pays back per mile. */
     vehicleId?: string;
     projectId?: string;
+    /**
+     * The business's per-mile rate when the trip was logged (0: it wasn't paying miles back then).
+     * Set by the database, never by the person; a new rate never re-prices old trips.
+     */
+    rate?: number;
+    custom?: Record<string, FieldValue>;
   };
 
 export type FileKind = 'pdf' | 'image' | 'doc' | 'sheet' | 'archive';
@@ -280,7 +327,18 @@ export type LinkPage = Owned & {
 /* ---------- activity & inbox ---------- */
 
 export type ObjectRef = {
-  type: 'project' | 'vehicle' | 'receipt' | 'mileage' | 'file' | 'person' | 'qr' | 'link' | 'space';
+  type:
+    | 'project'
+    | 'vehicle'
+    | 'receipt'
+    | 'mileage'
+    | 'file'
+    | 'person'
+    | 'qr'
+    | 'link'
+    | 'space'
+    /** The business's own setup: its fields, rules and words. `id` is the Space. */
+    | 'setting';
   id: string;
   label: string;
 };
@@ -302,7 +360,11 @@ export type ActivityVerb =
   | 'commented'
   | 'completed'
   | 'merged'
-  | 'generated';
+  | 'generated'
+  /** Setup: a field added, a rule changed, a field no longer used. */
+  | 'added'
+  | 'changed'
+  | 'archived';
 
 export type ActivityEvent = {
   id: string;

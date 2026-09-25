@@ -44,6 +44,15 @@ begin
     select count(*), md5(coalesce(string_agg(d.id::text, ',' order by d.id::text), ''))
       into rows, ids from public.space_directory(pg_temp.did(view.s)) d;
     return next;
+    -- The business's own setup (Phase 2C): which fields and rules this persona can read.
+    source := 'custom_fields';
+    select count(*), md5(coalesce(string_agg(f.applies_to || ':' || f.key, ',' order by f.applies_to, f.key), ''))
+      into rows, ids from public.custom_fields f where f.space_id = pg_temp.did(view.s);
+    return next;
+    source := 'space_settings';
+    select count(*), md5(coalesce(string_agg(ss.settings::text, ','), ''))
+      into rows, ids from public.space_settings ss where ss.space_id = pg_temp.did(view.s);
+    return next;
     source := 'pins';
     select count(*), md5(coalesce(string_agg(p.target_type || ':' || p.target_id, ',' order by p.target_id), ''))
       into rows, ids from public.pins p where p.space_id = pg_temp.did(view.s);

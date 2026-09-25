@@ -3,6 +3,7 @@ import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { dataBackend } from '@/lib/data';
+import { clearConfig } from '@/lib/data/demo/config';
 import { clearJournal } from '@/lib/data/demo/journal';
 import { clearPins } from '@/lib/data/demo/prefs';
 import { seed } from '@/lib/data/demo/seed';
@@ -42,8 +43,9 @@ export async function resetDemo(formData: FormData) {
     // the server allows it (HYPHY_DEMO_RESET=on) and the database is marked as development.
     await resetWorld();
   } else {
-    // Everything this browser changed goes: records, decisions and their own pins.
+    // Everything this browser changed goes: records, decisions, business setup and pins.
     await clearJournal();
+    await clearConfig();
     await clearPins();
   }
   // Every page was showing the old world. (Clearing cookies refreshes them; a database reset

@@ -8,8 +8,20 @@ import {
   type Submission,
   type SubmissionKind,
 } from '@/lib/platform/approvals';
+import { mergeSettings, needsApproval } from '@/lib/platform/business-settings';
+import {
+  activeFields,
+  definitionProblem,
+  fieldKey,
+  fieldsFor,
+  fieldsInUse,
+  formatField,
+  MAX_FIELDS,
+} from '@/lib/platform/custom-fields';
 import type {
   ActivityEvent,
+  FieldDefinition,
+  FieldType,
   FileRecord,
   InboxItem,
   LinkPage,
@@ -30,7 +42,7 @@ const byNewest =
 
 type Names = Pick<
   Visible,
-  'projects' | 'vehicles' | 'directory' | 'files' | 'receipts' | 'mileage'
+  'projects' | 'vehicles' | 'directory' | 'files' | 'receipts' | 'mileage' | 'fields'
 >;
 
 /**
@@ -47,9 +59,20 @@ export function createRepository(workspace: Workspace, source: DataSource): Repo
   const business = space.kind === 'business';
   const approver = business && has('expenses.approve');
   const now = () => new Date().toISOString();
-  /** Personal Spaces and approvers file straight through; everyone else waits for a decision. */
-  const filedStatus = () =>
-    space.kind === 'personal' || has('expenses.approve') ? 'approved' : 'submitted';
+  /**
+   * Personal Spaces and approvers file straight through. Everyone else waits for a decision —
+   * unless the business doesn't ask for one (no approval for trips, or none under an amount), in
+   * which case it's filed with no reviewer: nobody approved it, nothing needed to.
+   */
+  const filedStatus = (kind: 'receipt' | 'mileage', amount: number) =>
+    space.kind === 'personal' || has('expenses.approve') || !needsApproval(space, kind, amount)
+      ? 'approved'
+      : 'submitted';
+  /** Who decided, for something filed now: the approver filing it, or nobody. */
+  const filedBy = (status: string) =>
+    status === 'approved' && business && has('expenses.approve')
+      ? { reviewedBy: me, reviewedAt: now() }
+      : {};
   const owned = (prefix: string) => ({
     id: source.newId(prefix),
     spaceId: space.id,
@@ -63,15 +86,28 @@ export function createRepository(workspace: Workspace, source: DataSource): Repo
   });
 
   async function names(): Promise<Names> {
-    const [projects, vehicles, directory, files, receipts, mileage] = await Promise.all([
+    const [projects, vehicles, directory, files, receipts, mileage, fields] = await Promise.all([
       source.load('projects'),
       source.load('vehicles'),
       source.load('directory'),
       source.load('files'),
       source.load('receipts'),
       source.load('mileage'),
+      source.load('fields'),
     ]);
-    return { projects, vehicles, directory, files, receipts, mileage };
+    return { projects, vehicles, directory, files, receipts, mileage, fields };
+  }
+
+  /** A reference value's name, from the rows this person can see. */
+  function lookupIn(rows: Pick<Names, 'projects' | 'vehicles' | 'directory' | 'files'>) {
+    return (type: FieldType, id: string) =>
+      type === 'project'
+        ? rows.projects.find((row) => row.id === id)?.name
+        : type === 'vehicle'
+          ? rows.vehicles.find((row) => row.id === id)?.name
+          : type === 'person'
+            ? rows.directory.find((row) => row.id === id)?.name
+            : rows.files.find((row) => row.id === id)?.name;
   }
 
   /**
@@ -129,7 +165,10 @@ export function createRepository(workspace: Workspace, source: DataSource): Repo
     ].sort((a, b) => b.date.localeCompare(a.date));
   }
 
-  /** "Shell · $71.42 · Truck 24 · Oak Brook Remodel", from the records as they are now. */
+  /**
+   * "Shell · $71.42 · Truck 24 · Oak Brook Remodel · Cost Code: 200 — Materials", from the records
+   * as they are now — with what the business asks for, so an approver sees it without opening it.
+   */
   function describe(item: Submission, rows: Names) {
     const vehicle = item.vehicleId
       ? rows.vehicles.find((row) => row.id === item.vehicleId)?.name
@@ -137,9 +176,27 @@ export function createRepository(workspace: Workspace, source: DataSource): Repo
         ? 'Personal vehicle'
         : undefined;
     const project = rows.projects.find((row) => row.id === item.projectId)?.name;
-    return item.kind === 'receipt'
-      ? [item.title, item.amount, vehicle, project].filter(Boolean).join(' · ')
-      : [item.amount, item.title, vehicle, project].filter(Boolean).join(' · ');
+    const record =
+      item.kind === 'receipt'
+        ? rows.receipts.find((row) => row.id === item.id)
+        : rows.mileage.find((row) => row.id === item.id);
+    const extra = fieldsFor(
+      rows.fields,
+      item.kind === 'receipt' ? 'receipts' : 'mileage',
+      record?.custom,
+    )
+      .filter((field) => record?.custom?.[field.id] !== undefined)
+      .map(
+        (field) =>
+          `${field.label}: ${formatField(field, record?.custom?.[field.id], lookupIn(rows), space.timezone)}`,
+      );
+    return (
+      item.kind === 'receipt'
+        ? [item.title, item.amount, vehicle, project, ...extra]
+        : [item.amount, item.title, vehicle, project, ...extra]
+    )
+      .filter(Boolean)
+      .join(' · ');
   }
 
   /** The inbox items that are really just views of submissions. */
@@ -245,21 +302,61 @@ export function createRepository(workspace: Workspace, source: DataSource): Repo
   }
 
   /** The submitter's own returned item or draft, ready to be sent again. */
-  function fixable<T extends Receipt | MileageEntry>(rows: T[], id: string) {
+  function fixable<T extends Receipt | MileageEntry>(
+    rows: T[],
+    id: string,
+    kind: 'receipt' | 'mileage',
+    amount: number,
+  ) {
     const record = rows.find((row) => row.id === id);
     if (!record || record.createdBy !== me)
       throw new RuleError('Only the person who sent it can resend it.');
     if (record.status !== 'returned' && record.status !== 'draft')
       throw new RuleError('Only returned items and drafts can be sent again.');
     const at = now();
+    const status = filedStatus(kind, amount);
     return {
       record,
       patch: {
-        status: filedStatus(),
+        status,
         ...(record.status === 'returned' ? { resubmittedAt: at } : {}),
-        ...(has('expenses.approve') && business ? { reviewedBy: me, reviewedAt: at } : {}),
+        ...(status === 'approved' && business
+          ? has('expenses.approve')
+            ? { reviewedBy: me, reviewedAt: at }
+            : // Filed without needing anyone: whoever returned it earlier didn't approve it.
+              { reviewedBy: null, reviewedAt: null }
+          : {}),
       },
     };
+  }
+
+  /* ---------- the business's fields ---------- */
+
+  async function allFields() {
+    return source.load('fields');
+  }
+
+  async function findField(appliesTo: FieldDefinition['appliesTo'], id: string) {
+    const field = (await allFields()).find(
+      (item) => item.appliesTo === appliesTo && item.id === id,
+    );
+    if (!field) throw new RuleError('That field isn’t part of this business.');
+    return field;
+  }
+
+  async function usage(appliesTo: FieldDefinition['appliesTo']) {
+    switch (appliesTo) {
+      case 'projects':
+        return fieldsInUse(await source.load('projects'));
+      case 'vehicles':
+        return fieldsInUse(await source.load('vehicles'));
+      case 'receipts':
+        return fieldsInUse(await source.load('receipts'));
+      case 'mileage':
+        return fieldsInUse(await source.load('mileage'));
+      case 'people':
+        return fieldsInUse(await source.load('members'));
+    }
   }
 
   async function members() {
@@ -376,24 +473,16 @@ export function createRepository(workspace: Workspace, source: DataSource): Repo
 
     async createReceipt(input) {
       const { draft, ...fields } = input;
-      const receipt: Receipt = {
-        ...owned('rc'),
-        ...fields,
-        status: draft ? 'draft' : filedStatus(),
-        ...(has('expenses.approve') && business && !draft
-          ? { reviewedBy: me, reviewedAt: now() }
-          : {}),
-      };
+      const status = draft ? 'draft' : filedStatus('receipt', input.total);
+      const receipt: Receipt = { ...owned('rc'), ...fields, status, ...filedBy(status) };
       await source.write([insert('receipts', receipt)]);
       return receipt;
     },
     async createMileage(input) {
-      const entry: MileageEntry = {
-        ...owned('mi'),
-        ...input,
-        status: filedStatus(),
-        ...(has('expenses.approve') && business ? { reviewedBy: me, reviewedAt: now() } : {}),
-      };
+      const status = filedStatus('mileage', input.miles);
+      // The rate it's paid back at is the business's rate now; a later change never re-prices it.
+      const rate = business ? (space.mileageRate ?? 0) : undefined;
+      const entry: MileageEntry = { ...owned('mi'), ...input, rate, status, ...filedBy(status) };
       await source.write([insert('mileage', entry)]);
       return entry;
     },
@@ -488,12 +577,12 @@ export function createRepository(workspace: Workspace, source: DataSource): Repo
     async resubmitReceipt(id, input) {
       const fields: Partial<typeof input> = { ...input };
       delete fields.draft;
-      const { record, patch } = fixable(await source.load('receipts'), id);
+      const { record, patch } = fixable(await source.load('receipts'), id, 'receipt', input.total);
       await source.write([{ op: 'update', table: 'receipts', id, patch: { ...fields, ...patch } }]);
       return { ...record, ...fields, ...patch } as Receipt;
     },
     async resubmitMileage(id, input) {
-      const { record, patch } = fixable(await source.load('mileage'), id);
+      const { record, patch } = fixable(await source.load('mileage'), id, 'mileage', input.miles);
       await source.write([{ op: 'update', table: 'mileage', id, patch: { ...input, ...patch } }]);
       return { ...record, ...input, ...patch } as MileageEntry;
     },
@@ -533,6 +622,117 @@ export function createRepository(workspace: Workspace, source: DataSource): Repo
     },
     async updateSpace(patch) {
       await source.write([{ op: 'update', table: 'spaces', id: space.id, patch }]);
+    },
+
+    async fields(appliesTo) {
+      return (await allFields())
+        .filter((field) => !appliesTo || field.appliesTo === appliesTo)
+        .sort((a, b) => a.position - b.position || a.label.localeCompare(b.label));
+    },
+    fieldsInUse: usage,
+    async addField(input) {
+      const existing = (await allFields()).filter((field) => field.appliesTo === input.appliesTo);
+      if (activeFields(existing, input.appliesTo).length >= MAX_FIELDS)
+        throw new RuleError(`Up to ${MAX_FIELDS} fields at a time. Stop using one to add another.`);
+      if (
+        existing.some(
+          (field) => field.label.trim().toLowerCase() === input.label.trim().toLowerCase(),
+        )
+      )
+        throw new RuleError(`There’s already a field called ${input.label.trim()}.`);
+      const problem = definitionProblem(input);
+      if (problem) throw new RuleError(problem);
+      const field: FieldDefinition = {
+        id:
+          input.id ??
+          fieldKey(
+            input.label,
+            existing.map((item) => item.id),
+          ),
+        spaceId: space.id,
+        appliesTo: input.appliesTo,
+        label: input.label.trim(),
+        type: input.type,
+        ...(input.type === 'select' ? { options: input.options } : {}),
+        ...(input.required ? { required: true } : {}),
+        ...(input.help ? { help: input.help } : {}),
+        ...(input.showInList ? { showInList: true } : {}),
+        position: existing.reduce((max, item) => Math.max(max, item.position + 1), 0),
+        createdBy: me,
+        createdAt: now(),
+      };
+      await source.writeFields([{ op: 'insert', field }]);
+      return field;
+    },
+    async updateField(appliesTo, id, patch) {
+      const field = await findField(appliesTo, id);
+      const next = { ...field, ...patch, label: (patch.label ?? field.label).trim() };
+      const inUse = (await usage(appliesTo)).has(id);
+      const problem = definitionProblem(next, field, inUse);
+      if (problem) throw new RuleError(problem);
+      const others = (await allFields()).filter(
+        (item) => item.appliesTo === appliesTo && item.id !== id,
+      );
+      if (others.some((item) => item.label.toLowerCase() === next.label.toLowerCase()))
+        throw new RuleError(`There’s already a field called ${next.label}.`);
+      const clean = {
+        label: next.label,
+        type: next.type,
+        options: next.type === 'select' ? (next.options ?? []) : [],
+        required: Boolean(next.required),
+        help: next.help ?? '',
+        showInList: Boolean(next.showInList),
+      };
+      await source.writeFields([{ op: 'update', appliesTo, id, patch: clean }]);
+      return { ...field, ...clean, options: clean.options.length ? clean.options : undefined };
+    },
+    async setFieldArchived(appliesTo, id, archived) {
+      const field = await findField(appliesTo, id);
+      if (Boolean(field.archivedAt) === archived) return;
+      if (!archived) {
+        const active = activeFields(await allFields(), appliesTo);
+        if (active.length >= MAX_FIELDS)
+          throw new RuleError(`Up to ${MAX_FIELDS} fields at a time. Stop using one first.`);
+      }
+      await source.writeFields([
+        { op: 'update', appliesTo, id, patch: { archivedAt: archived ? now() : null } },
+      ]);
+    },
+    async removeField(appliesTo, id) {
+      await findField(appliesTo, id);
+      if ((await usage(appliesTo)).has(id))
+        throw new RuleError('Records already have answers for this field. Stop using it instead.');
+      await source.writeFields([{ op: 'delete', appliesTo, id }]);
+    },
+    async moveField(appliesTo, id, direction) {
+      const active = activeFields(await allFields(), appliesTo);
+      const index = active.findIndex((field) => field.id === id);
+      const target = index + direction;
+      if (index === -1 || target < 0 || target >= active.length) return;
+      const order = [...active];
+      [order[index], order[target]] = [order[target], order[index]];
+      await source.writeFields(
+        order
+          .map((field, position) => ({ field, position }))
+          .filter(({ field, position }) => field.position !== position)
+          .map(({ field, position }) => ({
+            op: 'update' as const,
+            appliesTo,
+            id: field.id,
+            patch: { position },
+          })),
+      );
+    },
+    async updateSettings(patch) {
+      const settings = mergeSettings(space.settings, patch);
+      await source.write([{ op: 'update', table: 'spaces', id: space.id, patch: { settings } }]);
+      return settings;
+    },
+    async setRecordFields(type, id, custom) {
+      await source.write([{ op: 'update', table: type, id, patch: { custom } }]);
+    },
+    async setMemberFields(personId, custom) {
+      await source.setMemberFields(personId, custom);
     },
   };
 }

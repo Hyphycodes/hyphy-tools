@@ -27,7 +27,9 @@ export function useSubmit(onDone: () => void) {
       onDone();
     });
   };
-  return { pending, error, submit };
+  /** A problem found before sending (a required answer missing), said where the server's would be. */
+  const fail = (message: string) => setError(message);
+  return { pending, error, submit, fail };
 }
 
 export type FormProps = { request: CreateRequest; onDone: () => void; formId: string };

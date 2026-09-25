@@ -93,5 +93,8 @@ export function visibleTo(workspace: Workspace, data: Dataset): Visible {
     approvalEvents: inSpace(data.approvalEvents).filter((event) =>
       submissions.has(event.submissionId),
     ),
+    // What a person needs to fill in and read the records they can reach. A guest reaches
+    // shared projects only, so that's the only setup they're given.
+    fields: inSpace(data.fields).filter((field) => !isGuest || field.appliesTo === 'projects'),
   };
 }

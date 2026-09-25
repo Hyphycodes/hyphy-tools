@@ -4,6 +4,9 @@ import type { Repository } from '@/lib/data';
 import type { Workspace } from '@/lib/identity/types';
 import { currentProjectFor } from '@/lib/insights';
 import { createActionsFor } from '@/lib/platform/actions';
+import { formRules, resolveSettings } from '@/lib/platform/business-settings';
+import { activeFields, fieldUsable } from '@/lib/platform/custom-fields';
+import { vehicleWords } from '@/lib/platform/terms';
 import { navigationFor } from '@/lib/platform/navigation';
 import { plans } from '@/lib/platform/plans';
 import { workProfile } from '@/lib/platform/work';
@@ -16,7 +19,7 @@ export function roleLabel(workspace: Pick<Workspace, 'space' | 'membership'>) {
 /** Everything the client shell needs, computed once per request on the server. */
 export async function buildShellModel(workspace: Workspace, repo: Repository): Promise<ShellModel> {
   const { space, membership, person, session } = workspace;
-  const [inbox, projects, vehicles, members, trips, activity, pins] = await Promise.all([
+  const [inbox, projects, vehicles, members, trips, activity, pins, fields] = await Promise.all([
     repo.inbox(),
     repo.projects(),
     repo.vehicles(),
@@ -24,7 +27,11 @@ export async function buildShellModel(workspace: Workspace, repo: Repository): P
     repo.mileage({ createdBy: person.id }),
     repo.activity({ actorId: person.id, limit: 12 }),
     repo.pins(),
+    repo.fields(),
   ]);
+  const settings = resolveSettings(space);
+  const approver = workspace.permissions.includes('expenses.approve');
+  const business = space.kind === 'business';
   const seen = new Set<string>();
   const recentTrips = [...trips]
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -112,6 +119,24 @@ export async function buildShellModel(workspace: Workspace, repo: Repository): P
     labels: {
       project: workProfile(space).singular,
       projects: workProfile(space).plural,
+      vehicle: vehicleWords(space).singular,
+      vehicles: vehicleWords(space).plural,
+      customer: workProfile(space).client,
+    },
+    setup: {
+      fields: (['receipts', 'mileage', 'projects', 'vehicles', 'people'] as const).flatMap((type) =>
+        activeFields(fields, type).filter((field) => fieldUsable(field, space.modules)),
+      ),
+      rules: formRules(
+        space,
+        space.modules.includes('vehicles') && vehicles.length > 0,
+        space.modules.includes('projects') && projects.length > 0,
+      ),
+      // Approvers and Personal Spaces file straight through.
+      approval: {
+        receipt: business && !approver ? settings.receipts.approval : null,
+        mileage: business && !approver ? settings.mileage.approval : null,
+      },
     },
   };
 }

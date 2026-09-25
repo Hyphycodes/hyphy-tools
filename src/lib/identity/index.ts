@@ -68,7 +68,7 @@ export const getWorkspace = cache(async (slug: string): Promise<Workspace | null
     person: session.person,
     space,
     membership: rest,
-    permissions: permissionsFor(rest),
+    permissions: permissionsFor(rest, space),
   };
 });
 
@@ -91,5 +91,6 @@ export class PermissionError extends Error {
 
 /** Server-side guard for actions. The interface hides what you can't do; this refuses it. */
 export function requirePermission(workspace: Workspace, permission: Permission) {
-  if (!can(workspace.membership, permission)) throw new PermissionError(permission);
+  if (!can(workspace.membership, permission, workspace.space))
+    throw new PermissionError(permission);
 }

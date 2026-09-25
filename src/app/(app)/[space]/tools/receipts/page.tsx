@@ -1,12 +1,14 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { CreateButton } from '@/components/create/create-button';
+import { fieldRows, listLine } from '@/components/fields/field-facts';
 import { Relations, relationsOf } from '@/components/records/relations';
 import { ReturnedNotice, ReviewActions } from '@/components/records/review';
 import { ReceiptPaper } from '@/components/records/receipt-paper';
 import { ReceiptRow } from '@/components/records/rows';
 import { SubmissionTimeline } from '@/components/records/timeline';
 import { ApprovalBadge } from '@/components/records/status';
+import { CsvButton } from '@/components/tools/csv-button';
 import { ToolHeader } from '@/components/tools/tool-header';
 import { Avatar } from '@/components/ui/avatar';
 import { cn } from '@/components/ui/cn';
@@ -20,8 +22,15 @@ import { UrlSheet } from '@/components/ui/url-sheet';
 import { categoryLabel, monthSummary } from '@/lib/insights';
 import { openPage } from '@/lib/page';
 import { formatCurrency, formatDateLong, formatNumber } from '@/lib/platform/format';
+import { exportField, fieldsFor } from '@/lib/platform/custom-fields';
 import { getTool } from '@/lib/platform/tools';
-import type { ApprovalEvent, ApprovalStatus, Person, Receipt } from '@/lib/platform/types';
+import type {
+  ApprovalEvent,
+  ApprovalStatus,
+  FieldType,
+  Person,
+  Receipt,
+} from '@/lib/platform/types';
 
 export const metadata = { title: 'Receipts' };
 
@@ -40,10 +49,11 @@ export default async function ReceiptsPage({
   const { workspace, repo, base, people, tz, can } = await openPage(params, 'receipts');
   const query = await searchParams;
   const view = String(query.view ?? 'all');
-  const [receipts, projects, vehicles] = await Promise.all([
+  const [receipts, projects, vehicles, fields] = await Promise.all([
     repo.receipts(),
     repo.projects(),
     repo.vehicles(),
+    repo.fields('receipts'),
   ]);
   const business = workspace.space.kind === 'business';
   const approver = business && can('expenses.approve');
@@ -59,9 +69,22 @@ export default async function ReceiptsPage({
     );
   const vehicleName = (id?: string) => vehicles.find((vehicle) => vehicle.id === id)?.name;
   const projectName = (id?: string) => projects.find((project) => project.id === id)?.name;
+  const lookup = (type: FieldType, value: string) =>
+    type === 'person'
+      ? people.get(value)?.name
+      : type === 'project'
+        ? projectName(value)
+        : type === 'vehicle'
+          ? vehicleName(value)
+          : undefined;
   const context = (receipt: Receipt) =>
-    [vehicleName(receipt.vehicleId), projectName(receipt.projectId)].filter(Boolean).join(' · ') ||
-    (business ? 'Not assigned' : undefined);
+    [
+      vehicleName(receipt.vehicleId),
+      projectName(receipt.projectId),
+      ...listLine(fields, 'receipts', receipt.custom, lookup, tz),
+    ]
+      .filter(Boolean)
+      .join(' · ') || (business ? 'Not assigned' : undefined);
   const href = (params: Record<string, string | undefined>) => {
     const next = new URLSearchParams();
     for (const [key, value] of Object.entries({
@@ -125,14 +148,55 @@ export default async function ReceiptsPage({
     ],
   ];
 
+  // The complete records, with every field the business asks for (or asked for, where answered).
+  const exported = fields.filter(
+    (field) =>
+      !field.archivedAt ||
+      receipts.some((receipt) => fieldsFor([field], 'receipts', receipt.custom).length),
+  );
+  const csv: (string | number)[][] = [
+    [
+      'Date',
+      'Person',
+      'Vendor',
+      'Category',
+      'Total',
+      'Paid with',
+      'Vehicle',
+      'Project',
+      'Status',
+      'Note',
+      ...exported.map((field) => field.label),
+    ],
+    ...receipts.map((receipt) => [
+      new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date(receipt.date)),
+      people.get(receipt.createdBy)?.name ?? '',
+      receipt.vendor,
+      categoryLabel[receipt.category],
+      receipt.total.toFixed(2),
+      receipt.paymentMethod ?? '',
+      vehicleName(receipt.vehicleId) ?? '',
+      projectName(receipt.projectId) ?? '',
+      receipt.status,
+      receipt.notes ?? '',
+      ...exported.map((field) => exportField(field, receipt.custom?.[field.id], lookup)),
+    ]),
+  ];
+
   return (
     <Page wide>
       <ToolHeader
         tool={getTool('receipts')!}
         actions={
-          <CreateButton request="receipt" variant="primary" icon="camera">
-            {business && !approver ? 'Submit receipt' : 'Scan receipt'}
-          </CreateButton>
+          <>
+            {/* An export is a desk job; on phones the one big action stays alone. */}
+            <span className="hidden sm:contents">
+              <CsvButton rows={csv} name={`receipts-${workspace.space.slug}.csv`} />
+            </span>
+            <CreateButton request="receipt" variant="primary" icon="camera">
+              {business && !approver ? 'Submit receipt' : 'Scan receipt'}
+            </CreateButton>
+          </>
         }
       />
 
@@ -344,6 +408,7 @@ export default async function ReceiptsPage({
             relations={relationsOf(selected, { people, projects, vehicles })}
             canOpenPeople={can('people.view') && workspace.space.modules.includes('people')}
             history={history}
+            extra={fieldRows(fields, 'receipts', selected.custom, lookup, tz)}
           />
         </UrlSheet>
       )}
@@ -362,6 +427,7 @@ function ReceiptDetail({
   relations,
   canOpenPeople,
   history,
+  extra,
 }: {
   receipt: Receipt;
   base: string;
@@ -373,9 +439,12 @@ function ReceiptDetail({
   relations: ReturnType<typeof relationsOf>;
   canOpenPeople: boolean;
   history: ApprovalEvent[];
+  /** What the business asks for on a receipt, answered: "Cost Code · 200 — Materials". */
+  extra: [string, string][];
 }) {
   const reviewer = receipt.reviewedBy ? people.get(receipt.reviewedBy) : undefined;
   const rows: [string, ReactNode][] = [
+    ...extra,
     ['Paid with', receipt.paymentMethod ?? '—'],
     ...(receipt.gallons
       ? ([

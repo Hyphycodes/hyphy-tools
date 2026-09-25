@@ -152,13 +152,21 @@ belong to a subcontractor and two projects at once. The file panel answers "Who 
 plain words. Uploads record name, type, size and attachments (on the database, as real rows); the
 bytes stay on the device — there is no Storage bucket yet, and Download is disabled.
 
-## Custom fields (architecture only)
+## Business customization (Phase 2C)
 
-`FieldDefinition` lives on the Space per module (`space.customFields.projects`), values on the
-record (`project.custom`, or `membership.custom` for per-Space facts about a person). Ten types
-including references (`person`, `project`, `vehicle`, `file`), validation and formatting in
-`lib/platform/custom-fields.ts`. The demo shows definitions in Settings and values on project,
-vehicle and person pages; editing comes later.
+A business's setup lives in three places (docs/CUSTOMIZATION.md): identity and words as columns on
+`spaces` (`labels`, `brand`, `modules`, `mileage_rate`), rules in `space_settings` (one validated
+document: receipts, mileage, approvals, read through `resolveSettings()` in
+`lib/platform/business-settings.ts`), and field definitions in `custom_fields` (one row per field;
+`repo.fields()`). Answers stay on the record (`custom` on projects, vehicles, receipts, trips and
+memberships), so a record's access is its answers' access. One field engine
+(`lib/platform/custom-fields.ts`) builds forms, checks answers, formats facts, exports and search
+for every record type; the database checks the same things again. Rules flow into the product
+through a few functions — `formRules()` shapes the forms, `needsApproval()` decides filing,
+`permissionsFor(membership, space)` drops approval from managers when only owners and admins
+approve — never through `if` checks for a kind of business. Presets (`lib/platform/business-types.ts`)
+are a starting setup, applied only when a business is created or when its owner accepts
+"Apply recommended additions".
 
 ## Search
 

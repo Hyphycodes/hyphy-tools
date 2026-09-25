@@ -94,8 +94,14 @@ export default async function ToolsPage({ params }: PageProps<'/[space]/tools'>)
     4: 'lg:col-span-3',
   };
   const modules = tools.filter((tool) => tool.kind === 'module' && tool.status !== 'soon');
+  // A tool the business switched off isn't suggested to people who can't switch it on: for them
+  // it simply isn't part of this business right now.
   const unavailable = tools.filter(
-    (tool) => tool.kind !== 'module' && tool.status !== 'soon' && !ready(tool),
+    (tool) =>
+      tool.kind !== 'module' &&
+      tool.status !== 'soon' &&
+      !ready(tool) &&
+      (states.get(tool.id)?.state !== 'off' || can('space.manage')),
   );
   const soon = tools.filter((tool) => tool.status === 'soon');
 

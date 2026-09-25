@@ -1,6 +1,7 @@
 import type { IconName } from '@/components/ui/icon';
 import { can, type Permission } from './roles';
 import { availability, getTool } from './tools';
+import { vehicleWords } from './terms';
 import { workProfile } from './work';
 import type { Membership, Role, Space } from './types';
 
@@ -215,13 +216,17 @@ export function createActionsFor(
           ? definition.label
           : (definition.label[view] ?? definition.label.default);
       const projectLabel = space.kind === 'business' ? workProfile(space).singular : undefined;
+      const vehicleLabel = vehicleWords(space).singular;
       return {
         id: definition.id,
         toolId: definition.toolId,
+        // The business's own words: "Create job", "Add truck".
         label:
           definition.id === 'project' && projectLabel && projectLabel !== 'Project'
             ? `Create ${projectLabel.toLowerCase()}`
-            : label,
+            : definition.id === 'vehicle' && vehicleLabel !== 'Vehicle'
+              ? `Add ${vehicleLabel.toLowerCase()}`
+              : label,
         hint: definition.hint,
         group: definition.group,
         icon: definition.icon ?? tool.icon,

@@ -1,5 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { Facts, fieldRows } from '@/components/fields/field-facts';
+import { EditRecordFields } from '@/components/fields/record-fields';
 import { ActivityList } from '@/components/records/activity-list';
 import { ApproveAll, ReviewActions } from '@/components/records/review';
 import {
@@ -18,7 +20,8 @@ import { Panel, PanelHeader } from '@/components/ui/panel';
 import { currentProjectFor, thisMonth } from '@/lib/insights';
 import { describeCount, tripTitle } from '@/lib/platform/approvals';
 import { openPage } from '@/lib/page';
-import { formatField } from '@/lib/platform/custom-fields';
+import { formFields } from '@/lib/platform/custom-fields';
+import type { FieldType } from '@/lib/platform/types';
 import { buttonClass } from '@/components/ui/button';
 import { cn } from '@/components/ui/cn';
 import {
@@ -41,13 +44,14 @@ export default async function PersonPage({ params }: PageProps<'/[space]/people/
   const { id } = await params;
   const member = await repo.member(id);
   if (!member) notFound();
-  const [projects, vehicles, files, activity, receipts, mileage] = await Promise.all([
+  const [projects, vehicles, files, activity, receipts, mileage, fields] = await Promise.all([
     repo.projects(),
     repo.vehicles(),
     repo.files({ attachedTo: { type: 'person', id } }),
     repo.activity({ actorId: id, limit: 8 }),
     repo.receipts({ createdBy: id }),
     repo.mileage({ createdBy: id }),
+    repo.fields('people'),
   ]);
   const self = id === workspace.person.id;
   const working = projects.filter(
@@ -58,7 +62,19 @@ export default async function PersonPage({ params }: PageProps<'/[space]/people/
   const vehicle = vehicles.find((item) => item.assignedTo === id);
   const current = currentProjectFor(id, projects, activity) ?? working[0];
   const seeMoney = can('expenses.view_all') || self;
-  const fields = workspace.space.customFields?.people ?? [];
+  const lookup = (type: FieldType, value: string) =>
+    type === 'person'
+      ? people.get(value)?.name
+      : type === 'project'
+        ? projects.find((project) => project.id === value)?.name
+        : type === 'vehicle'
+          ? vehicles.find((item) => item.id === value)?.name
+          : undefined;
+  const details = fieldRows(fields, 'people', member.custom, lookup, tz);
+  const editable =
+    can('people.manage') && member.status !== 'removed'
+      ? formFields(fields, 'people', workspace.space.modules)
+      : [];
   // A manager's operational read on this person: what's waiting on them, and this month's totals.
   const approver = can('expenses.approve') && !self;
   const waitingReceipts = receipts.filter((item) => item.status === 'submitted');
@@ -420,24 +436,22 @@ export default async function PersonPage({ params }: PageProps<'/[space]/people/
               )}
             </Panel>
           )}
-          {fields.length > 0 && member.role !== 'guest' && (
-            <Panel>
+          {member.role !== 'guest' && (details.length > 0 || editable.length > 0) && (
+            <Panel aria-label="Details">
               <PanelHeader title="Details">
-                <span className="text-[11.5px] text-faint">Custom fields</span>
+                <EditRecordFields
+                  type="people"
+                  id={member.personId}
+                  fields={editable}
+                  values={member.custom}
+                  title={member.person.name}
+                />
               </PanelHeader>
-              <dl className="row-divide px-4 pb-2">
-                {fields.map((field) => (
-                  <div
-                    key={field.id}
-                    className="flex items-center justify-between gap-4 py-2.5 text-[13.5px]"
-                  >
-                    <dt className="text-muted">{field.label}</dt>
-                    <dd className="font-medium">
-                      {formatField(field, member.custom?.[field.id] ?? null)}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
+              {details.length ? (
+                <Facts rows={details} className="px-4 pb-2" />
+              ) : (
+                <p className="px-4 pb-4 text-[13px] text-muted">Nothing filled in yet.</p>
+              )}
             </Panel>
           )}
         </aside>

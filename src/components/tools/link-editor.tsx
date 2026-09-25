@@ -61,9 +61,12 @@ export function LinkEditor({
   base,
   code,
   brand,
+  starter,
 }: {
   slug: string;
   page?: LinkPage;
+  /** A business's first page starts from what it already told Hyphy: its name and line. */
+  starter?: { title: string; handle: string; bio: string };
   base: string;
   /** The saved QR code that opens this page, if one was made. */
   code?: QrCode;
@@ -84,16 +87,17 @@ export function LinkEditor({
           : { title: result.error, icon: 'alert' },
       );
     });
-  const [title, setTitle] = useState(page?.title ?? '');
-  const [handle, setHandle] = useState(page?.handle ?? '');
-  const [bio, setBio] = useState(page?.bio ?? '');
+  const [title, setTitle] = useState(page?.title ?? starter?.title ?? '');
+  const [handle, setHandle] = useState(page?.handle ?? starter?.handle ?? '');
+  const [bio, setBio] = useState(page?.bio ?? starter?.bio ?? '');
   const [theme, setTheme] = useState<LinkPage['theme']>(page?.theme ?? 'paper');
   const [links, setLinks] = useState<LinkItem[]>(
     page?.links ?? [{ id: 'l1', label: '', url: 'https://' }],
   );
   const [selected, setSelected] = useState<string | null>(null);
+  // A page that was never saved (even one started from the business's name) is always savable.
   const [savedState, setSavedState] = useState(() =>
-    JSON.stringify({ title, handle, bio, theme, links }),
+    page ? JSON.stringify({ title, handle, bio, theme, links }) : '',
   );
   const style = THEMES[theme];
   const cleanHandle = handle.toLowerCase().replace(/[^a-z0-9-]/g, '');

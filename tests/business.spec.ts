@@ -149,7 +149,30 @@ test('a new account creates a business and becomes its owner; Personal stays', a
     ['business', 'owner', 'active'],
   ]);
   expect(rows[1]).toMatchObject({ business_type: 'construction', work_style: 'jobs' });
-  expect(rows[1].labels).toEqual({ projects: { singular: 'Job', plural: 'Jobs' } });
+  expect(rows[1].labels).toEqual({
+    projects: { singular: 'Job', plural: 'Jobs' },
+    customer: { singular: 'Customer', plural: 'Customers' },
+  });
+  // Phase 2C: the kind's starting setup comes with it — suggested fields, all optional to start,
+  // and its starting rules. Never a mileage rate: the business chooses what it pays back.
+  const db2 = sql();
+  const setup = await db2`
+    select f.applies_to, f.key, f.required, ss.settings, s.mileage_rate
+    from spaces s join space_members m on m.space_id = s.id
+    join profiles p on p.id = m.person_id
+    left join custom_fields f on f.space_id = s.id
+    left join space_settings ss on ss.space_id = s.id
+    where p.email = ${address('ava')} and s.kind = 'business'
+    order by f.applies_to, f.position`;
+  await db2.end();
+  expect(setup.map((row) => `${row.applies_to}:${row.key}:${row.required}`)).toEqual([
+    'projects:job_number:false',
+    'projects:foreman:false',
+    'receipts:cost_code:false',
+    'receipts:reimbursable:false',
+  ]);
+  expect(setup[0].settings).toEqual({ receipts: { requireProject: true } });
+  expect(setup[0].mileage_rate).toBeNull();
 });
 
 test('owner invites a member: an invitation, not a membership, and an email to join', async () => {

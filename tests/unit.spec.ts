@@ -4,6 +4,7 @@ import { seed } from '@/lib/data/demo/seed';
 import {
   currentProjectFor,
   exceptionsFor,
+  paidBack,
   projectMoney,
   toolUsage,
   vehicleProject,
@@ -752,7 +753,10 @@ test.describe('business types', () => {
       expect(modules).toContain('files');
       for (const id of modules) expect(known.has(id), `${type}: ${id}`).toBe(true);
     }
-    expect(presetLabels('construction')).toEqual({ projects: { singular: 'Job', plural: 'Jobs' } });
+    expect(presetLabels('construction')).toEqual({
+      projects: { singular: 'Job', plural: 'Jobs' },
+      customer: { singular: 'Customer', plural: 'Customers' },
+    });
     expect(businessTypes.hospitality.workStyle).toBe('events');
     expect(presetLabels('real-estate')?.projects?.plural).toBe('Properties');
     expect(presetModules('construction')).toEqual(
@@ -864,5 +868,708 @@ test.describe('the invitation email', () => {
     expect(
       describeInvitation({ ...invitation, expiresAt: new Date(now - 1).toISOString() }, 'UTC', now),
     ).toMatch(/link expired$/);
+  });
+});
+
+/* ---------- business customization (Phase 2C) ---------- */
+
+import {
+  applyConfig,
+  cleanConfig,
+  emptyConfig,
+  fieldLine,
+  spaceLines,
+} from '@/lib/data/demo/config-apply';
+import { createRepository } from '@/lib/data/core';
+import { visibleTo } from '@/lib/data/demo/visibility';
+import type { Change, DataSource, FieldChange } from '@/lib/data/source';
+import { ACCENTS, contrast, INK_COLORS, monogramFor, scannableColor } from '@/lib/platform/brand';
+import {
+  DEFAULT_SETTINGS,
+  formRules,
+  mergeSettings,
+  needsApproval,
+  parseSettings,
+  resolveSettings,
+  submissionProblem,
+} from '@/lib/platform/business-settings';
+import { hasAdditions, presetAdditions, presetFields } from '@/lib/platform/business-types';
+import {
+  checkValues,
+  coerceValue,
+  definitionProblem,
+  FIELD_KEY,
+  fieldKey,
+  fieldsFor,
+  formFields,
+  formatField,
+  exportField,
+  searchWords,
+} from '@/lib/platform/custom-fields';
+import { cleanLabels, vehicleWords } from '@/lib/platform/terms';
+import { toolName } from '@/lib/platform/tools';
+import type { FieldDefinition, FieldValue, ModuleId } from '@/lib/platform/types';
+import { permissionsFor as permissionsIn } from '@/lib/platform/roles';
+
+const field = (overrides: Partial<FieldDefinition>): FieldDefinition => ({
+  id: 'cost_code',
+  spaceId: 'sp_abc',
+  appliesTo: 'receipts',
+  label: 'Cost Code',
+  type: 'select',
+  options: ['100 — General', '200 — Materials', '300 — Equipment'],
+  position: 0,
+  ...overrides,
+});
+
+test.describe('presets: a starting setup, never a box', () => {
+  test('every kind starts with fields its tools can hold, made the way owners make them', () => {
+    for (const type of BUSINESS_TYPES) {
+      const preset = businessTypes[type];
+      const modules = presetModules(type);
+      expect(() => parseSettings(preset.settings), type).not.toThrow();
+      // Hyphy never assumes a reimbursement rate for a business.
+      expect(JSON.stringify(preset)).not.toMatch(/mileageRate|rate/);
+      for (const suggested of presetFields(type, 'sp_new')) {
+        expect(FIELD_KEY.test(suggested.id), `${type}: ${suggested.id}`).toBe(true);
+        expect(definitionProblem(suggested), `${type}: ${suggested.label}`).toBeNull();
+        expect(
+          suggested.appliesTo === 'people' || modules.includes(suggested.appliesTo as ModuleId),
+          `${type}: ${suggested.label} on ${suggested.appliesTo}`,
+        ).toBe(true);
+      }
+    }
+  });
+  test('construction: jobs, customers, a job number and cost codes', () => {
+    expect(presetLabels('construction')).toEqual({
+      projects: { singular: 'Job', plural: 'Jobs' },
+      customer: { singular: 'Customer', plural: 'Customers' },
+    });
+    const fields = presetFields('construction', 'sp_new');
+    expect(fields.map((item) => `${item.appliesTo}:${item.label}`)).toEqual([
+      'projects:Job Number',
+      'projects:Foreman',
+      'receipts:Cost Code',
+      'receipts:Reimbursable?',
+    ]);
+    expect(fields.find((item) => item.id === 'cost_code')?.options).toEqual([
+      '100 — General',
+      '200 — Materials',
+      '300 — Equipment',
+    ]);
+    // Positions count within each record type.
+    expect(fields.map((item) => item.position)).toEqual([0, 1, 0, 1]);
+  });
+  test('restaurants get events and rooms; real estate properties, MLS numbers and purposes', () => {
+    expect(presetFields('hospitality', 's').map((item) => item.label)).toEqual([
+      'Room',
+      'Host',
+      'Expected Guests',
+      'Department',
+    ]);
+    expect(presetLabels('real-estate').projects?.plural).toBe('Properties');
+    expect(businessTypes['real-estate'].settings.mileage?.requirePurpose).toBe(true);
+    expect(presetFields('real-estate', 's').map((item) => item.label)).toContain('MLS Number');
+  });
+  test('changing kind only ever adds, and says exactly what', () => {
+    const abc = space('abc-construction');
+    const current = data.fields.filter((item) => item.spaceId === abc.id);
+    const additions = presetAdditions(abc, current, 'real-estate');
+    // Nothing is taken away: ABC keeps Vehicles, Receipts and its own fields.
+    expect(additions.modules).toEqual(expect.arrayContaining(['links']));
+    expect(additions.modules).not.toContain('vehicles');
+    expect(additions.fields.map((item) => item.label)).toEqual([
+      'MLS Number',
+      'Property Type',
+      'Agent',
+    ]);
+    expect(additions.labels).toEqual({
+      projects: { singular: 'Property', plural: 'Properties' },
+      customer: { singular: 'Client', plural: 'Clients' },
+    });
+    // A field the business already has (by key or by name) isn't suggested twice.
+    const withJobNumber = [
+      ...current,
+      field({ appliesTo: 'projects', id: 'x', label: 'job number' }),
+    ];
+    expect(
+      presetAdditions(abc, withJobNumber, 'construction').fields.map((item) => item.label),
+    ).not.toContain('Job Number');
+    // Same kind, same words: nothing to add.
+    const done = presetAdditions({ modules: presetModules('other'), labels: {} }, [], 'other');
+    expect(hasAdditions(done)).toBe(false);
+  });
+});
+
+test.describe('terminology from short lists', () => {
+  test('only curated words are kept', () => {
+    expect(
+      cleanLabels({
+        projects: { singular: 'Job' },
+        customer: { singular: 'Customer' },
+        vehicles: { singular: 'Spaceship' },
+      }),
+    ).toEqual({
+      projects: { singular: 'Job', plural: 'Jobs' },
+      customer: { singular: 'Customer', plural: 'Customers' },
+    });
+    expect(cleanLabels('<script>')).toEqual({});
+  });
+  test('the words reach the menu, the forms and the Create menu', () => {
+    const abc: Space = {
+      ...space('abc-construction'),
+      labels: {
+        projects: { singular: 'Job', plural: 'Jobs' },
+        customer: { singular: 'Customer', plural: 'Customers' },
+        vehicles: { singular: 'Truck', plural: 'Trucks' },
+      },
+    };
+    expect(workProfile(abc)).toMatchObject({ singular: 'Job', plural: 'Jobs', client: 'Customer' });
+    expect(vehicleWords(abc).plural).toBe('Trucks');
+    expect(toolName(getTool('vehicles')!, abc)).toBe('Trucks');
+    expect(navigationFor(abc, { role: 'owner' }).space.map((item) => item.label)).toEqual(
+      expect.arrayContaining(['Jobs', 'Trucks']),
+    );
+    const labels = createActionsFor(abc, { role: 'owner' }).map((action) => action.label);
+    expect(labels).toEqual(expect.arrayContaining(['Create job', 'Add truck']));
+  });
+  test('businesses that never chose keep their words exactly', () => {
+    expect(workProfile(space('abc-construction')).plural).toBe('Projects');
+    expect(workProfile(space('salt-and-ember'))).toMatchObject({
+      plural: 'Events',
+      client: 'Host',
+    });
+    expect(vehicleWords(space('abc-construction')).plural).toBe('Vehicles');
+  });
+});
+
+test.describe('custom fields: one engine', () => {
+  const costCode = field({ required: true });
+  const reimbursable = field({
+    id: 'reimbursable',
+    label: 'Reimbursable?',
+    type: 'boolean',
+    options: undefined,
+    position: 1,
+  });
+  const truck = field({
+    id: 'truck',
+    label: 'Truck',
+    type: 'vehicle',
+    options: undefined,
+    position: 2,
+  });
+  const old = field({
+    id: 'old_code',
+    label: 'Old code',
+    type: 'text',
+    options: undefined,
+    archivedAt: '2026-01-01T00:00:00Z',
+    position: 3,
+  });
+  const fields = [costCode, reimbursable, truck, old];
+
+  test('required answers, allowed choices, the right kinds', () => {
+    expect(checkValues(fields, 'receipts', {}, { require: true }).errors).toEqual({
+      cost_code: 'Cost Code is required.',
+    });
+    // A draft may be unfinished.
+    expect(checkValues(fields, 'receipts', {}, { require: false }).errors).toEqual({});
+    expect(
+      checkValues(fields, 'receipts', { cost_code: '400 — Snacks' }, { require: true }).errors,
+    ).toEqual({ cost_code: 'Choose one of the options.' });
+    expect(
+      checkValues(
+        fields,
+        'receipts',
+        { cost_code: '200 — Materials', reimbursable: 'true' },
+        { require: true },
+      ),
+    ).toEqual({ values: { cost_code: '200 — Materials', reimbursable: true }, errors: {} });
+    expect(
+      checkValues([field({ type: 'number', options: undefined })], 'receipts', {
+        cost_code: 'many',
+      }).errors.cost_code,
+    ).toBe('Enter a number.');
+  });
+  test('stopped fields keep their answers and take no new ones; strangers are ignored', () => {
+    const previous: Record<string, FieldValue> = { old_code: 'A-7', cost_code: '100 — General' };
+    const result = checkValues(
+      fields,
+      'receipts',
+      { cost_code: '300 — Equipment', old_code: 'HACKED', hyphy_llc_field: 'x' },
+      { previous, require: true },
+    );
+    expect(result.values).toEqual({ cost_code: '300 — Equipment', old_code: 'A-7' });
+    expect(result.errors).toEqual({});
+  });
+  test('references must be something the person can see; a tool that is off asks nothing', () => {
+    const exists = (_: string, id: string) => id === 'veh_t24';
+    expect(
+      checkValues(
+        fields,
+        'receipts',
+        { cost_code: '100 — General', truck: 'veh_t17' },
+        { require: true, exists },
+      ).errors,
+    ).toEqual({ truck: 'Choose one from the list.' });
+    const required = [
+      field({ id: 'truck', label: 'Truck', type: 'vehicle', options: undefined, required: true }),
+    ];
+    expect(
+      checkValues(required, 'receipts', {}, { require: true, modules: ['receipts'] }).errors,
+    ).toEqual({});
+    expect(formFields(required, 'receipts', ['receipts'])).toEqual([]);
+    expect(formFields(required, 'receipts', ['receipts', 'vehicles'])).toHaveLength(1);
+  });
+  test('the lifecycle protects saved answers', () => {
+    expect(definitionProblem({ ...costCode, type: 'text' }, costCode, true)).toMatch(
+      /can’t change/,
+    );
+    expect(definitionProblem({ ...costCode, type: 'text' }, costCode, false)).toBeNull();
+    expect(
+      definitionProblem(
+        { ...costCode, options: ['100 — General', '300 — Equipment'] },
+        costCode,
+        true,
+      ),
+    ).toMatch(/200 — Materials/);
+    expect(
+      definitionProblem(
+        { ...costCode, options: [...costCode.options!, '400 — Subs'] },
+        costCode,
+        true,
+      ),
+    ).toBeNull();
+    expect(definitionProblem({ label: 'Scan', type: 'file' })).toMatch(/kind of answer/);
+    expect(definitionProblem({ label: '', type: 'text' })).toMatch(/name/);
+    expect(definitionProblem({ label: 'Code', type: 'select', options: [] })).toMatch(/choice/);
+  });
+  test('keys are made once from the name and never collide', () => {
+    expect(fieldKey('Cost Code', [])).toBe('cost_code');
+    expect(fieldKey('Cost Code', ['cost_code'])).toBe('cost_code_2');
+    expect(fieldKey('Reimbursable?', [])).toBe('reimbursable');
+    expect(fieldKey('24h Rate', [])).toBe('f_24h_rate');
+    expect(fieldKey('!!!', [])).toBe('field');
+    for (const key of ['cost_code', 'f_24h_rate', 'field']) expect(FIELD_KEY.test(key)).toBe(true);
+  });
+  test('answers read naturally, export plainly and are findable', () => {
+    const lookup = (_: string, id: string) => (id === 'mike' ? 'Mike Rodriguez' : undefined);
+    const foreman = field({ id: 'foreman', label: 'Foreman', type: 'person', options: undefined });
+    expect(formatField(foreman, 'mike', lookup)).toBe('Mike Rodriguez');
+    expect(formatField(reimbursable, false)).toBe('No');
+    expect(formatField(field({ type: 'currency', options: undefined }), 1250)).toBe('$1,250');
+    expect(formatField(field({ type: 'date', options: undefined }), '2026-10-03')).toBe('Oct 3');
+    expect(exportField(field({ type: 'currency', options: undefined }), 1250)).toBe('1250.00');
+    expect(coerceValue(field({ type: 'currency', options: undefined }), '$1,250.50')).toBe(1250.5);
+    // Only fields the record has, plus the old ones it still has an answer for.
+    expect(fieldsFor(fields, 'receipts', { old_code: 'A-7' }).map((item) => item.id)).toEqual([
+      'cost_code',
+      'reimbursable',
+      'truck',
+      'old_code',
+    ]);
+    expect(fieldsFor(fields, 'receipts', {}).map((item) => item.id)).not.toContain('old_code');
+    expect(
+      searchWords(fields, 'receipts', { cost_code: '200 — Materials', reimbursable: true }),
+    ).toBe('200 — Materials');
+  });
+});
+
+test.describe('business rules', () => {
+  test('a business that changed nothing works exactly as before', () => {
+    expect(resolveSettings({})).toEqual(DEFAULT_SETTINGS);
+    for (const slug of ['abc-construction', 'hyphy', 'salt-and-ember'])
+      expect(resolveSettings(space(slug))).toEqual(DEFAULT_SETTINGS);
+    expect(needsApproval(space('abc-construction'), 'receipt', 5)).toBe(true);
+    expect(needsApproval(personal, 'receipt', 5000)).toBe(false);
+  });
+  test('only known questions with allowed answers are stored', () => {
+    expect(() => parseSettings({ payroll: {} })).toThrow('Unknown settings.');
+    expect(() => parseSettings({ receipts: { requireProject: 'yes' } })).toThrow(/yes or no/);
+    expect(() => parseSettings({ receipts: { approval: { mode: 'over', over: -1 } } })).toThrow();
+    expect(() => parseSettings({ mileage: { approval: { mode: 'over', over: 50 } } })).toThrow();
+    expect(() => parseSettings({ approvals: { approvers: 'members' } })).toThrow();
+    expect(parseSettings({ receipts: { approval: { mode: 'over', over: 250.555 } } })).toEqual({
+      receipts: { approval: { mode: 'over', over: 250.56 } },
+    });
+  });
+  test('settings merge section by section', () => {
+    const merged = mergeSettings(
+      { receipts: { requireProject: true }, approvals: { approvers: 'admins' } },
+      { receipts: { requireVehicle: true } },
+    );
+    expect(merged).toEqual({
+      receipts: { requireProject: true, requireVehicle: true },
+      approvals: { approvers: 'admins' },
+    });
+  });
+  test('approval: always, never, or receipts over an amount', () => {
+    const abc = (settings: Space['settings']) => ({ ...space('abc-construction'), settings });
+    expect(needsApproval(abc({ receipts: { approval: { mode: 'never' } } }), 'receipt', 900)).toBe(
+      false,
+    );
+    const over = abc({ receipts: { approval: { mode: 'over', over: 250 } } });
+    expect(needsApproval(over, 'receipt', 250)).toBe(false);
+    expect(needsApproval(over, 'receipt', 250.01)).toBe(true);
+    expect(needsApproval(over, 'mileage', 1)).toBe(true);
+  });
+  test('rules about a tool that is off ask for nothing', () => {
+    const abc = {
+      ...space('abc-construction'),
+      settings: { receipts: { requireProject: true, requireVehicle: true } },
+    };
+    expect(formRules(abc).receipts).toMatchObject({ project: 'required', vehicle: 'required' });
+    expect(
+      formRules({ ...abc, modules: abc.modules.filter((id) => id !== 'vehicles') }).receipts
+        .vehicle,
+    ).toBe('off');
+    // Someone with no vehicle to pick isn't asked for one.
+    expect(formRules(abc, false).receipts.vehicle).toBe('optional');
+    const words = { project: 'Job', vehicle: 'Truck' };
+    expect(submissionProblem(abc, 'receipt', {}, words, true)).toBe(
+      'Choose the job this receipt is for.',
+    );
+    expect(submissionProblem(abc, 'receipt', { projectId: 'p' }, words, true)).toBe(
+      'Choose the truck this receipt is for.',
+    );
+    expect(submissionProblem(abc, 'receipt', { projectId: 'p' }, words, false)).toBeNull();
+    const strict = {
+      ...abc,
+      settings: {
+        receipts: { allowPersonal: false },
+        mileage: { allowPersonalVehicles: false, requirePurpose: true },
+      },
+    };
+    expect(
+      submissionProblem(
+        strict,
+        'receipt',
+        { paymentMethod: 'Personal card (reimburse me)' },
+        words,
+        true,
+      ),
+    ).toMatch(/personal expenses/);
+    expect(
+      submissionProblem(strict, 'mileage', { vehicleId: 'v', purpose: ' ' }, words, true),
+    ).toBe('Add what the trip was for.');
+    expect(submissionProblem(strict, 'mileage', { purpose: 'Site visit' }, words, false)).toMatch(
+      /none is assigned/,
+    );
+  });
+  test('owners decide whether managers approve; nobody else changes', () => {
+    const abc = {
+      ...space('abc-construction'),
+      settings: { approvals: { approvers: 'admins' as const } },
+    };
+    expect(permissionsIn({ role: 'manager' }, abc)).not.toContain('expenses.approve');
+    expect(permissionsIn({ role: 'manager' }, abc)).toContain('expenses.view_all');
+    expect(permissionsIn({ role: 'admin' }, abc)).toContain('expenses.approve');
+    expect(permissionsIn({ role: 'owner' }, abc)).toContain('expenses.approve');
+    expect(permissionsIn({ role: 'member' }, abc)).toEqual(permissionsIn({ role: 'member' }));
+    expect(permissionsIn({ role: 'manager' }, space('abc-construction'))).toContain(
+      'expenses.approve',
+    );
+  });
+});
+
+test.describe('brand: one accent, always readable', () => {
+  test('every accent reads with its ink, and makes a scannable code', () => {
+    for (const accent of ACCENTS) {
+      expect(contrast(accent.color, INK_COLORS[accent.ink]), accent.name).toBeGreaterThanOrEqual(
+        4.5,
+      );
+      expect(contrast(scannableColor(accent.color), '#FFFFFF'), accent.name).toBeGreaterThanOrEqual(
+        4.5,
+      );
+    }
+    // Salt & Ember's own orange is darkened for its codes.
+    expect(contrast(scannableColor('#E0492F'), '#FFFFFF')).toBeGreaterThanOrEqual(4.5);
+  });
+  test('marks from names', () => {
+    expect(monogramFor('ABC Construction')).toBe('AB');
+    expect(monogramFor('Salt & Ember')).toBe('SE');
+    expect(monogramFor('Hyphy')).toBe('HY');
+  });
+});
+
+test.describe('Demo Mode keeps a business’s setup apart', () => {
+  test('setup applies to its Space only, and old fields stay where they were', () => {
+    const cost = field({ required: true, createdBy: 'dana' });
+    const config = {
+      ...emptyConfig(),
+      spaces: { sp_abc: { settings: { receipts: { requireProject: true } }, mileageRate: 0.67 } },
+      fields: { sp_abc: [...data.fields.filter((item) => item.spaceId === 'sp_abc'), cost] },
+    };
+    const applied = applyConfig(data, config);
+    const abc = applied.spaces.find((item) => item.id === 'sp_abc')!;
+    expect(abc.mileageRate).toBe(0.67);
+    expect(abc.settings?.receipts?.requireProject).toBe(true);
+    expect(applied.fields.filter((item) => item.spaceId === 'sp_hyphy')).toEqual(
+      data.fields.filter((item) => item.spaceId === 'sp_hyphy'),
+    );
+    expect(
+      applied.fields.some((item) => item.spaceId === 'sp_abc' && item.id === 'cost_code'),
+    ).toBe(true);
+    // The seed itself is never touched.
+    expect(data.spaces.find((item) => item.id === 'sp_abc')?.mileageRate).toBe(0.7);
+    expect(applyConfig(data, emptyConfig())).toBe(data);
+  });
+  test('setup writes the same activity lines the database does — and not for every click', () => {
+    const cost = field({ required: true });
+    expect(fieldLine(undefined, cost)).toEqual({
+      verb: 'added',
+      label: 'required receipt field “Cost Code”',
+    });
+    expect(fieldLine(cost, { ...cost, archivedAt: 'now' })).toEqual({
+      verb: 'archived',
+      label: 'receipt field “Cost Code”',
+    });
+    expect(fieldLine(cost, { ...cost, required: false })).toMatchObject({
+      verb: 'changed',
+      detail: 'Now optional',
+    });
+    expect(fieldLine(cost, { ...cost, position: 4 })).toBeNull();
+    const abc = space('abc-construction');
+    expect(spaceLines(abc, { mileageRate: 0.67 })).toEqual([
+      { verb: 'changed', label: 'the mileage rate', detail: '$0.67 a mile' },
+    ]);
+    expect(spaceLines(abc, { brand: { ...abc.brand, color: '#13784A' } })).toEqual([]);
+    expect(spaceLines(abc, { settings: { receipts: { requireProject: true } } })).toEqual([
+      { verb: 'changed', label: 'the receipt rules' },
+    ]);
+  });
+});
+
+test.describe('filing follows the business’s rules', () => {
+  /** The real repository over an in-memory world, to see what it writes. */
+  function world(settings: Space['settings'], person: string, slug = 'abc-construction') {
+    const base = seed(Date.UTC(2026, 8, 24, 18));
+    const target = base.spaces.find((item) => item.slug === slug)!;
+    const withRules = { ...target, settings };
+    const membership = base.memberships.find(
+      (item) => item.spaceId === target.id && item.personId === person,
+    )!;
+    const workspace = {
+      session: {
+        source: 'demo' as const,
+        person: base.people.find((p) => p.id === person)!,
+        memberships: [],
+      },
+      person: base.people.find((p) => p.id === person)!,
+      space: withRules,
+      membership,
+      permissions: permissionsIn(membership, withRules),
+    };
+    const writes: Change[] = [];
+    const fieldWrites: FieldChange[] = [];
+    const visible = visibleTo(workspace, base);
+    const source: DataSource = {
+      kind: 'demo',
+      load: async (key) => visible[key],
+      newId: (prefix) => `${prefix}_test`,
+      write: async (changes) => void writes.push(...changes),
+      writeFields: async (changes) => void fieldWrites.push(...changes),
+      setMemberFields: async () => {},
+      invite: async () => {
+        throw new Error('not here');
+      },
+      pins: async () => [],
+      setPins: async () => {},
+    };
+    return { repo: createRepository(workspace, source), writes, fieldWrites };
+  }
+  const receipt = {
+    vendor: 'Menards',
+    category: 'materials' as const,
+    total: 42,
+    date: '2026-09-24T12:00:00Z',
+  };
+
+  test('no approval needed: filed as approved, with nobody named as approver', async () => {
+    const { repo } = world({ receipts: { approval: { mode: 'never' } } }, 'mike');
+    const filed = await repo.createReceipt(receipt);
+    expect(filed.status).toBe('approved');
+    expect(filed.reviewedBy).toBeUndefined();
+  });
+  test('over an amount: small ones file, big ones wait', async () => {
+    const { repo } = world({ receipts: { approval: { mode: 'over', over: 250 } } }, 'mike');
+    expect((await repo.createReceipt(receipt)).status).toBe('approved');
+    expect((await repo.createReceipt({ ...receipt, total: 300 })).status).toBe('submitted');
+    // Trips keep their own rule.
+    const trip = await repo.createMileage({
+      date: receipt.date,
+      from: 'Shop',
+      to: 'Oak Brook',
+      miles: 5,
+      purpose: '',
+    });
+    expect(trip.status).toBe('submitted');
+  });
+  test('a new trip is stamped with the business’s rate as it is now', async () => {
+    const { repo } = world({}, 'mike');
+    const trip = await repo.createMileage({
+      date: receipt.date,
+      from: 'Shop',
+      to: 'Oak Brook',
+      miles: 5,
+      purpose: '',
+    });
+    expect(trip.rate).toBe(0.7);
+  });
+  test('approvers still file their own as approved, by themselves', async () => {
+    const { repo } = world({ receipts: { approval: { mode: 'never' } } }, 'dana');
+    const filed = await repo.createReceipt(receipt);
+    expect(filed).toMatchObject({ status: 'approved', reviewedBy: 'dana' });
+  });
+  test('a manager who no longer approves waits like everyone else, and can’t decide', async () => {
+    const { repo } = world({ approvals: { approvers: 'admins' } }, 'ray');
+    expect((await repo.createReceipt(receipt)).status).toBe('submitted');
+    expect((await repo.inbox()).some((item) => item.kind === 'approval')).toBe(false);
+  });
+  test('fields: added with a key from the name, moved, stopped, and never removed once used', async () => {
+    const { repo, fieldWrites } = world({}, 'dana');
+    const added = await repo.addField({
+      appliesTo: 'receipts',
+      label: 'Cost Code',
+      type: 'select',
+      options: ['100 — General'],
+      required: true,
+    });
+    expect(added).toMatchObject({
+      id: 'cost_code',
+      position: 0,
+      required: true,
+      createdBy: 'dana',
+    });
+    await expect(
+      repo.addField({ appliesTo: 'projects', label: 'permit #', type: 'text' }),
+    ).rejects.toThrow(/already a field/);
+    await expect(repo.removeField('projects', 'permit')).rejects.toThrow(/Stop using it instead/);
+    await expect(repo.updateField('projects', 'job_type', { type: 'text' })).rejects.toThrow(
+      /can’t change/,
+    );
+    await repo.moveField('projects', 'job_type', -1);
+    expect(fieldWrites.at(-1)).toMatchObject({
+      op: 'update',
+      id: 'next_inspection',
+      patch: { position: 2 },
+    });
+    await repo.setFieldArchived('projects', 'permit', true);
+    expect(fieldWrites.at(-1)).toMatchObject({
+      op: 'update',
+      id: 'permit',
+      patch: { archivedAt: expect.any(String) },
+    });
+  });
+});
+
+test.describe('a trip keeps the rate it was logged at', () => {
+  const base = seed(Date.UTC(2026, 8, 24, 18));
+  const own = base.mileage.find((entry) => entry.id === 'mi_abc_07')!;
+  test('payback is miles × the trip’s own rate, never today’s', () => {
+    expect(paidBack({ miles: 10, rate: 0.7 }, 0.9)).toBeCloseTo(7, 5);
+    // Logged when the business wasn't paying miles back: nothing, whatever the rate is now.
+    expect(paidBack({ miles: 10, rate: 0 }, 0.9)).toBe(0);
+    // A company vehicle is never paid back by the mile.
+    expect(paidBack({ miles: 10, rate: 0.7, vehicleId: 'veh_t24' }, 0.9)).toBe(0);
+    // Only a trip with no rate of its own falls back to the current one.
+    expect(paidBack({ miles: 10 }, 0.9)).toBeCloseTo(9, 5);
+  });
+  test('a project adds each trip at its own rate', () => {
+    const old = { ...own, id: 'a', miles: 10, rate: 0.7 };
+    const newer = { ...own, id: 'b', miles: 10, rate: 0.5 };
+    const mixed = projectMoney({}, [], [old, newer], 0.9);
+    expect(mixed.lines.find((line) => line.label === 'Mileage paid back')?.total).toBeCloseTo(
+      12,
+      5,
+    );
+    expect(mixed.rate).toBeUndefined();
+    expect(projectMoney({}, [], [old], 0.9).rate).toBe(0.7);
+  });
+  test('seeded business trips carry their business’s rate; Personal trips have none', () => {
+    const kindOf = new Map(base.spaces.map((space) => [space.id, space]));
+    for (const entry of base.mileage) {
+      const space = kindOf.get(entry.spaceId)!;
+      expect(entry.rate, entry.id).toBe(
+        space.kind === 'business' ? (space.mileageRate ?? 0) : undefined,
+      );
+    }
+    expect(own.rate).toBe(0.7);
+  });
+});
+
+test.describe('setup never asks for what can’t be given', () => {
+  const abc = seed(Date.UTC(2026, 8, 24, 18)).spaces.find(
+    (item) => item.slug === 'abc-construction',
+  )!;
+  const strict = {
+    ...abc,
+    settings: { receipts: { requireProject: true }, mileage: { requireProject: true } },
+  };
+  const words = { project: 'Job', vehicle: 'Truck' };
+  test('a job is required only of people who can see a job to pick', () => {
+    expect(formRules(strict, true, true).receipts.project).toBe('required');
+    expect(formRules(strict, true, false).receipts.project).toBe('optional');
+    expect(formRules(strict, true, false).mileage.project).toBe('optional');
+    expect(submissionProblem(strict, 'receipt', {}, words, false, true)).toBe(
+      'Choose the job this receipt is for.',
+    );
+    expect(submissionProblem(strict, 'receipt', {}, words, false, false)).toBeNull();
+  });
+  test('an answer nobody changed isn’t re-judged; a new one is', () => {
+    const foreman = {
+      id: 'foreman',
+      spaceId: abc.id,
+      appliesTo: 'projects' as const,
+      label: 'Foreman',
+      type: 'person' as const,
+      position: 0,
+    };
+    const permit = { ...foreman, id: 'permit', label: 'Permit', type: 'text' as const };
+    // Sam left the business; his name stays on the job while someone fixes the permit.
+    const nobody = () => false;
+    const kept = checkValues(
+      [foreman, permit],
+      'projects',
+      { permit: 'B-2291' },
+      {
+        previous: { foreman: 'sam' },
+        exists: nobody,
+      },
+    );
+    expect(kept.errors).toEqual({});
+    expect(kept.values).toEqual({ foreman: 'sam', permit: 'B-2291' });
+    const changed = checkValues(
+      [foreman],
+      'projects',
+      { foreman: 'ghost' },
+      {
+        previous: { foreman: 'sam' },
+        exists: nobody,
+      },
+    );
+    expect(changed.errors).toEqual({ foreman: 'Choose one from the list.' });
+  });
+  test('a new kind that runs projects differently says so before it changes', () => {
+    expect(presetAdditions(abc, [], 'hospitality').workStyle).toBe('events');
+    expect(presetAdditions(abc, [], 'construction').workStyle).toBeUndefined();
+    expect(hasAdditions({ modules: [], fields: [], labels: {}, workStyle: 'events' })).toBe(true);
+  });
+  test('a setup cookie of the wrong shape is ignored, never a broken page', () => {
+    expect(cleanConfig('nope')).toEqual(emptyConfig());
+    const cleaned = cleanConfig({
+      spaces: { sp_abc: { mileageRate: 0.8 }, sp_bad: 'x' },
+      fields: { sp_abc: [null, 7, { id: 'cost_code' }], sp_bad: 'x' },
+      log: [null, { id: 'a' }],
+      changes: 'many',
+    });
+    expect(cleaned).toEqual({
+      spaces: { sp_abc: { mileageRate: 0.8 } },
+      fields: { sp_abc: [] },
+      log: [],
+      changes: 0,
+    });
+    expect(() => applyConfig(seed(Date.UTC(2026, 8, 24, 18)), cleaned)).not.toThrow();
   });
 });

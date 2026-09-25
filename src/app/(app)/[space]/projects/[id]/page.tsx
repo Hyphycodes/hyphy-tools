@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { CreateButton } from '@/components/create/create-button';
+import { Facts, fieldRows } from '@/components/fields/field-facts';
+import { EditRecordFields } from '@/components/fields/record-fields';
 import { ActivityList } from '@/components/records/activity-list';
 import { PinButton } from '@/components/records/pin-button';
 import { QrMini } from '@/components/records/qr-mini';
@@ -18,7 +20,7 @@ import { Progress } from '@/components/ui/progress';
 import { Tabs } from '@/components/ui/tabs';
 import { projectMoney, vehiclesOn, type ProjectMoney } from '@/lib/insights';
 import { openPage } from '@/lib/page';
-import { formatField } from '@/lib/platform/custom-fields';
+import { formFields } from '@/lib/platform/custom-fields';
 import {
   daysUntil,
   formatCurrency,
@@ -55,18 +57,31 @@ export default async function ProjectPage({
   const project = await repo.project(id);
   if (!project) notFound();
 
-  const [receipts, mileage, files, activity, members, vehicles, allFiles, codes, pins] =
-    await Promise.all([
-      repo.receipts({ projectId: id }),
-      repo.mileage({ projectId: id }),
-      repo.files({ attachedTo: { type: 'project', id } }),
-      repo.activity({ about: { type: 'project', id } }),
-      repo.members(),
-      repo.vehicles(),
-      repo.files(),
-      repo.qrCodes(),
-      repo.pins(),
-    ]);
+  const [
+    receipts,
+    mileage,
+    files,
+    activity,
+    members,
+    vehicles,
+    allFiles,
+    codes,
+    pins,
+    fields,
+    projects,
+  ] = await Promise.all([
+    repo.receipts({ projectId: id }),
+    repo.mileage({ projectId: id }),
+    repo.files({ attachedTo: { type: 'project', id } }),
+    repo.activity({ about: { type: 'project', id } }),
+    repo.members(),
+    repo.vehicles(),
+    repo.files(),
+    repo.qrCodes(),
+    repo.pins(),
+    repo.fields('projects'),
+    repo.projects(),
+  ]);
   const { space } = workspace;
   const profile = workProfile(space);
   const noun = profile.singular.toLowerCase();
@@ -84,15 +99,24 @@ export default async function ProjectPage({
   const hasQr = isModuleReady('qr', space, workspace.membership);
   const money = projectMoney(project, receipts, mileage, space.mileageRate);
   const onSite = profile.field ? vehiclesOn(id, vehicles, receipts, mileage) : [];
-  const fields = space.customFields?.projects ?? [];
   const lookup = (type: FieldType, value: string) =>
     type === 'person'
       ? people.get(value)?.name
       : type === 'vehicle'
         ? vehicles.find((vehicle) => vehicle.id === value)?.name
-        : type === 'file'
-          ? allFiles.find((file) => file.id === value)?.name
-          : undefined;
+        : type === 'project'
+          ? projects.find((item) => item.id === value)?.name
+          : type === 'file'
+            ? allFiles.find((file) => file.id === value)?.name
+            : undefined;
+  // Hyphy's own facts and the business's, read the same way: "Customer · Harrison Family".
+  const details: [string, string][] = [
+    ...(project.client && profile.style !== 'events'
+      ? ([[profile.client, project.client]] as [string, string][])
+      : []),
+    ...fieldRows(fields, 'projects', project.custom, lookup, tz),
+  ];
+  const editable = can('projects.manage') ? formFields(fields, 'projects', space.modules) : [];
   const tabHref = (name: string) =>
     `${base}/projects/${id}${name === 'overview' ? '' : `?tab=${name}`}`;
   const date = keyDate(project, profile);
@@ -304,7 +328,6 @@ export default async function ProjectPage({
                 valueLabel={profile.value}
                 client={project.client}
                 noun={noun}
-                rate={space.mileageRate}
               />
             ) : null}
 
@@ -462,24 +485,22 @@ export default async function ProjectPage({
               )}
             </Panel>
 
-            {fields.length > 0 && (
-              <Panel>
+            {(details.length > 0 || editable.length > 0) && (
+              <Panel aria-label="Details">
                 <PanelHeader title="Details">
-                  <span className="text-[11.5px] text-faint">Custom fields</span>
+                  <EditRecordFields
+                    type="projects"
+                    id={project.id}
+                    fields={editable}
+                    values={project.custom}
+                    title={project.name}
+                  />
                 </PanelHeader>
-                <dl className="row-divide px-4 pb-2">
-                  {fields.map((field) => (
-                    <div
-                      key={field.id}
-                      className="flex items-center justify-between gap-4 py-2.5 text-[13.5px]"
-                    >
-                      <dt className="text-muted">{field.label}</dt>
-                      <dd className="text-right font-medium text-ink">
-                        {formatField(field, project.custom?.[field.id], lookup, tz)}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
+                {details.length ? (
+                  <Facts rows={details} className="px-4 pb-2" />
+                ) : (
+                  <p className="px-4 pb-4 text-[13px] text-muted">Nothing filled in yet.</p>
+                )}
               </Panel>
             )}
 
@@ -517,7 +538,6 @@ export default async function ProjectPage({
               valueLabel={profile.value}
               client={project.client}
               noun={noun}
-              rate={space.mileageRate}
             />
           ) : null}
           <Panel>
@@ -688,13 +708,11 @@ function MoneyPanel({
   valueLabel,
   client,
   noun,
-  rate,
 }: {
   money: ProjectMoney;
   valueLabel: string | null;
   client?: string;
   noun: string;
-  rate?: number;
 }) {
   const left = money.allowance ? money.allowance - money.tracked : 0;
   const used = money.allowance ? Math.min(100, (money.tracked / money.allowance) * 100) : 0;
@@ -811,8 +829,8 @@ function MoneyPanel({
               <li key={line.label} className="text-muted">
                 {line.label}{' '}
                 <span className="num font-medium text-ink">{formatCurrency(line.total)}</span>
-                {line.label === 'Mileage paid back' && rate
-                  ? ` (${formatMiles(money.reimbursedMiles)} × ${formatCurrency(rate)})`
+                {line.label === 'Mileage paid back' && money.rate
+                  ? ` (${formatMiles(money.reimbursedMiles)} × ${formatCurrency(money.rate)})`
                   : ''}
               </li>
             ))}

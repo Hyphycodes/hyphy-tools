@@ -1,6 +1,7 @@
 import 'server-only';
 import { perspectives, seed } from '@/lib/data/demo/seed';
 import { dataBackend } from '@/lib/data';
+import { readConfig } from '@/lib/data/demo/config';
 import { readJournal } from '@/lib/data/demo/journal';
 import { changesSinceSeed, personaIds, resetAllowed } from '@/lib/data/supabase/dev';
 import type { Workspace } from '@/lib/identity/types';
@@ -34,7 +35,7 @@ export async function demoModel(workspace: Workspace): Promise<DemoModel> {
   const real = dataBackend() === 'supabase';
   const [changes, ids] = real
     ? await Promise.all([changesSinceSeed(), personaIds()])
-    : [(await readJournal()).length, null];
+    : [(await readJournal()).length + (await readConfig()).changes, null];
   const personaKey = ids
     ? ([...ids].find(([, id]) => id === workspace.person.id)?.[0] ?? '')
     : workspace.person.id;

@@ -6,6 +6,7 @@ import { cn } from '@/components/ui/cn';
 import { Page } from '@/components/ui/page';
 import { Panel, PanelHeader } from '@/components/ui/panel';
 import { openPage } from '@/lib/page';
+import { scannableColor } from '@/lib/platform/brand';
 import { formatRelative } from '@/lib/platform/format';
 import { getTool } from '@/lib/platform/tools';
 
@@ -40,6 +41,11 @@ export default async function QrPage({ params, searchParams }: PageProps<'/[spac
         key={selected?.id ?? `${content ?? 'new'}-${fromProject?.id ?? ''}`}
         slug={workspace.space.slug}
         spaceName={workspace.space.kind === 'personal' ? 'Personal' : workspace.space.name}
+        accent={
+          workspace.space.kind === 'business'
+            ? scannableColor(workspace.space.brand.color)
+            : undefined
+        }
         canSave={can('tools.use')}
         initial={
           selected

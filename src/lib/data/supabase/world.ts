@@ -88,7 +88,6 @@ export function worldRows(now = Date.now()): World {
       modules: space.modules,
       labels: space.labels ?? {},
       brand: space.brand,
-      custom_fields: space.customFields ?? {},
       timezone: v(space.timezone),
       owner_id: u(space.ownerId),
       work_style: v(space.workStyle),
@@ -111,6 +110,30 @@ export function worldRows(now = Date.now()): World {
       custom: custom(item.custom),
       joined_at: t(item.joinedAt),
       department: v(item.department),
+    })),
+  );
+  add(
+    'public.space_settings',
+    data.spaces
+      .filter((space) => space.settings && Object.keys(space.settings).length)
+      .map((space) => ({ space_id: u(space.id), settings: space.settings })),
+  );
+  add(
+    'public.custom_fields',
+    data.fields.map((field) => ({
+      space_id: u(field.spaceId),
+      applies_to: v(field.appliesTo),
+      key: v(field.id),
+      label: v(field.label),
+      type: v(field.type),
+      options: field.options ?? [],
+      required: Boolean(field.required),
+      help: v(field.help),
+      position: v(field.position),
+      show_in_list: Boolean(field.showInList),
+      archived_at: t(field.archivedAt),
+      created_by: u(field.createdBy),
+      created_at: t(field.createdAt),
     })),
   );
   add(
@@ -212,6 +235,7 @@ export function worldRows(now = Date.now()): World {
       vehicle_id: u(receipt.vehicleId),
       project_id: u(receipt.projectId),
       notes: v(receipt.notes),
+      custom: custom(receipt.custom),
       ...review(receipt),
     })),
   );
@@ -230,6 +254,8 @@ export function worldRows(now = Date.now()): World {
       purpose: v(entry.purpose),
       vehicle_id: u(entry.vehicleId),
       project_id: u(entry.projectId),
+      rate: v(entry.rate),
+      custom: custom(entry.custom),
       ...review(entry),
     })),
   );

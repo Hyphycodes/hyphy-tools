@@ -3,11 +3,13 @@ import { randomUUID } from 'node:crypto';
 import type { Workspace } from '@/lib/identity/types';
 import type { PinTarget } from '@/lib/platform/types';
 import { DataUnavailableError, RuleError, type Member } from '../repository';
-import type { Change, DataSource, Visible } from '../source';
+import type { Change, DataSource, FieldChange, Visible } from '../source';
 import { asPerson, readAsPerson, uuidLiteral, type Tx } from './db';
 import {
   activityFrom,
   approvalEventFrom,
+  fieldColumns,
+  fieldFrom,
   fileFrom,
   inboxFrom,
   linkPageFrom,
@@ -105,6 +107,11 @@ export function createSupabaseSource(workspace: Workspace): DataSource {
       sql: list(`select * from approval_events where space_id = ${S}`),
       map: (r) => r.map(approvalEventFrom),
     },
+    // Row Level Security gives a guest only what their shared projects need.
+    fields: {
+      sql: list(`select * from custom_fields where space_id = ${S}`),
+      map: (r) => r.map(fieldFrom),
+    },
     pins: {
       sql: list(`
         select target_type, target_id from pins
@@ -147,6 +154,15 @@ export function createSupabaseSource(workspace: Workspace): DataSource {
 
   async function apply(tx: Tx, change: Change) {
     const table = tableName[change.table];
+    // A business's rules live beside its Space row, in `space_settings` (one per Space).
+    if (change.op === 'update' && change.table === 'spaces' && 'settings' in change.patch) {
+      const { settings, ...rest } = change.patch;
+      await tx`
+        insert into space_settings (space_id, settings) values (${space.id}, ${tx.json(settings as never)})
+        on conflict (space_id) do update set settings = excluded.settings`;
+      if (!Object.keys(toColumns('spaces', rest)).length) return;
+      change = { ...change, patch: rest };
+    }
     if (change.op === 'insert') {
       const values = toColumns(change.table, change.row);
       await tx`insert into ${tx(table)} ${tx(values as Record<string, never>)}`;
@@ -191,6 +207,32 @@ export function createSupabaseSource(workspace: Workspace): DataSource {
       if (!member) throw new RuleError('The invitation couldn’t be read back.');
       return member;
     },
+    async writeFields(changes: FieldChange[]) {
+      await run(async (tx) => {
+        for (const change of changes) {
+          if (change.op === 'insert') {
+            const values = asJson(tx, fieldColumns(change.field));
+            await tx`insert into custom_fields ${tx(values as Record<string, never>)}`;
+            continue;
+          }
+          const where = tx`space_id = ${space.id} and applies_to = ${change.appliesTo} and key = ${change.id}`;
+          const done =
+            change.op === 'delete'
+              ? await tx`delete from custom_fields where ${where} returning key`
+              : await tx`
+                  update custom_fields set ${tx(asJson(tx, fieldColumns(change.patch)) as Record<string, never>)}
+                  where ${where} returning key`;
+          if (!done.length) throw new RuleError('That field isn’t part of this business.');
+        }
+      });
+      cache.delete('fields');
+    },
+    async setMemberFields(personId, custom) {
+      await run(async (tx) => {
+        await tx`select public.set_member_fields(${space.id}, ${personId}, ${tx.json(custom)})`;
+      });
+      cache.delete('members');
+    },
     pins() {
       return read<PinTarget[]>('pins');
     },
@@ -205,6 +247,11 @@ export function createSupabaseSource(workspace: Workspace): DataSource {
       cache.delete('pins');
     },
   };
+}
+
+/** A field's choices go to the database as JSON, not as a Postgres array. */
+export function asJson(tx: Tx, values: Record<string, unknown>) {
+  return 'options' in values ? { ...values, options: tx.json(values.options as never) } : values;
 }
 
 /** Database refusals become product messages; an unreachable database says so. */

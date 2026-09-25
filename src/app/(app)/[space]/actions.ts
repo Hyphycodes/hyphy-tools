@@ -11,19 +11,40 @@ import {
 import { getWorkspace, PermissionError, requirePermission } from '@/lib/identity';
 import type { Workspace } from '@/lib/identity/types';
 import type { SubmissionKind, SubmissionRef } from '@/lib/platform/approvals';
+import { ACCENTS, scannableColor, withAccent } from '@/lib/platform/brand';
+import {
+  parseSettings,
+  RECEIPT_CATEGORIES,
+  SettingsError,
+  submissionProblem,
+  type SpaceSettings,
+} from '@/lib/platform/business-settings';
+import {
+  checkValues,
+  cleanOptions,
+  CREATABLE_TYPES,
+  isRecordType,
+  problemText,
+  recordTypes,
+} from '@/lib/platform/custom-fields';
 import type { Permission } from '@/lib/platform/roles';
 import { grantableRoles, roles } from '@/lib/platform/roles';
-import { isBusinessType } from '@/lib/platform/business-types';
+import { isBusinessType, presetAdditions } from '@/lib/platform/business-types';
+import { plans } from '@/lib/platform/plans';
+import { cleanLabels, vehicleWords } from '@/lib/platform/terms';
 import { teamFor } from '@/lib/teams';
-import { availability, tools } from '@/lib/platform/tools';
+import { availability, isModuleReady, tools } from '@/lib/platform/tools';
+import { workProfile } from '@/lib/platform/work';
 import type {
   AttachmentRef,
+  FieldType,
+  FieldValue,
   FileKind,
   LinkPage,
   ModuleId,
   PinTarget,
   ProjectStatus,
-  ReceiptCategory,
+  RecordType,
   Role,
 } from '@/lib/platform/types';
 
@@ -57,7 +78,8 @@ async function run(slug: string, work: () => Promise<ActionResult>): Promise<Act
     if (
       error instanceof InputError ||
       error instanceof RuleError ||
-      error instanceof DataUnavailableError
+      error instanceof DataUnavailableError ||
+      error instanceof SettingsError
     )
       return { ok: false, error: error.message };
     console.error(error);
@@ -126,58 +148,162 @@ async function visibleVehicle(repo: ReturnType<typeof getRepository>, id: unknow
   return vehicle.id;
 }
 
+/* ---------- the business's fields and rules, on every record they apply to ---------- */
+
+type Repo = ReturnType<typeof getRepository>;
+
+/** The tool must be on here, for this person — a switched-off tool takes no new records. */
+function requireTool(workspace: Workspace, module: ModuleId) {
+  if (!isModuleReady(module, workspace.space, workspace.membership))
+    throw new InputError(
+      `${tools.find((tool) => tool.module === module)?.name ?? 'That tool'} is off in ${workspace.space.name}.`,
+    );
+}
+
+/**
+ * The business's own fields on a record: checked against its definitions (only fields in use,
+ * each its own kind, pointing only at people, projects and vehicles this person can see), with
+ * answers to fields it stopped using kept as they were. `require` asks for every required field.
+ */
+async function customValues(
+  repo: Repo,
+  workspace: Workspace,
+  appliesTo: RecordType,
+  input: unknown,
+  options: { previous?: Record<string, FieldValue>; require: boolean },
+) {
+  const [fields, members, projects, vehicles] = await Promise.all([
+    repo.fields(appliesTo),
+    repo.members(),
+    repo.projects(),
+    repo.vehicles(),
+  ]);
+  const exists = (type: FieldType, id: string) =>
+    type === 'person'
+      ? members.some((member) => member.personId === id && member.status === 'active')
+      : type === 'project'
+        ? projects.some((project) => project.id === id)
+        : type === 'vehicle'
+          ? vehicles.some((vehicle) => vehicle.id === id)
+          : false;
+  const { values, errors } = checkValues(fields, appliesTo, input, {
+    ...options,
+    exists,
+    modules: workspace.space.modules,
+  });
+  const [key, message] = Object.entries(errors)[0] ?? [];
+  if (key)
+    throw new InputError(
+      problemText(
+        fields.find((field) => field.id === key)!,
+        message,
+      ),
+    );
+  return values;
+}
+
+/** Whether this person has a vehicle they could pick (a vehicle rule only asks them if so). */
+async function hasVehicle(repo: Repo, workspace: Workspace) {
+  return workspace.space.modules.includes('vehicles') && (await repo.vehicles()).length > 0;
+}
+
+/** Whether this person can see a project to pick (a project rule only asks them if so). */
+async function hasProject(repo: Repo, workspace: Workspace) {
+  return workspace.space.modules.includes('projects') && (await repo.projects()).length > 0;
+}
+
+/** The business's rules for something being sent, in its own words. */
+async function checkRules(
+  repo: Repo,
+  workspace: Workspace,
+  kind: 'receipt' | 'mileage',
+  record: Parameters<typeof submissionProblem>[2],
+) {
+  const problem = submissionProblem(
+    workspace.space,
+    kind,
+    record,
+    {
+      project: workProfile(workspace.space).singular,
+      vehicle: vehicleWords(workspace.space).singular,
+    },
+    await hasVehicle(repo, workspace),
+    await hasProject(repo, workspace),
+  );
+  if (problem) throw new InputError(problem);
+}
+
 /* ---------- actions ---------- */
 
-const CATEGORIES: ReceiptCategory[] = [
-  'fuel',
-  'materials',
-  'meals',
-  'supplies',
-  'equipment',
-  'other',
-];
+const CATEGORIES = RECEIPT_CATEGORIES;
 
 async function receiptFields(
-  repo: ReturnType<typeof getRepository>,
+  repo: Repo,
+  workspace: Workspace,
   input: Input,
   draft: boolean,
+  previous?: Record<string, FieldValue>,
 ): Promise<ReceiptInput> {
-  return {
+  const fields: ReceiptInput = {
     vendor: text(input, 'vendor', { max: 80 })!,
     category: oneOf(input, 'category', CATEGORIES, 'other'),
     total: number(input, 'total', { min: 0, max: 100000, required: !draft }) ?? 0,
     date: date(input, 'date')!,
     gallons: number(input, 'gallons', { max: 500 }),
     odometer: number(input, 'odometer', { max: 2_000_000 }),
-    vehicleId: await visibleVehicle(repo, input.vehicleId),
-    projectId: await visibleProject(repo, input.projectId),
+    vehicleId: workspace.space.modules.includes('vehicles')
+      ? await visibleVehicle(repo, input.vehicleId)
+      : undefined,
+    projectId: workspace.space.modules.includes('projects')
+      ? await visibleProject(repo, input.projectId)
+      : undefined,
     paymentMethod: text(input, 'paymentMethod', { max: 60, required: false }),
     notes: text(input, 'notes', { max: 500, required: false }),
+    // A draft may be unfinished; anything sent answers every required field.
+    custom: await customValues(repo, workspace, 'receipts', input.custom, {
+      previous,
+      require: !draft,
+    }),
     draft,
   };
+  if (!draft) await checkRules(repo, workspace, 'receipt', fields);
+  return fields;
 }
 
 async function mileageFields(
-  repo: ReturnType<typeof getRepository>,
+  repo: Repo,
+  workspace: Workspace,
   input: Input,
+  previous?: Record<string, FieldValue>,
 ): Promise<MileageInput> {
-  return {
+  const fields: MileageInput = {
     date: date(input, 'date')!,
     from: text(input, 'from', { max: 120 })!,
     to: text(input, 'to', { max: 120 })!,
     miles: number(input, 'miles', { min: 0.1, max: 2000, required: true })!,
     roundTrip: input.roundTrip === true,
     purpose: text(input, 'purpose', { max: 200, required: false }) ?? '',
-    vehicleId: await visibleVehicle(repo, input.vehicleId),
-    projectId: await visibleProject(repo, input.projectId),
+    vehicleId: workspace.space.modules.includes('vehicles')
+      ? await visibleVehicle(repo, input.vehicleId)
+      : undefined,
+    projectId: workspace.space.modules.includes('projects')
+      ? await visibleProject(repo, input.projectId)
+      : undefined,
+    custom: await customValues(repo, workspace, 'mileage', input.custom, {
+      previous,
+      require: true,
+    }),
   };
+  await checkRules(repo, workspace, 'mileage', fields);
+  return fields;
 }
 
 export async function createReceipt(slug: string, input: Input) {
   return run(slug, async () => {
     const { repo, workspace } = await open(slug, 'expenses.submit');
+    requireTool(workspace, 'receipts');
     const draft = input.draft === true;
-    const receipt = await repo.createReceipt(await receiptFields(repo, input, draft));
+    const receipt = await repo.createReceipt(await receiptFields(repo, workspace, input, draft));
     const business = workspace.space.kind === 'business';
     return {
       ok: true,
@@ -187,17 +313,20 @@ export async function createReceipt(slug: string, input: Input) {
           ? 'Sent for approval'
           : draft
             ? 'Saved as a draft'
-            : business
+            : business && receipt.reviewedBy
               ? 'Filed and approved'
-              : 'Saved to your receipts',
+              : business
+                ? 'Filed — no approval needed'
+                : 'Saved to your receipts',
     };
   });
 }
 
 export async function createMileage(slug: string, input: Input) {
   return run(slug, async () => {
-    const { repo } = await open(slug, 'expenses.submit');
-    const entry = await repo.createMileage(await mileageFields(repo, input));
+    const { repo, workspace } = await open(slug, 'expenses.submit');
+    requireTool(workspace, 'mileage');
+    const entry = await repo.createMileage(await mileageFields(repo, workspace, input));
     return {
       ok: true,
       id: entry.id,
@@ -209,8 +338,12 @@ export async function createMileage(slug: string, input: Input) {
 /** The submitter's fix for a returned receipt, or a draft finished and sent. */
 export async function resubmitReceipt(slug: string, id: string, input: Input) {
   return run(slug, async () => {
-    const { repo } = await open(slug, 'expenses.submit');
-    const receipt = await repo.resubmitReceipt(String(id), await receiptFields(repo, input, false));
+    const { repo, workspace } = await open(slug, 'expenses.submit');
+    const current = await repo.receipt(String(id));
+    const receipt = await repo.resubmitReceipt(
+      String(id),
+      await receiptFields(repo, workspace, input, false, current?.custom),
+    );
     return {
       ok: true,
       id: receipt.id,
@@ -221,8 +354,12 @@ export async function resubmitReceipt(slug: string, id: string, input: Input) {
 
 export async function resubmitMileage(slug: string, id: string, input: Input) {
   return run(slug, async () => {
-    const { repo } = await open(slug, 'expenses.submit');
-    const entry = await repo.resubmitMileage(String(id), await mileageFields(repo, input));
+    const { repo, workspace } = await open(slug, 'expenses.submit');
+    const current = (await repo.mileage()).find((entry) => entry.id === String(id));
+    const entry = await repo.resubmitMileage(
+      String(id),
+      await mileageFields(repo, workspace, input, current?.custom),
+    );
     return {
       ok: true,
       id: entry.id,
@@ -236,6 +373,7 @@ const STATUSES: ProjectStatus[] = ['planning', 'active', 'on-hold', 'done'];
 export async function createProject(slug: string, input: Input) {
   return run(slug, async () => {
     const { repo, workspace } = await open(slug, 'projects.manage');
+    requireTool(workspace, 'projects');
     const members = await repo.members();
     const ids = new Set(members.map((member) => member.personId));
     const team = Array.isArray(input.teamIds)
@@ -253,6 +391,7 @@ export async function createProject(slug: string, input: Input) {
       value: number(input, 'value', { max: 1e9 }),
       costAllowance: number(input, 'costAllowance', { max: 1e8 }),
       status: oneOf(input, 'status', STATUSES, 'planning'),
+      custom: await customValues(repo, workspace, 'projects', input.custom, { require: true }),
       // An event happens on its date; a job runs until it.
       ...(workspace.space.workStyle === 'events'
         ? { startDate: date(input, 'dueDate', false) }
@@ -388,24 +527,289 @@ export async function transferOwnership(slug: string, personId: string, confirmN
   });
 }
 
-/* ---------- the business itself ---------- */
+/* ---------- the business itself: its setup (owners and admins) ---------- */
+
+/** Business setup is for owners and admins of a business; everyone else uses it. */
+async function setup(slug: string) {
+  const context = await open(slug, 'space.manage');
+  if (context.workspace.space.kind !== 'business')
+    throw new InputError('That’s for business Spaces.');
+  return context;
+}
 
 export async function updateBusiness(slug: string, input: Input) {
   return run(slug, async () => {
-    const { repo, workspace } = await open(slug, 'space.manage');
-    if (workspace.space.kind !== 'business') throw new InputError('That’s for business Spaces.');
-    const name = text(input, 'name', { max: 80 })!;
-    const type = isBusinessType(input.type) ? input.type : workspace.space.businessType;
-    const singular = text(input, 'singular', { max: 30, required: false });
-    const plural = text(input, 'plural', { max: 30, required: false });
-    await repo.updateSpace({
-      name,
-      ...(type ? { businessType: type } : {}),
-      ...(singular && plural
-        ? { labels: { ...workspace.space.labels, projects: { singular, plural } } }
-        : {}),
+    const { repo } = await setup(slug);
+    await repo.updateSpace({ name: text(input, 'name', { max: 80 })! });
+    return { ok: true, message: 'Business name saved' };
+  });
+}
+
+/** The few words a business chooses, each from Hyphy's short lists (`lib/platform/terms.ts`). */
+export async function saveTerms(slug: string, input: Input) {
+  return run(slug, async () => {
+    const { repo, workspace } = await setup(slug);
+    const wanted = cleanLabels({
+      projects: { singular: input.projects },
+      customer: { singular: input.customer },
+      vehicles: { singular: input.vehicles },
     });
-    return { ok: true, message: 'Business details saved' };
+    for (const key of ['projects', 'customer', 'vehicles'] as const)
+      if (input[key] !== undefined && input[key] !== '' && !wanted[key])
+        throw new InputError('Choose the words from the list.');
+    await repo.updateSpace({ labels: { ...workspace.space.labels, ...wanted } });
+    return { ok: true, message: 'Words saved' };
+  });
+}
+
+export async function saveAccent(slug: string, accentId: string) {
+  return run(slug, async () => {
+    const { repo, workspace } = await setup(slug);
+    const accent = ACCENTS.find((item) => item.id === accentId);
+    if (!accent) throw new InputError('Choose one of the accent colors.');
+    await repo.updateSpace({ brand: withAccent(workspace.space.brand, accent) });
+    return { ok: true, message: `${accent.name} it is` };
+  });
+}
+
+/**
+ * A new kind of business. Nothing is ever taken away: with `apply`, the new kind's missing tools,
+ * suggested fields and words are added; without, only the kind changes.
+ */
+export async function changeBusinessType(slug: string, type: string, apply: boolean) {
+  return run(slug, async () => {
+    const { repo, workspace } = await setup(slug);
+    if (!isBusinessType(type)) throw new InputError('Choose what kind of business this is.');
+    const { space } = workspace;
+    if (!apply) {
+      await repo.updateSpace({ businessType: type });
+      return { ok: true, message: 'Kind of business saved. Your setup stayed as it was.' };
+    }
+    const additions = presetAdditions(space, await repo.fields(), type);
+    // Only tools the plan includes; the rest wait for a plan that has them.
+    const inPlan = additions.modules.filter((module) =>
+      plans[space.plan].includes.includes(module),
+    );
+    const modules = Array.from(new Set([...space.modules, ...inPlan]));
+    await repo.updateSpace({
+      businessType: type,
+      ...(additions.workStyle ? { workStyle: additions.workStyle } : {}),
+      labels: { ...space.labels, ...additions.labels },
+      ...(inPlan.length ? { modules } : {}),
+    });
+    let added = 0;
+    for (const field of additions.fields) {
+      const needs = recordTypes[field.appliesTo].module;
+      if (!modules.includes(needs)) continue;
+      await repo.addField({ ...field, required: false });
+      added += 1;
+    }
+    const parts = [
+      inPlan.length ? `${inPlan.length} ${inPlan.length === 1 ? 'tool' : 'tools'} on` : '',
+      added ? `${added} ${added === 1 ? 'field' : 'fields'} added` : '',
+    ].filter(Boolean);
+    return {
+      ok: true,
+      message: parts.length ? `Updated: ${parts.join(', ')}` : 'Kind of business saved',
+    };
+  });
+}
+
+const yes = (value: unknown) => value === true || value === 'true';
+
+/** What receipts must name here, whether personal cards are paid back, when approval is needed. */
+export async function saveReceiptRules(slug: string, input: Input) {
+  return run(slug, async () => {
+    const { repo } = await setup(slug);
+    const approval = String(input.approval ?? 'always');
+    const receipts = parseSettings({
+      receipts: {
+        requireProject: yes(input.requireProject),
+        requireVehicle: yes(input.requireVehicle),
+        allowPersonal: yes(input.allowPersonal),
+        ...(input.defaultCategory ? { defaultCategory: input.defaultCategory } : {}),
+        approval:
+          approval === 'over'
+            ? { mode: 'over', over: Number(String(input.over ?? '').replace(/[$,\s]/g, '')) }
+            : { mode: approval },
+      },
+    }).receipts;
+    await repo.updateSettings({
+      receipts: { ...receipts, defaultCategory: receipts?.defaultCategory },
+    });
+    return { ok: true, message: 'Receipt rules saved' };
+  });
+}
+
+/** The business's own mileage rate (never a tax table's), and what trips must say. */
+export async function saveMileageRules(slug: string, input: Input) {
+  return run(slug, async () => {
+    const { repo, workspace } = await setup(slug);
+    const raw = String(input.rate ?? '').replace(/[$,\s]/g, '');
+    // Kept to a tenth of a cent, and never rounded down to nothing.
+    const rate = raw === '' ? null : Math.round(Number(raw) * 1000) / 1000;
+    if (rate !== null && (!Number.isFinite(rate) || rate < 0.01 || rate > 5))
+      throw new InputError('Choose a rate between $0.01 and $5.00 a mile.');
+    const mileage = parseSettings({
+      mileage: {
+        requireProject: yes(input.requireProject),
+        requirePurpose: yes(input.requirePurpose),
+        allowPersonalVehicles: yes(input.allowPersonalVehicles),
+        approval: { mode: input.approval === 'never' ? 'never' : 'always' },
+      },
+    }).mileage;
+    await repo.updateSettings({ mileage });
+    if (rate !== (workspace.space.mileageRate ?? null))
+      await repo.updateSpace({ mileageRate: rate as number });
+    return { ok: true, message: 'Mileage rules saved' };
+  });
+}
+
+export async function saveApprovers(slug: string, approvers: string) {
+  return run(slug, async () => {
+    const { repo } = await setup(slug);
+    const settings: SpaceSettings = parseSettings({ approvals: { approvers } });
+    await repo.updateSettings(settings);
+    return {
+      ok: true,
+      message: approvers === 'admins' ? 'Owners and admins approve' : 'Managers approve too',
+    };
+  });
+}
+
+/* ---------- the business's own fields ---------- */
+
+function recordType(value: unknown, workspace: Workspace): RecordType {
+  if (!isRecordType(value)) throw new InputError('Choose where the field goes.');
+  const needs = recordTypes[value].module;
+  if (!workspace.space.modules.includes(needs))
+    throw new InputError(
+      `Turn on ${tools.find((tool) => tool.module === needs)?.name ?? 'the tool'} first.`,
+    );
+  return value;
+}
+
+async function fieldDraft(repo: Repo, appliesTo: RecordType, input: Input, id?: string) {
+  const options = cleanOptions(
+    Array.isArray(input.options) ? input.options : String(input.options ?? '').split('\n'),
+  );
+  const showInList = yes(input.showInList);
+  if (showInList) {
+    const listed = (await repo.fields(appliesTo)).filter(
+      (field) => field.showInList && !field.archivedAt && field.id !== id,
+    );
+    if (listed.length >= 2)
+      throw new InputError('Lists show up to two fields. Take one off first.');
+  }
+  return {
+    label: text(input, 'label', { max: 40, required: false }) ?? '',
+    options,
+    required: yes(input.required),
+    help: text(input, 'help', { max: 120, required: false }),
+    showInList,
+  };
+}
+
+export async function addField(slug: string, input: Input) {
+  return run(slug, async () => {
+    const { repo, workspace } = await setup(slug);
+    const appliesTo = recordType(input.appliesTo, workspace);
+    const type = oneOf(input, 'type', CREATABLE_TYPES);
+    const draft = await fieldDraft(repo, appliesTo, input);
+    const field = await repo.addField({
+      appliesTo,
+      type,
+      ...draft,
+      options: type === 'select' ? draft.options : undefined,
+    });
+    return { ok: true, id: field.id, message: `${field.label} added` };
+  });
+}
+
+export async function updateField(slug: string, appliesTo: string, id: string, input: Input) {
+  return run(slug, async () => {
+    const { repo, workspace } = await setup(slug);
+    const kind = recordType(appliesTo, workspace);
+    const type = oneOf(input, 'type', CREATABLE_TYPES);
+    const draft = await fieldDraft(repo, kind, input, String(id));
+    const field = await repo.updateField(kind, String(id), {
+      ...draft,
+      type,
+      options: type === 'select' ? draft.options : undefined,
+    });
+    return { ok: true, id: field.id, message: `${field.label} saved` };
+  });
+}
+
+export async function setFieldArchived(
+  slug: string,
+  appliesTo: string,
+  id: string,
+  archived: boolean,
+) {
+  return run(slug, async () => {
+    const { repo, workspace } = await setup(slug);
+    await repo.setFieldArchived(recordType(appliesTo, workspace), String(id), archived === true);
+    return {
+      ok: true,
+      message: archived
+        ? 'No longer asked for. Saved answers stay on their records.'
+        : 'Asked for again',
+    };
+  });
+}
+
+export async function removeField(slug: string, appliesTo: string, id: string) {
+  return run(slug, async () => {
+    const { repo, workspace } = await setup(slug);
+    await repo.removeField(recordType(appliesTo, workspace), String(id));
+    return { ok: true, message: 'Field removed' };
+  });
+}
+
+export async function moveField(slug: string, appliesTo: string, id: string, direction: number) {
+  return run(slug, async () => {
+    const { repo, workspace } = await setup(slug);
+    await repo.moveField(recordType(appliesTo, workspace), String(id), direction < 0 ? -1 : 1);
+    return { ok: true };
+  });
+}
+
+/** The business's own answers on a project, vehicle or person — by whoever manages those. */
+export async function saveRecordFields(
+  slug: string,
+  type: 'projects' | 'vehicles' | 'people',
+  id: string,
+  values: Input,
+) {
+  return run(slug, async () => {
+    const permission: Permission =
+      type === 'projects'
+        ? 'projects.manage'
+        : type === 'vehicles'
+          ? 'vehicles.manage'
+          : 'people.manage';
+    const { repo, workspace } = await open(slug, permission);
+    if (type === 'people') {
+      const member = await repo.member(String(id));
+      if (!member || member.status === 'removed') throw new InputError('That person isn’t here.');
+      const custom = await customValues(repo, workspace, 'people', values, {
+        previous: member.custom,
+        require: true,
+      });
+      await repo.setMemberFields(member.personId, custom);
+      return { ok: true, message: 'Details saved' };
+    }
+    if (type !== 'projects' && type !== 'vehicles') throw new InputError('Unknown record.');
+    const record =
+      type === 'projects' ? await repo.project(String(id)) : await repo.vehicle(String(id));
+    if (!record) throw new InputError('That isn’t available to you.');
+    const custom = await customValues(repo, workspace, type, values, {
+      previous: record.custom,
+      require: true,
+    });
+    await repo.setRecordFields(type, record.id, custom);
+    return { ok: true, message: 'Details saved' };
   });
 }
 
@@ -421,7 +825,8 @@ export async function finishSetup(slug: string) {
 
 export async function createVehicle(slug: string, input: Input) {
   return run(slug, async () => {
-    const { repo } = await open(slug, 'vehicles.manage');
+    const { repo, workspace } = await open(slug, 'vehicles.manage');
+    requireTool(workspace, 'vehicles');
     const members = await repo.members();
     const assignedTo = members.some((member) => member.personId === input.assignedTo)
       ? String(input.assignedTo)
@@ -435,6 +840,7 @@ export async function createVehicle(slug: string, input: Input) {
       fuel: oneOf(input, 'fuel', ['gas', 'diesel', 'electric'] as const, 'gas'),
       odometer: number(input, 'odometer', { max: 2_000_000 }) ?? 0,
       assignedTo,
+      custom: await customValues(repo, workspace, 'vehicles', input.custom, { require: true }),
     });
     return { ok: true, id: vehicle.id };
   });
@@ -492,7 +898,8 @@ export async function addFiles(
 
 export async function saveQrCode(slug: string, input: Input) {
   return run(slug, async () => {
-    const { repo } = await open(slug, 'tools.use');
+    const { repo, workspace } = await open(slug, 'tools.use');
+    requireTool(workspace, 'qr');
     const hex = /^#[0-9a-f]{6}$/i;
     const pages = await repo.linkPages();
     const code = await repo.saveQrCode({
@@ -512,7 +919,8 @@ const THEMES: LinkPage['theme'][] = ['paper', 'ink', 'signal', 'ember'];
 
 export async function saveLinkPage(slug: string, input: Input) {
   return run(slug, async () => {
-    const { repo } = await open(slug, 'tools.use');
+    const { repo, workspace } = await open(slug, 'tools.use');
+    requireTool(workspace, 'links');
     const links = (Array.isArray(input.links) ? input.links : [])
       .slice(0, 12)
       .map((link: Input, index: number) => ({
@@ -605,20 +1013,6 @@ export async function setPinned(slug: string, target: PinTarget, pinned: boolean
   });
 }
 
-/** The Space's color, darkened until a phone camera reads it reliably on white. */
-function scannableInk(hex: string) {
-  const channels = [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16));
-  const luminance = (values: number[]) =>
-    values
-      .map((value) => value / 255)
-      .map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4))
-      .reduce((sum, c, index) => sum + c * [0.2126, 0.7152, 0.0722][index], 0);
-  let current = channels;
-  for (let step = 0; step < 8 && 1.05 / (luminance(current) + 0.05) < 4.5; step += 1)
-    current = current.map((value) => Math.round(value * 0.8));
-  return `#${current.map((value) => value.toString(16).padStart(2, '0')).join('')}`.toUpperCase();
-}
-
 /**
  * A QR code for one of this Space's link pages, in the Space's own color. Saved with the page
  * it opens, so the page, the code and the Space stay connected.
@@ -626,6 +1020,8 @@ function scannableInk(hex: string) {
 export async function createLinkPageQr(slug: string, pageId: string) {
   return run(slug, async () => {
     const { repo, workspace } = await open(slug, 'tools.use');
+    requireTool(workspace, 'links');
+    requireTool(workspace, 'qr');
     const page = (await repo.linkPages()).find((item) => item.id === pageId);
     if (!page) throw new InputError('Save the link page first.');
     const existing = (await repo.qrCodes()).find((code) => code.linkPageId === page.id);
@@ -633,7 +1029,7 @@ export async function createLinkPageQr(slug: string, pageId: string) {
     const code = await repo.saveQrCode({
       label: `@${page.handle} link page`,
       content: `https://hyphy.example/@${page.handle}`,
-      fg: scannableInk(workspace.space.brand.color),
+      fg: scannableColor(workspace.space.brand.color),
       bg: '#FFFFFF',
       placement: 'Anywhere people find you',
       linkPageId: page.id,
@@ -652,6 +1048,7 @@ export async function setModules(slug: string, modules: string[]) {
     // Files and People keep a business Space working; they can't be switched off here.
     const required: ModuleId[] =
       workspace.space.kind === 'business' ? ['files', 'people'] : ['files'];
+    // Turning a tool off hides it; nothing it holds is deleted, and turning it on brings it back.
     await repo.setModules(Array.from(new Set([...required, ...next])));
     return { ok: true, message: 'Tools updated' };
   });
