@@ -58,6 +58,7 @@ export function ReceiptRules({
         requireProject: draft.requireProject,
         requireVehicle: draft.requireVehicle,
         allowPersonal: draft.allowPersonal,
+        requirePhoto: draft.requirePhoto,
         defaultCategory: draft.defaultCategory ?? '',
         approval: draft.approval.mode,
         over,
@@ -144,15 +145,17 @@ export function ReceiptRules({
                 </Select>
               </div>
             </div>
-            <div className="flex items-center justify-between gap-4 px-4 py-3.5 opacity-70">
-              <div>
-                <p className="text-[14px] font-medium text-ink">A photo of the receipt</p>
-                <p className="mt-0.5 text-[12.5px] text-muted">
-                  Can be required once Hyphy stores files. Until then, photos stay on the phone.
-                </p>
-              </div>
-              <span className="shrink-0 text-[12.5px] text-faint">Coming with file storage</span>
-            </div>
+            <RuleRow
+              name={`${id}-photo`}
+              label="A photo of the receipt"
+              line="Taken or chosen on the phone, stored with the receipt for whoever approves it."
+              value={draft.requirePhoto ? 'yes' : 'no'}
+              onChange={(value) => set('requirePhoto', value === 'yes')}
+              options={[
+                { value: 'yes', label: 'Required' },
+                { value: 'no', label: 'Optional' },
+              ]}
+            />
             <p className="px-4 pt-4 pb-0 text-[12.5px] font-medium text-muted">
               Approval · {approvers} approve, never their own
             </p>
@@ -215,6 +218,7 @@ export function ReceiptRules({
           who="What employees see"
           footer={approval === 'Not needed' ? 'Save receipt' : 'Submit for approval'}
           rows={[
+            { label: 'Photo', sample: 'Receipt photo', required: current.requirePhoto },
             { label: 'Where', sample: 'Home Depot', required: true },
             { label: 'Total', sample: '$142.00', required: true },
             { label: 'Date', sample: 'Today', required: true },

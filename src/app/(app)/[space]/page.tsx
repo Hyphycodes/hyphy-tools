@@ -8,6 +8,7 @@ import { BusinessStarters } from '@/components/business/starters';
 import { Icon } from '@/components/ui/icon';
 import Link from 'next/link';
 import { getRepository } from '@/lib/data';
+import { viewsFor } from '@/lib/files/access';
 import { requireWorkspace } from '@/lib/identity';
 import {
   currentProjectFor,
@@ -80,6 +81,18 @@ export default async function Home({ params }: PageProps<'/[space]'>) {
     receipts,
     mileage,
     files,
+    // Project photos' previews, signed together (only the few the dashboard shows).
+    fileViews: await viewsFor(
+      workspace,
+      files
+        .filter(
+          (file) =>
+            file.kind === 'image' &&
+            file.source !== 'qr' &&
+            file.attachedTo.some((ref) => ref.type === 'project'),
+        )
+        .slice(0, 24),
+    ),
     qrCodes,
     linkPages,
     month: monthSummary({ receipts, mileage, files }, space.timezone),

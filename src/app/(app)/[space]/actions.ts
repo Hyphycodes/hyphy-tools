@@ -1,21 +1,12 @@
 'use server';
-import { revalidatePath } from 'next/cache';
 import { getRepository } from '@/lib/data';
-import {
-  DataUnavailableError,
-  RuleError,
-  type FileInput,
-  type MileageInput,
-  type ReceiptInput,
-} from '@/lib/data/repository';
-import { getWorkspace, PermissionError, requirePermission } from '@/lib/identity';
+import { type MileageInput, type ReceiptInput } from '@/lib/data/repository';
 import type { Workspace } from '@/lib/identity/types';
 import type { SubmissionKind, SubmissionRef } from '@/lib/platform/approvals';
 import { ACCENTS, scannableColor, withAccent } from '@/lib/platform/brand';
 import {
   parseSettings,
   RECEIPT_CATEGORIES,
-  SettingsError,
   submissionProblem,
   type SpaceSettings,
 } from '@/lib/platform/business-settings';
@@ -33,13 +24,11 @@ import { isBusinessType, presetAdditions } from '@/lib/platform/business-types';
 import { plans } from '@/lib/platform/plans';
 import { cleanLabels, vehicleWords } from '@/lib/platform/terms';
 import { teamFor } from '@/lib/teams';
-import { availability, isModuleReady, tools } from '@/lib/platform/tools';
+import { availability, tools } from '@/lib/platform/tools';
 import { workProfile } from '@/lib/platform/work';
 import type {
-  AttachmentRef,
   FieldType,
   FieldValue,
-  FileKind,
   LinkPage,
   ModuleId,
   PinTarget,
@@ -48,44 +37,23 @@ import type {
   Role,
 } from '@/lib/platform/types';
 
+import {
+  InputError,
+  open,
+  requireTool,
+  run,
+  visibleProject,
+  visibleVehicle,
+  type ActionResult,
+} from './action-kit';
+
+export type { ActionResult };
+
 /*
  * Every change goes through here: resolve the Workspace from the URL, check the permission on
  * the server, validate, then write through the scoped repository. The same functions will run
  * unchanged against Supabase, where RLS checks everything a second time.
  */
-
-export type ActionResult =
-  | { ok: true; id?: string; message?: string; link?: string; href?: string }
-  | { ok: false; error: string };
-
-class InputError extends Error {}
-
-async function open(slug: string, permission?: Permission) {
-  const workspace = await getWorkspace(slug);
-  if (!workspace) throw new InputError('You’re not a member of this Space.');
-  if (permission) requirePermission(workspace, permission);
-  return { workspace, repo: getRepository(workspace) };
-}
-
-async function run(slug: string, work: () => Promise<ActionResult>): Promise<ActionResult> {
-  try {
-    const result = await work();
-    revalidatePath(`/${slug}`, 'layout');
-    return result;
-  } catch (error) {
-    if (error instanceof PermissionError)
-      return { ok: false, error: 'Your role in this Space can’t do that.' };
-    if (
-      error instanceof InputError ||
-      error instanceof RuleError ||
-      error instanceof DataUnavailableError ||
-      error instanceof SettingsError
-    )
-      return { ok: false, error: error.message };
-    console.error(error);
-    return { ok: false, error: 'Something went wrong. Try again.' };
-  }
-}
 
 /* ---------- validation ---------- */
 
@@ -134,31 +102,9 @@ function oneOf<T extends string>(
   throw new InputError(`Choose a ${key}.`);
 }
 
-async function visibleProject(repo: ReturnType<typeof getRepository>, id: unknown) {
-  if (!id) return undefined;
-  const project = await repo.project(String(id));
-  if (!project) throw new InputError('That project isn’t available to you.');
-  return project.id;
-}
-
-async function visibleVehicle(repo: ReturnType<typeof getRepository>, id: unknown) {
-  if (!id) return undefined;
-  const vehicle = await repo.vehicle(String(id));
-  if (!vehicle) throw new InputError('That vehicle isn’t available to you.');
-  return vehicle.id;
-}
-
 /* ---------- the business's fields and rules, on every record they apply to ---------- */
 
 type Repo = ReturnType<typeof getRepository>;
-
-/** The tool must be on here, for this person — a switched-off tool takes no new records. */
-function requireTool(workspace: Workspace, module: ModuleId) {
-  if (!isModuleReady(module, workspace.space, workspace.membership))
-    throw new InputError(
-      `${tools.find((tool) => tool.module === module)?.name ?? 'That tool'} is off in ${workspace.space.name}.`,
-    );
-}
 
 /**
  * The business's own fields on a record: checked against its definitions (only fields in use,
@@ -259,6 +205,10 @@ async function receiptFields(
       : undefined,
     paymentMethod: text(input, 'paymentMethod', { max: 60, required: false }),
     notes: text(input, 'notes', { max: 500, required: false }),
+    // The photo was uploaded first (file-actions.ts); the repository and the database check it's
+    // this person's own finished file.
+    fileId:
+      typeof input.fileId === 'string' && input.fileId ? input.fileId.slice(0, 64) : undefined,
     // A draft may be unfinished; anything sent answers every required field.
     custom: await customValues(repo, workspace, 'receipts', input.custom, {
       previous,
@@ -627,6 +577,7 @@ export async function saveReceiptRules(slug: string, input: Input) {
         requireProject: yes(input.requireProject),
         requireVehicle: yes(input.requireVehicle),
         allowPersonal: yes(input.allowPersonal),
+        requirePhoto: yes(input.requirePhoto),
         ...(input.defaultCategory ? { defaultCategory: input.defaultCategory } : {}),
         approval:
           approval === 'over'
@@ -843,56 +794,6 @@ export async function createVehicle(slug: string, input: Input) {
       custom: await customValues(repo, workspace, 'vehicles', input.custom, { require: true }),
     });
     return { ok: true, id: vehicle.id };
-  });
-}
-
-const KINDS: FileKind[] = ['pdf', 'image', 'doc', 'sheet', 'archive'];
-
-export async function addFiles(
-  slug: string,
-  input: { files: Input[]; attachTo?: AttachmentRef | null; folder?: string },
-) {
-  return run(slug, async () => {
-    const { repo, workspace } = await open(slug, 'files.upload');
-    if (!Array.isArray(input.files) || input.files.length === 0)
-      throw new InputError('Choose at least one file.');
-    if (input.files.length > 20) throw new InputError('Up to 20 files at a time.');
-    let attachedTo: AttachmentRef[] = [];
-    if (input.attachTo?.type === 'project')
-      attachedTo = [{ type: 'project', id: (await visibleProject(repo, input.attachTo.id))! }];
-    if (input.attachTo?.type === 'vehicle')
-      attachedTo = [{ type: 'vehicle', id: (await visibleVehicle(repo, input.attachTo.id))! }];
-    const guest = workspace.membership.role === 'guest';
-    if (guest && attachedTo.length === 0)
-      throw new InputError('Guests upload into a shared project.');
-    const personal = workspace.space.kind === 'personal';
-    const folder =
-      (typeof input.folder === 'string' && input.folder.trim().slice(0, 40)) || undefined;
-    const files: FileInput[] = input.files.map((file) => {
-      const kind = oneOf(file, 'kind', KINDS, 'doc');
-      return {
-        name: text(file, 'name', { max: 140 })!,
-        kind,
-        size: number(file, 'size', { max: 500_000_000 }) ?? 0,
-        pages: number(file, 'pages', { max: 5000 }),
-        folder: folder ?? (kind === 'image' ? 'Photos' : 'Uploads'),
-        attachedTo,
-        access: personal ? 'private' : guest ? 'shared' : 'team',
-        source: tools.some((tool) => tool.module === file.source)
-          ? (file.source as ModuleId)
-          : undefined,
-        preview:
-          kind === 'image'
-            ? `linear-gradient(${120 + ((file.name as string)?.length ?? 0) * 7}deg,#d9d2c3 0%,#9a8f7d 50%,#3f3a33 100%)`
-            : undefined,
-      };
-    });
-    const saved = await repo.addFiles(files);
-    return {
-      ok: true,
-      id: saved[0]?.id,
-      message: saved.length === 1 ? 'File added' : `${saved.length} files added`,
-    };
   });
 }
 

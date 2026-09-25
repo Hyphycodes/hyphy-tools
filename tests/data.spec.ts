@@ -311,27 +311,84 @@ test.describe('relationships and preferences persist', () => {
     expect(theirs.length).toBe(0);
   });
 
-  test('a file attached to a project appears on that project', async () => {
+  test('a file uploaded to a project appears there once it’s finished', async () => {
     const mike = await repo('mike', 'abc-construction');
-    const [file] = await mike.addFiles([
-      {
-        name: 'Oak Brook tile spec.pdf',
-        kind: 'pdf',
-        size: 220_000,
-        pages: 3,
-        folder: 'Projects',
-        access: 'team',
-        attachedTo: [{ type: 'project', id: u('prj_oakbrook') }],
-      },
-    ]);
-    const onProject = await (
-      await repo('ray', 'abc-construction')
-    ).files({ attachedTo: { type: 'project', id: u('prj_oakbrook') } });
-    expect(onProject.map((item) => item.id)).toContain(file.id);
+    const id = mike.newFileId();
+    // Demo Mode's personas keep bytes in their browser ('device'); the record is real.
+    const file = await mike.startUpload({
+      id,
+      name: 'Oak Brook tile spec.pdf',
+      originalName: 'tile-spec.pdf',
+      kind: 'pdf',
+      size: 220_000,
+      mimeType: 'application/pdf',
+      pages: 3,
+      folder: 'Projects',
+      access: 'team',
+      attachedTo: [{ type: 'project', id: u('prj_oakbrook') }],
+      storage: 'device',
+      storagePath: `spaces/${spaceId('abc-construction')}/files/${id}/tile-spec.pdf`,
+    });
+    const ray = () => repo('ray', 'abc-construction');
+    const onProject = async () =>
+      (await (await ray()).files({ attachedTo: { type: 'project', id: u('prj_oakbrook') } })).map(
+        (item) => item.id,
+      );
+    // Still uploading: nobody else sees it, and nothing is in the activity yet.
+    expect(await onProject()).not.toContain(file.id);
+    expect(await mike.finishUpload(file.id)).toBe('ready');
+    expect(await onProject()).toContain(file.id);
     const lines = await (
-      await repo('ray', 'abc-construction')
+      await ray()
     ).activity({ about: { type: 'project', id: u('prj_oakbrook') } });
-    expect(lines.some((line) => line.object.id === file.id)).toBe(true);
+    expect(lines.filter((line) => line.object.id === file.id).map((line) => line.verb)).toEqual([
+      'uploaded',
+    ]);
+  });
+
+  test('a file’s life: rename, Trash, restore and delete for good, by the right people', async () => {
+    const dana = await repo('dana', 'abc-construction');
+    const id = dana.newFileId();
+    await dana.startUpload({
+      id,
+      name: 'plans.pdf',
+      originalName: 'plans.pdf',
+      kind: 'pdf',
+      size: 1000,
+      mimeType: 'application/pdf',
+      folder: 'Plans',
+      access: 'team',
+      attachedTo: [],
+      storage: 'device',
+      storagePath: `spaces/${spaceId('abc-construction')}/files/${id}/plans.pdf`,
+    });
+    await dana.finishUpload(id);
+    await dana.renameFile(id, 'Oak Brook Plans.pdf');
+    const mike = await repo('mike', 'abc-construction');
+    expect((await mike.file(id))?.name).toBe('Oak Brook Plans.pdf');
+    // A member can't rename or throw away the owner's file.
+    await expect(mike.renameFile(id, 'mine.pdf')).rejects.toThrow(RuleError);
+    await expect(mike.trashFile(id, true)).rejects.toThrow(RuleError);
+    // Not in Trash: can't be deleted for good.
+    await expect(dana.deleteFile(id)).rejects.toThrow(/Trash/);
+    await dana.trashFile(id, true);
+    expect((await (await repo('mike', 'abc-construction')).files()).map((f) => f.id)).not.toContain(
+      id,
+    );
+    expect((await dana.files({ trash: true })).map((f) => f.id)).toContain(id);
+    await dana.trashFile(id, false);
+    expect((await (await repo('mike', 'abc-construction')).files()).map((f) => f.id)).toContain(id);
+    await dana.trashFile(id, true);
+    await dana.deleteFile(id);
+    expect(await (await repo('dana', 'abc-construction')).file(id)).toBeNull();
+  });
+
+  test('the files suite passes (supabase/tests/files.sql)', async () => {
+    test.skip(!process.env.DATABASE_ADMIN_URL, 'Needs DATABASE_ADMIN_URL.');
+    const sql = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} });
+    const file = readFileSync(path.join(__dirname, '../supabase/tests/files.sql'), 'utf8');
+    await expect(sql.unsafe(file)).rejects.toThrow(/FILES PASSED/);
+    await sql.end();
   });
 
   test('a new project and its team show up for the team', async () => {

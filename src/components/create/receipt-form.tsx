@@ -2,6 +2,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createReceipt, resubmitReceipt } from '@/app/(app)/[space]/actions';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/components/ui/cn';
 import { Field, Input, Select, Textarea } from '@/components/ui/form';
 import { Icon } from '@/components/ui/icon';
 import {
@@ -11,6 +12,8 @@ import {
   firstProblem,
 } from '@/components/fields/field-inputs';
 import { useWorkspace } from '@/components/shell/workspace-context';
+import { acceptFor } from '@/lib/files/rules';
+import { retryFile, uploadFile, UploadError, type UploadStage } from '@/lib/files/upload';
 import { formatCurrency } from '@/lib/platform/format';
 import { PERSONAL_PAYMENT } from '@/lib/platform/payments';
 import type { ReceiptCategory } from '@/lib/platform/types';
@@ -38,11 +41,27 @@ const CATEGORIES: {
   { value: 'other', label: 'Other', icon: 'circle' },
 ];
 
-type Photo = { kind: 'file'; url: string; name: string; pdf: boolean } | { kind: 'sample' };
+type Photo =
+  | {
+      kind: 'file';
+      file: File;
+      /** A local preview while (and after) it uploads; null for files a browser can't show. */
+      url: string | null;
+      pdf: boolean;
+      stage: UploadStage | 'done' | 'failed';
+      progress: number;
+      fileId?: string;
+      error?: string;
+      retry?: { fileId?: string } | null;
+    }
+  /** The photo a returned receipt or draft already has. */
+  | { kind: 'saved'; fileId: string }
+  | { kind: 'sample' };
 
 /**
- * Receipt capture. The photo stays on this device in the preview; reading the fields from it
- * automatically arrives with the production build.
+ * Receipt capture. The photo is uploaded as soon as it's taken — through the same pipeline as
+ * every file — so it's stored by the time the details are in; the receipt then points at it, and
+ * approvers see the real image. Reading the fields from it automatically comes later.
  */
 export function ReceiptForm({ request, onDone, formId }: FormProps) {
   const workspace = useWorkspace();
@@ -57,7 +76,11 @@ export function ReceiptForm({ request, onDone, formId }: FormProps) {
   const fields = workspace.setup.fields.filter((field) => field.appliesTo === 'receipts');
   // Fixing a returned receipt (or finishing a draft) starts from what was saved.
   const editing = request.edit?.kind === 'receipt' ? request.edit.record : undefined;
-  const [photo, setPhoto] = useState<Photo | null>(null);
+  const [photo, setPhoto] = useState<Photo | null>(
+    editing?.fileId ? { kind: 'saved', fileId: editing.fileId } : null,
+  );
+  const uploading = useRef<Promise<string | null> | null>(null);
+  const rulesPhoto = workspace.setup.rules.receipts.photo;
   const [category, setCategory] = useState<ReceiptCategory>(
     editing?.category ??
       (request.preset?.category as ReceiptCategory) ??
@@ -100,12 +123,71 @@ export function ReceiptForm({ request, onDone, formId }: FormProps) {
   const [payment, setPayment] = useState(editing?.paymentMethod ?? '');
   const fileInput = useRef<HTMLInputElement>(null);
 
+  const previewUrl = photo?.kind === 'file' ? photo.url : null;
   useEffect(
     () => () => {
-      if (photo?.kind === 'file') URL.revokeObjectURL(photo.url);
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
     },
-    [photo],
+    [previewUrl],
   );
+
+  /** Uploads the photo now; the receipt refers to it once it's stored. */
+  function takePhoto(file: File, again?: string) {
+    const pdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+    const showable = !pdf && /^image\/(jpeg|png|webp|gif)$/.test(file.type);
+    setPhoto((current) => ({
+      kind: 'file',
+      file,
+      url:
+        current?.kind === 'file' && current.file === file
+          ? current.url
+          : showable
+            ? URL.createObjectURL(file)
+            : null,
+      pdf,
+      stage: 'checking',
+      progress: 0,
+    }));
+    const patch = (change: Partial<Extract<Photo, { kind: 'file' }>>) =>
+      setPhoto((current) =>
+        current?.kind === 'file' && current.file === file ? { ...current, ...change } : current,
+      );
+    const options = {
+      purpose: 'receipt' as const,
+      onStage: (stage: UploadStage) => patch({ stage }),
+      onProgress: (progress: number) => patch({ progress }),
+    };
+    const work = (
+      again
+        ? retryFile(workspace.space.slug, again, file, options)
+        : uploadFile(workspace.space.slug, file, options)
+    ).then(
+      (saved) => {
+        patch({ stage: 'done', fileId: saved.fileId, error: undefined });
+        return saved.fileId;
+      },
+      (error: unknown) => {
+        patch({
+          stage: 'failed',
+          error:
+            error instanceof UploadError ? error.message : 'The photo didn’t upload. Try again.',
+          retry: error instanceof UploadError ? error.retry : null,
+        });
+        return null;
+      },
+    );
+    uploading.current = work;
+    return work;
+  }
+
+  /** The photo's stored file, once it's there (waiting for an upload still going). */
+  async function photoId(): Promise<string | undefined | false> {
+    if (!photo || photo.kind === 'sample') return undefined;
+    if (photo.kind === 'saved') return photo.fileId;
+    if (photo.fileId) return photo.fileId;
+    const id = uploading.current ? await uploading.current : null;
+    return id ?? false;
+  }
 
   const business = workspace.space.kind === 'business';
   // Approvers file straight through; others wait unless this business doesn't ask (or not below
@@ -147,7 +229,8 @@ export function ReceiptForm({ request, onDone, formId }: FormProps) {
     if (mine && !vehicleId) setVehicleId(mine.id);
   }
 
-  const values = () => ({
+  const values = (fileId?: string) => ({
+    fileId,
     vendor,
     total,
     date,
@@ -166,15 +249,24 @@ export function ReceiptForm({ request, onDone, formId }: FormProps) {
       id={formId}
       // The business's requirements are said in Hyphy's words, not the browser's bubble.
       noValidate
-      onSubmit={(event) => {
+      onSubmit={async (event) => {
         event.preventDefault();
         const problem = missing();
         if (problem) return fail(problem);
+        const fileId = await photoId();
+        if (fileId === false)
+          return fail('The photo didn’t upload. Try again, or remove it to send without one.');
+        if (rulesPhoto === 'required' && !fileId)
+          return fail(
+            photo?.kind === 'sample'
+              ? 'The sample isn’t a real photo. Take a photo of the receipt.'
+              : 'Add a photo of the receipt.',
+          );
         submit(
           () =>
             editing
-              ? resubmitReceipt(workspace.space.slug, editing.id, values())
-              : createReceipt(workspace.space.slug, values()),
+              ? resubmitReceipt(workspace.space.slug, editing.id, values(fileId))
+              : createReceipt(workspace.space.slug, values(fileId)),
           {
             title: `${vendor || 'Receipt'} · ${total ? formatCurrency(Number(total)) : 'no total yet'}`,
             href: workspace.href(
@@ -187,23 +279,30 @@ export function ReceiptForm({ request, onDone, formId }: FormProps) {
       {request.edit && request.edit.record.status === 'returned' && (
         <EditNote reason={request.edit.reason} reviewer={request.edit.reviewer} />
       )}
-      {/* Capture */}
+      {/* Capture: the camera, or a photo or PDF already on the device. */}
       <input
         ref={fileInput}
         id={`${id}-photo`}
         type="file"
-        accept="image/*,application/pdf,.heic,.heif"
+        accept={acceptFor('receipt')}
         capture="environment"
         className="sr-only"
+        aria-describedby={`${id}-photo-hint`}
         onChange={(event) => {
           const file = event.target.files?.[0];
-          if (!file) return;
-          setPhoto({
-            kind: 'file',
-            url: URL.createObjectURL(file),
-            name: file.name,
-            pdf: file.type === 'application/pdf',
-          });
+          if (file) void takePhoto(file);
+          event.target.value = '';
+        }}
+      />
+      <input
+        id={`${id}-pick`}
+        type="file"
+        accept={acceptFor('receipt')}
+        className="sr-only"
+        aria-describedby={`${id}-photo-hint`}
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) void takePhoto(file);
           event.target.value = '';
         }}
       />
@@ -211,32 +310,72 @@ export function ReceiptForm({ request, onDone, formId }: FormProps) {
         <div className="mt-1 flex gap-4 rounded-[16px] bg-subtle p-3 shadow-[inset_0_0_0_1px_var(--color-line)]">
           {photo.kind === 'sample' ? (
             <SampleReceipt odometer={odometer} />
-          ) : photo.pdf ? (
-            <span className="grid h-28 w-20 place-items-center rounded-[8px] bg-surface text-muted shadow-card">
-              <Icon name="pdf" size={26} />
-            </span>
-          ) : (
+          ) : photo.kind === 'file' && photo.url ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={photo.url}
               alt="Receipt photo"
               className="h-28 w-20 rounded-[8px] object-cover shadow-card"
             />
+          ) : (
+            <span className="grid h-28 w-20 place-items-center rounded-[8px] bg-surface text-muted shadow-card">
+              <Icon name={photo.kind === 'file' && photo.pdf ? 'pdf' : 'image'} size={26} />
+            </span>
           )}
           <div className="flex min-w-0 flex-1 flex-col">
-            <p className="text-[14px] font-medium text-ink">
-              {photo.kind === 'sample' ? 'Sample receipt' : photo.name}
+            <p className="truncate text-[14px] font-medium text-ink">
+              {photo.kind === 'sample'
+                ? 'Sample receipt'
+                : photo.kind === 'saved'
+                  ? 'Photo attached'
+                  : photo.file.name}
             </p>
-            <p className="mt-1 text-[13px] leading-snug text-muted">
+            <p
+              className={cn(
+                'mt-1 text-[13px] leading-snug',
+                photo.kind === 'file' && photo.stage === 'failed' ? 'text-critical' : 'text-muted',
+              )}
+              role={photo.kind === 'file' && photo.stage === 'failed' ? 'alert' : 'status'}
+            >
               {photo.kind === 'sample'
                 ? 'Filled in the way automatic reading will. Check each field.'
-                : 'Automatic reading arrives with the production build. Fill in the details below.'}
+                : photo.kind === 'saved'
+                  ? 'It stays with the receipt. Replace it if it’s wrong.'
+                  : photo.stage === 'failed'
+                    ? photo.error
+                    : photo.stage === 'done'
+                      ? workspace.fileStorage === 'device'
+                        ? 'Saved in this browser (preview). Fill in the details below.'
+                        : 'Uploaded. Fill in the details below.'
+                      : photo.stage === 'uploading'
+                        ? `Uploading ${Math.round(photo.progress * 100)}%…`
+                        : 'Preparing the upload…'}
             </p>
-            <div className="mt-auto flex gap-2 pt-2">
+            {photo.kind === 'file' && photo.stage !== 'done' && photo.stage !== 'failed' && (
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-well" aria-hidden="true">
+                <span
+                  className="block h-full rounded-full bg-signal transition-[width] duration-200"
+                  style={{ width: `${Math.max(6, Math.round(photo.progress * 100))}%` }}
+                />
+              </div>
+            )}
+            <div className="mt-auto flex flex-wrap gap-2 pt-2">
+              {photo.kind === 'file' && photo.stage === 'failed' && (
+                <Button size="sm" onClick={() => void takePhoto(photo.file, photo.retry?.fileId)}>
+                  <Icon name="refresh" size={15} /> Try again
+                </Button>
+              )}
               <Button size="sm" onClick={() => fileInput.current?.click()}>
-                <Icon name="camera" size={15} /> Retake
+                <Icon name="camera" size={15} /> {photo.kind === 'saved' ? 'Replace' : 'Retake'}
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => setPhoto(null)}>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  uploading.current = null;
+                  setPhoto(null);
+                }}
+              >
                 Remove
               </Button>
             </div>
@@ -252,15 +391,27 @@ export function ReceiptForm({ request, onDone, formId }: FormProps) {
               <Icon name="camera" size={22} />
             </span>
             <span className="text-[15px] font-semibold text-ink">Take a photo</span>
-            <span className="text-[13px] text-muted">or choose a JPG, HEIC or PDF</span>
+            <span id={`${id}-photo-hint`} className="text-[13px] text-muted">
+              {rulesPhoto === 'required'
+                ? `${workspace.space.name} needs a photo of every receipt`
+                : 'JPG, PNG, HEIC or PDF, up to 20 MB'}
+            </span>
           </label>
-          <button
-            type="button"
-            onClick={fillSample}
-            className="flex items-center justify-center gap-1.5 rounded-[12px] py-2 text-[13.5px] font-medium text-signal-ink hover:bg-signal-soft"
-          >
-            <Icon name="sparkles" size={15} /> Try a sample receipt
-          </button>
+          <div className="flex flex-wrap items-center justify-center gap-1">
+            <label
+              htmlFor={`${id}-pick`}
+              className="flex min-h-10 cursor-pointer items-center justify-center gap-1.5 rounded-[12px] px-3 py-2 text-[13.5px] font-medium text-ink-2 hover:bg-ink/5"
+            >
+              <Icon name="upload" size={15} /> Choose a photo or PDF
+            </label>
+            <button
+              type="button"
+              onClick={fillSample}
+              className="flex min-h-10 items-center justify-center gap-1.5 rounded-[12px] px-3 py-2 text-[13.5px] font-medium text-signal-ink hover:bg-signal-soft"
+            >
+              <Icon name="sparkles" size={15} /> Try a sample receipt
+            </button>
+          </div>
         </div>
       )}
 
@@ -450,12 +601,17 @@ export function ReceiptForm({ request, onDone, formId }: FormProps) {
           <Button
             variant="ghost"
             disabled={pending || !vendor}
-            onClick={() =>
-              submit(() => createReceipt(workspace.space.slug, { ...values(), draft: true }), {
-                title: 'Draft saved',
-                href: workspace.href('/tools/receipts'),
-              })
-            }
+            onClick={async () => {
+              const fileId = await photoId();
+              submit(
+                () =>
+                  createReceipt(workspace.space.slug, {
+                    ...values(fileId || undefined),
+                    draft: true,
+                  }),
+                { title: 'Draft saved', href: workspace.href('/tools/receipts') },
+              );
+            }}
           >
             Save draft
           </Button>

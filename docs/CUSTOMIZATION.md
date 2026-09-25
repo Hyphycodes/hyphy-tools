@@ -79,8 +79,8 @@ the same keys, so answers already saved keep their meaning.
   default color of its QR codes (darkened until a phone can scan it), and the default for new link
   pages. It never re-themes the product. A color from before this list stays until someone picks
   another.
-- **Logo.** A placeholder that says logos arrive with file storage. No upload, and no pretend
-  upload.
+- **Logo.** Owners and admins upload one (PNG, JPG or WebP, 2 MB) in Settings; it replaces the
+  initials in the Space switcher and header for everyone in the business (docs/FILES.md).
 
 ## Tools
 
@@ -107,8 +107,8 @@ record type.
 | People     | The person's page (set by owners and admins)                 |
 
 **Kinds** (the only ones): Text, Number, Money, Date, Yes/No, Dropdown, Person, Project (in the
-business's word), Vehicle. File fields exist in the Phase 1 data but can't be created until file
-storage exists. No formulas, rollups, lookups, conditional logic or per-field permissions.
+business's word), Vehicle. File fields exist in the Phase 1 data but can't be created yet (files
+attach to records instead, docs/FILES.md). No formulas, rollups, lookups, conditional logic or per-field permissions.
 
 **A definition** has: key (made from the label, stable forever), business, record type, label,
 kind, choices (dropdowns), help line, required, position, "show in lists", archived at, created by
@@ -173,15 +173,15 @@ No preset sets a mileage rate. That rate is the business's decision (see Mileage
 
 `/settings/receipts`. The rules (defaults = how Phase 1 behaved):
 
-| Rule                          | Default       | Notes                                                                                                            |
-| ----------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------- |
-| A job on every receipt        | Optional      | Only while Projects is on, and only for people who can see a job to pick                                         |
-| A vehicle on every receipt    | Optional      | Only for people who have a vehicle to pick                                                                       |
-| A photo of the receipt        | —             | "Coming with file storage": it can be required once Hyphy stores files. Until then there is no photo requirement |
-| Personal expenses (paid back) | Allowed       | Off: the "Personal card (reimburse me)" payment disappears, and the server and database refuse it                |
-| Default category              | None          | Pre-selects the category on a new receipt                                                                        |
-| Approval                      | Every receipt | Every receipt · Only over an amount · Not needed                                                                 |
-| Receipt fields                | —             | As above                                                                                                         |
+| Rule                          | Default       | Notes                                                                                                              |
+| ----------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------ |
+| A job on every receipt        | Optional      | Only while Projects is on, and only for people who can see a job to pick                                           |
+| A vehicle on every receipt    | Optional      | Only for people who have a vehicle to pick                                                                         |
+| A photo of the receipt        | Optional      | Required: every submitted receipt needs a finished photo or PDF of the submitter's own; drafts may wait (FILES.md) |
+| Personal expenses (paid back) | Allowed       | Off: the "Personal card (reimburse me)" payment disappears, and the server and database refuse it                  |
+| Default category              | None          | Pre-selects the category on a new receipt                                                                          |
+| Approval                      | Every receipt | Every receipt · Only over an amount · Not needed                                                                   |
+| Receipt fields                | —             | As above                                                                                                           |
 
 **The form assembles itself** from these rules (`formRules()`): required things are marked required,
 turned-off things aren't asked, the order is always amount → vendor → date → category → job →

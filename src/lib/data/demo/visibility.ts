@@ -31,9 +31,17 @@ export function visibleTo(workspace: Workspace, data: Dataset): Visible {
     has('expenses.view_all') ? rows : rows.filter((row) => row.createdBy === me);
   const projectIds = new Set(projects.map((project) => project.id));
   const vehicleIds = new Set(vehicles.map((vehicle) => vehicle.id));
+  const receipts = ownOrAll(inSpace(data.receipts));
+  const receiptIds = new Set(receipts.map((receipt) => receipt.id));
+  // Mirrors `can_see_file`: your own files; finished ones by role; a receipt's photo with its
+  // receipt; the business logo for every member.
   const files = inSpace(data.files).filter((file) => {
-    if (has('files.view_all')) return file.access !== 'private' || file.createdBy === me;
     if (file.createdBy === me) return true;
+    if ((file.status ?? 'ready') !== 'ready') return false;
+    if (has('files.view_all') && file.access !== 'private') return true;
+    if (space.logo?.fileId === file.id) return true;
+    if (file.attachedTo.some((ref) => ref.type === 'receipt' && receiptIds.has(ref.id)))
+      return true;
     if (file.access === 'private' || file.access === 'managers') return false;
     if (file.attachedTo.length === 0) return !isGuest && file.access === 'team';
     return file.attachedTo.some(
@@ -53,7 +61,6 @@ export function visibleTo(workspace: Workspace, data: Dataset): Visible {
         (ref.type === 'vehicle' && vehicleIds.has(ref.id)),
     );
   });
-  const receipts = ownOrAll(inSpace(data.receipts));
   const mileage = ownOrAll(inSpace(data.mileage));
   const submissions = new Set([...receipts, ...mileage].map((row) => row.id));
   const all = inSpace(data.memberships).map((item) => ({

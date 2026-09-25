@@ -67,6 +67,7 @@ export type ReceiptInput = Pick<
   | 'paymentMethod'
   | 'notes'
   | 'custom'
+  | 'fileId'
 > & { draft?: boolean };
 
 export type MileageInput = Pick<
@@ -105,10 +106,29 @@ export type VehicleInput = Pick<
   'name' | 'year' | 'make' | 'model' | 'plate' | 'fuel' | 'assignedTo' | 'odometer' | 'custom'
 >;
 
-export type FileInput = Pick<
+/** A file whose bytes are about to be uploaded. Its id is chosen first: the path is built on it. */
+export type FileStart = Pick<
   FileRecord,
-  'name' | 'kind' | 'size' | 'folder' | 'attachedTo' | 'access' | 'source' | 'pages' | 'preview'
+  | 'id'
+  | 'name'
+  | 'originalName'
+  | 'kind'
+  | 'size'
+  | 'mimeType'
+  | 'folder'
+  | 'attachedTo'
+  | 'access'
+  | 'source'
+  | 'pages'
+  | 'sha256'
+  | 'width'
+  | 'height'
+  | 'storage'
+  | 'storagePath'
 >;
+
+/** What finishing an upload found: done, bytes not there (yet), or not what was promised. */
+export type UploadOutcome = 'ready' | 'missing' | 'mismatch';
 
 export type QrInput = Pick<
   QrCode,
@@ -166,7 +186,10 @@ export interface Repository {
   receipt(id: string): Promise<Receipt | null>;
   mileage(filter?: RecordFilter): Promise<MileageEntry[]>;
 
-  files(filter?: { attachedTo?: AttachmentRef }): Promise<FileRecord[]>;
+  /** Finished files, newest first; `trash` lists what's in Trash instead. */
+  files(filter?: { attachedTo?: AttachmentRef; trash?: boolean }): Promise<FileRecord[]>;
+  /** One file this person may see, in any state (uploading, in Trash), or null. */
+  file(id: string): Promise<FileRecord | null>;
   qrCodes(): Promise<QrCode[]>;
   linkPages(): Promise<LinkPage[]>;
 
@@ -190,7 +213,27 @@ export interface Repository {
   createProject(input: ProjectInput): Promise<Project>;
   invite(input: InviteInput): Promise<Member>;
   createVehicle(input: VehicleInput): Promise<Vehicle>;
-  addFiles(inputs: FileInput[]): Promise<FileRecord[]>;
+  /** A new id for a file, in this backend's format. */
+  newFileId(): string;
+  /** The record for an upload about to start, with its attachments. Not shown until finished. */
+  startUpload(input: FileStart): Promise<FileRecord>;
+  /** This person's uploads here that haven't finished (nobody else can see them). */
+  myUnfinishedUploads(): Promise<FileRecord[]>;
+  /** Marks an upload finished once its bytes are stored (the database checks they are). */
+  finishUpload(id: string): Promise<UploadOutcome>;
+  /** Forgets an upload that didn't finish. Its bytes must already be gone. */
+  discardUpload(id: string): Promise<void>;
+  renameFile(id: string, name: string): Promise<void>;
+  /** To Trash (`true`) or back. A receipt's photo and the logo can't go. */
+  trashFile(id: string, trashed: boolean): Promise<void>;
+  /** Deletes a file in Trash for good. Its bytes must already be gone. */
+  deleteFile(id: string): Promise<void>;
+  /** The same file on one more record — never a second copy. */
+  attachFile(id: string, ref: AttachmentRef): Promise<void>;
+  /** The business's logo (a finished file of the caller's), or none. Returns the previous one. */
+  setLogo(fileId: string | null): Promise<string | null>;
+  /** Bytes this Space keeps in Storage, for the people who run it; null for everyone else. */
+  storageBytes(): Promise<number | null>;
   saveQrCode(input: QrInput): Promise<QrCode>;
   saveLinkPage(input: LinkPageInput): Promise<LinkPage>;
   /** Approve or return one submission. A return can carry a short reason for the submitter. */

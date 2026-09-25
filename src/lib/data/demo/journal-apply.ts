@@ -17,6 +17,7 @@ const moneyFormat = new Intl.NumberFormat('en-US', { style: 'currency', currency
 function normalize(op: JournalOp): JournalOp {
   const fix = (value: Record<string, unknown>) =>
     value.status === 'rejected' ? { ...value, status: 'returned' } : value;
+  if (op.k === 'del') return op;
   return op.k === 'add' ? { ...op, row: fix(op.row) } : { ...op, patch: fix(op.patch) };
 }
 
@@ -35,7 +36,11 @@ export function applyJournal(base: Dataset, ops: JournalOp[]): Dataset {
 
   for (const raw of ops) {
     const op = normalize(raw);
-    if (op.k === 'add') {
+    if (op.k === 'del') {
+      const rows = table(op.t);
+      const index = rows.findIndex((row) => row.id === op.id);
+      if (index !== -1) rows.splice(index, 1);
+    } else if (op.k === 'add') {
       table(op.t).push(op.row);
       derive(op);
     } else {
@@ -69,7 +74,7 @@ export function applyJournal(base: Dataset, ops: JournalOp[]): Dataset {
   }
 
   function derive(
-    op: JournalOp,
+    op: Exclude<JournalOp, { k: 'del' }>,
     current?: Record<string, unknown>,
     before?: Record<string, unknown>,
   ) {
@@ -96,6 +101,7 @@ export function applyJournal(base: Dataset, ops: JournalOp[]): Dataset {
             context: contextOf(row),
             detail,
           });
+          if (row.fileId) attachPhoto(op, row, undefined);
           break;
         }
         case 'mileage':
@@ -111,21 +117,11 @@ export function applyJournal(base: Dataset, ops: JournalOp[]): Dataset {
             detail: `${row.miles} mi`,
           });
           break;
-        case 'files': {
-          const attached = (row.attachedTo as unknown as { type: string; id: string }[])?.[0];
-          activity({
-            actorId: op.by,
-            verb: row.source ? 'generated' : 'uploaded',
-            object: { type: 'file', id: row.id, label: row.name },
-            context:
-              attached?.type === 'project'
-                ? projectRef(attached.id)
-                : attached?.type === 'vehicle'
-                  ? vehicleRef(attached.id)
-                  : undefined,
-          });
+        case 'files':
+          // A file's line is written when its upload finishes (below), as the database does.
+          if (row.status === 'pending') break;
+          fileActivity(op, row, row.source ? 'generated' : 'uploaded');
           break;
-        }
         case 'projects':
           activity({
             actorId: op.by,
@@ -177,6 +173,19 @@ export function applyJournal(base: Dataset, ops: JournalOp[]): Dataset {
     }
 
     // Updates
+    if (op.t === 'files') {
+      if (op.patch.status === 'ready' && before?.status === 'pending') {
+        if (row.source !== 'receipts' && row.source !== 'brand')
+          fileActivity(op, row, row.source ? 'generated' : 'uploaded');
+      } else if ('deletedAt' in op.patch && row.source !== 'brand') {
+        fileActivity(op, row, op.patch.deletedAt ? 'deleted' : 'restored');
+      } else if (op.patch.name && before && op.patch.name !== before.name) {
+        fileActivity(op, row, 'renamed', `was ${before.name}`);
+      }
+      return;
+    }
+    if (op.t === 'receipts' && 'fileId' in op.patch && op.patch.fileId !== before?.fileId)
+      attachPhoto(op, row, before?.fileId as string | undefined);
     const status = op.patch.status as string | undefined;
     if ((op.t === 'receipts' || op.t === 'mileage') && status) {
       const object =
@@ -233,6 +242,63 @@ export function applyJournal(base: Dataset, ops: JournalOp[]): Dataset {
         verb: 'updated',
         object: { type: 'space', id: row.id, label: 'the tools in this Space' },
       });
+  }
+
+  /** "Dana uploaded Oak Brook Plans.pdf · Oak Brook Remodel" — the file's first project or vehicle. */
+  function fileActivity(
+    op: Exclude<JournalOp, { k: 'del' }>,
+    row: Record<string, unknown>,
+    verb: 'uploaded' | 'generated' | 'deleted' | 'restored' | 'renamed',
+    detail?: string,
+  ) {
+    const refs = (row.attachedTo as { type: string; id: string }[] | undefined) ?? [];
+    const place =
+      refs.find((ref) => ref.type === 'project') ?? refs.find((ref) => ref.type === 'vehicle');
+    data.activity.push({
+      id: `ac_${op.k}_files_${row.id}_${op.at}`,
+      spaceId: String(row.spaceId),
+      at: op.at,
+      actorId: op.by,
+      verb,
+      object: { type: 'file', id: String(row.id), label: String(row.name) },
+      context:
+        place?.type === 'project'
+          ? projectRef(place.id)
+          : place?.type === 'vehicle'
+            ? vehicleRef(place.id)
+            : undefined,
+      detail,
+    });
+  }
+
+  /** A receipt's photo is attached to it (and a replaced one no longer is), as the database does. */
+  function attachPhoto(
+    op: Exclude<JournalOp, { k: 'del' }>,
+    receipt: Record<string, unknown>,
+    previous: string | undefined,
+  ) {
+    const files = data.files as unknown as Record<string, unknown>[];
+    const without = (refs: unknown) =>
+      ((refs as { type: string; id: string }[]) ?? []).filter(
+        (ref) => !(ref.type === 'receipt' && ref.id === receipt.id),
+      );
+    const old = files.findIndex((file) => file.id === previous);
+    if (old !== -1) files[old] = { ...files[old], attachedTo: without(files[old].attachedTo) };
+    const index = files.findIndex((file) => file.id === receipt.fileId);
+    if (index === -1) return;
+    files[index] = {
+      ...files[index],
+      attachedTo: [...without(files[index].attachedTo), { type: 'receipt', id: receipt.id }],
+    };
+    data.activity.push({
+      id: `ac_${op.k}_photo_${receipt.id}_${op.at}`,
+      spaceId: String(receipt.spaceId),
+      at: op.at,
+      actorId: op.by,
+      verb: 'attached',
+      object: { type: 'file', id: String(files[index].id), label: String(files[index].name) },
+      context: { type: 'receipt', id: String(receipt.id), label: `${receipt.vendor} receipt` },
+    });
   }
 
   function projectRef(projectId: string) {

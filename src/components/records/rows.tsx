@@ -24,6 +24,9 @@ import type {
   SpaceKind,
   Vehicle,
 } from '@/lib/platform/types';
+import { FilePicture } from '@/components/files/file-media';
+import type { FileView } from '@/lib/files/access';
+import { originOf } from '@/lib/files/origin';
 import { ApprovalBadge, ProjectStatusBadge, VehicleStatusBadge } from './status';
 
 /* ---------- files ---------- */
@@ -86,6 +89,7 @@ const refIcon = {
 export const sourceName: Partial<Record<string, string>> = {
   pdf: 'PDF',
   images: 'Image Resize',
+  qr: 'QR code',
 };
 
 /**
@@ -100,6 +104,7 @@ export function FileRow({
   context,
   links,
   compact = false,
+  view,
 }: {
   file: FileRecord;
   base: string;
@@ -109,26 +114,37 @@ export function FileRow({
   links?: { type: AttachmentRef['type']; label: string }[];
   /** For narrow panels: no size column. */
   compact?: boolean;
+  /** How this person may see it: with it, a photo shows itself (lib/files/access.ts). */
+  view?: FileView;
 }) {
   const by = people.get(file.createdBy);
   const expires = file.expiresAt ? daysUntil(file.expiresAt) : null;
   const first = links?.[0];
-  const made = file.source ? sourceName[file.source] : undefined;
+  const origin = file.source ? originOf(file) : undefined;
+  const made = origin?.label;
   return (
     <Link
       href={`${base}/files?file=${file.id}`}
       scroll={false}
       className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-subtle"
     >
-      <FileThumb file={file} />
+      {view ? (
+        <FilePicture
+          file={file}
+          view={view}
+          className="size-10 shrink-0 rounded-[11px] shadow-[inset_0_0_0_1px_rgb(0_0_0/.08)]"
+        />
+      ) : (
+        <FileThumb file={file} />
+      )}
       <div className="min-w-0 flex-1">
         <p className="truncate text-[14px] font-medium text-ink">{file.name}</p>
         {/* Why it exists, then where it belongs, then who and when. */}
         <p className="flex min-w-0 items-center gap-1 text-[12.5px] text-muted">
           {made && (
             <span className="flex shrink-0 items-center gap-1 text-ink-2">
-              <Icon name={file.source === 'pdf' ? 'pdf' : 'image'} size={12.5} />
-              {first ? made : `Made with ${made}`}
+              <Icon name={origin!.icon} size={12.5} />
+              {made}
             </span>
           )}
           {first ? (

@@ -11,6 +11,8 @@ import { Progress } from '@/components/ui/progress';
 import { Chips } from '@/components/ui/tabs';
 import { PinButton } from '@/components/records/pin-button';
 import { projectMoney } from '@/lib/insights';
+import { FilePicture } from '@/components/files/file-media';
+import { viewsFor } from '@/lib/files/access';
 import { openPage } from '@/lib/page';
 import {
   daysUntil,
@@ -47,6 +49,20 @@ export default async function ProjectsPage({
     repo.fields('projects'),
     repo.vehicles(),
   ]);
+  // Each card's three newest photos, previewed together in one request.
+  const fileViews = await viewsFor(
+    workspace,
+    projects.flatMap((project) =>
+      files
+        .filter(
+          (file) =>
+            file.kind === 'image' &&
+            file.source !== 'qr' &&
+            file.attachedTo.some((ref) => ref.id === project.id),
+        )
+        .slice(0, 3),
+    ),
+  );
   // The one or two answers the business chose to see on every card ("24-184 · Residential").
   const lookup = (type: FieldType, id: string) =>
     type === 'person'
@@ -137,7 +153,9 @@ export default async function ProjectsPage({
             const spent = tracked(project.id);
             const photos = files.filter(
               (file) =>
-                file.kind === 'image' && file.attachedTo.some((ref) => ref.id === project.id),
+                file.kind === 'image' &&
+                file.source !== 'qr' &&
+                file.attachedTo.some((ref) => ref.id === project.id),
             );
             const fileCount = files.filter((file) =>
               file.attachedTo.some((ref) => ref.id === project.id),
@@ -162,10 +180,11 @@ export default async function ProjectsPage({
                   {photos.length > 0 ? (
                     <div className="absolute inset-0 flex gap-px">
                       {photos.slice(0, 3).map((file) => (
-                        <span
+                        <FilePicture
                           key={file.id}
-                          className="flex-1"
-                          style={{ background: file.preview }}
+                          file={file}
+                          view={fileViews[file.id]}
+                          className="h-full flex-1"
                         />
                       ))}
                     </div>

@@ -19,7 +19,9 @@ import { Page } from '@/components/ui/page';
 import { Panel, PanelHeader } from '@/components/ui/panel';
 import { currentProjectFor, thisMonth } from '@/lib/insights';
 import { describeCount, tripTitle } from '@/lib/platform/approvals';
+import { viewsFor } from '@/lib/files/access';
 import { openPage } from '@/lib/page';
+import { CreateButton } from '@/components/create/create-button';
 import { formFields } from '@/lib/platform/custom-fields';
 import type { FieldType } from '@/lib/platform/types';
 import { buttonClass } from '@/components/ui/button';
@@ -53,6 +55,7 @@ export default async function PersonPage({ params }: PageProps<'/[space]/people/
     repo.mileage({ createdBy: id }),
     repo.fields('people'),
   ]);
+  const fileViews = await viewsFor(workspace, files);
   const self = id === workspace.person.id;
   const working = projects.filter(
     (project) =>
@@ -414,7 +417,18 @@ export default async function PersonPage({ params }: PageProps<'/[space]/people/
           </Panel>
           {can('files.view_all') && (
             <Panel>
-              <PanelHeader title="Their documents" count={files.length} />
+              <PanelHeader title="Their documents" count={files.length}>
+                {can('people.manage') && member.status === 'active' && (
+                  <CreateButton
+                    request={{ id: 'file', attachTo: { type: 'person', id: member.personId } }}
+                    size="sm"
+                    variant="ghost"
+                    icon="upload"
+                  >
+                    Add
+                  </CreateButton>
+                )}
+              </PanelHeader>
               {files.length ? (
                 <div className="pb-1.5">
                   {files.map((file) => (
@@ -425,6 +439,7 @@ export default async function PersonPage({ params }: PageProps<'/[space]/people/
                       people={people}
                       timezone={tz}
                       context={file.folder}
+                      view={fileViews[file.id]}
                       compact
                     />
                   ))}

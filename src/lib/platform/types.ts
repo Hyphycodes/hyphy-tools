@@ -86,6 +86,8 @@ export type Space = {
   /** Paid back per mile driven in someone's own car. Counts toward a project's tracked costs. */
   mileageRate?: number;
   brand: { color: string; ink: 'light' | 'dark'; monogram: string };
+  /** A business's logo, one of its own files. Without one, the mark is its initials. */
+  logo?: { fileId: string; storage: FileStorage };
   timezone: string;
   /** Owner of a personal Space. */
   ownerId?: string;
@@ -285,7 +287,18 @@ export type FileKind = 'pdf' | 'image' | 'doc' | 'sheet' | 'archive';
 
 export type AttachmentRef = { type: 'project' | 'vehicle' | 'person' | 'receipt'; id: string };
 
+/**
+ * Where a file's bytes are: Supabase Storage (`hyphy-files`, the private bucket), or — in Demo
+ * Mode only — the browser that uploaded it (`device`). Records from before real storage have
+ * neither: their details are kept, not the file.
+ */
+export type FileStorage = 'hyphy-files' | 'device';
+
+/** Where a file came from: uploaded (none), made by a tool, a receipt's photo, a business logo. */
+export type FileSource = ModuleId | 'brand';
+
 export type FileRecord = Owned & {
+  /** The name people see. Renaming changes only this. */
   name: string;
   kind: FileKind;
   size: number;
@@ -294,11 +307,26 @@ export type FileRecord = Owned & {
   /** Who can open it. `team` = everyone who can see what it's attached to. */
   access: 'team' | 'managers' | 'private' | 'shared';
   expiresAt?: ISODate;
-  /** Photo files show a generated preview swatch in the demo. */
+  /** Sample records show a generated preview swatch in the demo. */
   preview?: string;
   pages?: number;
-  /** Which tool produced it, if any. */
-  source?: ModuleId;
+  /** Where it came from, if not simply uploaded. */
+  source?: FileSource;
+  /** Its name when it was uploaded or made. */
+  originalName?: string;
+  mimeType?: string;
+  storage?: FileStorage;
+  /** Hyphy's own path for the bytes (`spaces/<space>/files/<id>/<name>`). Server-side only. */
+  storagePath?: string;
+  /** `pending` while its bytes are uploading; only `ready` files are shown. Default ready. */
+  status?: 'pending' | 'ready' | 'failed';
+  /** SHA-256 of the bytes, as the uploading browser computed it. */
+  sha256?: string;
+  width?: number;
+  height?: number;
+  /** In Trash since. */
+  deletedAt?: ISODate;
+  deletedBy?: string;
 };
 
 export type QrCode = Owned & {
@@ -364,7 +392,12 @@ export type ActivityVerb =
   /** Setup: a field added, a rule changed, a field no longer used. */
   | 'added'
   | 'changed'
-  | 'archived';
+  | 'archived'
+  /** Files: into Trash, back out, a new name, a photo on a receipt. */
+  | 'deleted'
+  | 'restored'
+  | 'renamed'
+  | 'attached';
 
 export type ActivityEvent = {
   id: string;

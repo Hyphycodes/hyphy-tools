@@ -4,6 +4,7 @@ import { CreateButton } from '@/components/create/create-button';
 import { fieldRows, listLine } from '@/components/fields/field-facts';
 import { Relations, relationsOf } from '@/components/records/relations';
 import { ReturnedNotice, ReviewActions } from '@/components/records/review';
+import { ReceiptPhoto } from '@/components/files/receipt-photo';
 import { ReceiptPaper } from '@/components/records/receipt-paper';
 import { ReceiptRow } from '@/components/records/rows';
 import { SubmissionTimeline } from '@/components/records/timeline';
@@ -20,6 +21,7 @@ import { Panel } from '@/components/ui/panel';
 import { Chips } from '@/components/ui/tabs';
 import { UrlSheet } from '@/components/ui/url-sheet';
 import { categoryLabel, monthSummary } from '@/lib/insights';
+import { viewsFor, type FileView } from '@/lib/files/access';
 import { openPage } from '@/lib/page';
 import { formatCurrency, formatDateLong, formatNumber } from '@/lib/platform/format';
 import { exportField, fieldsFor } from '@/lib/platform/custom-fields';
@@ -28,6 +30,7 @@ import type {
   ApprovalEvent,
   ApprovalStatus,
   FieldType,
+  FileRecord,
   Person,
   Receipt,
 } from '@/lib/platform/types';
@@ -99,6 +102,9 @@ export default async function ReceiptsPage({
   const selected =
     typeof query.receipt === 'string' ? await repo.receipt(query.receipt) : undefined;
   const history = selected ? await repo.approvalHistory(selected.id) : [];
+  // The receipt's own photo, as the person looking may open it (the photo follows the receipt).
+  const photo = selected?.fileId ? await repo.file(selected.fileId) : null;
+  const photoView = photo ? (await viewsFor(workspace, [photo]))[photo.id] : undefined;
   // Who is waiting on a decision, and for how much — an approver's real queue.
   const waitingBy = [
     ...pending
@@ -409,6 +415,8 @@ export default async function ReceiptsPage({
             canOpenPeople={can('people.view') && workspace.space.modules.includes('people')}
             history={history}
             extra={fieldRows(fields, 'receipts', selected.custom, lookup, tz)}
+            photo={photo && (photo.status ?? 'ready') === 'ready' ? photo : null}
+            photoView={photoView}
           />
         </UrlSheet>
       )}
@@ -428,8 +436,12 @@ function ReceiptDetail({
   canOpenPeople,
   history,
   extra,
+  photo,
+  photoView,
 }: {
   receipt: Receipt;
+  photo: FileRecord | null;
+  photoView: FileView | undefined;
   base: string;
   tz: string;
   business: boolean;
@@ -473,8 +485,9 @@ function ReceiptDetail({
           draft={receipt.status === 'draft'}
         />
       )}
+      {photo && <ReceiptPhoto file={photo} view={photoView} />}
       <div className="flex items-center gap-5 rounded-[18px] bg-tool-receipt/30 p-4 shadow-[inset_0_0_0_1px_rgb(0_0_0/.04)] sm:p-5">
-        <ReceiptPaper receipt={receipt} timezone={tz} className="-rotate-2" />
+        {!photo && <ReceiptPaper receipt={receipt} timezone={tz} className="-rotate-2" />}
         <div className="min-w-0">
           <p className="label !text-ink/55">Total</p>
           <p className="display mt-1 text-[34px] leading-none text-ink">
@@ -514,9 +527,13 @@ function ReceiptDetail({
         <SubmissionTimeline record={receipt} events={history} people={people} timezone={tz} />
       )}
 
-      <p className="text-[12px] text-faint">
-        In this preview, Hyphy keeps a receipt’s details, not the photo.
-      </p>
+      {!photo && (
+        <p className="text-[12px] text-faint">
+          {receipt.fileId
+            ? 'Its photo isn’t available to you.'
+            : 'No photo with this receipt — the paper above is drawn from its details.'}
+        </p>
+      )}
     </div>
   );
 }

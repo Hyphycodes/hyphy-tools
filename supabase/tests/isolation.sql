@@ -232,8 +232,16 @@ begin
   begin perform invite_member(abc, 'x', 'x@x.example', 'member', 'x', '{}');
     failures := failures || 'anon called invite_member'::text;
   exception when others then null; end;
+  begin
+    select count(*) into n from storage.objects where bucket_id = 'hyphy-files';
+    if n > 0 then failures := failures || 'anon listed stored files'::text; end if;
+  exception when insufficient_privilege then null;
+  end;
+  begin perform public.can_read_file_object('x');
+    failures := failures || 'anon called can_read_file_object'::text;
+  exception when others then null; end;
   perform set_config('role', 'none', true);
-  results := results || 'ok: anon reads nothing and calls nothing'::text;
+  results := results || 'ok: anon reads nothing and calls nothing (stored files included)'::text;
 
   if array_length(failures, 1) > 0 then
     raise exception 'RLS attack suite: % got through: %', array_length(failures, 1),

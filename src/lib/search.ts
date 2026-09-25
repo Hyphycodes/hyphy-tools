@@ -9,6 +9,7 @@ import { inboxLook } from '@/lib/platform/inbox';
 import { roles } from '@/lib/platform/roles';
 import { availability, tools, toolName } from '@/lib/platform/tools';
 import { workProfile } from '@/lib/platform/work';
+import { originOf } from '@/lib/files/origin';
 import type { DemoModel } from '@/lib/demo/model';
 
 export type SearchItem = {
@@ -203,6 +204,21 @@ export async function buildSearchIndex(
       ]
         .filter(Boolean)
         .join(' · '),
+      // Its original name, everything it's attached to and where it came from. (Not what's
+      // inside it: document text search comes later.)
+      keywords: [
+        file.originalName,
+        originOf(file).label,
+        ...file.attachedTo.map((ref) =>
+          ref.type === 'project'
+            ? projectName(ref.id)
+            : ref.type === 'vehicle'
+              ? vehicles.find((vehicle) => vehicle.id === ref.id)?.name
+              : undefined,
+        ),
+      ]
+        .filter(Boolean)
+        .join(' '),
       href: `${base}/files?file=${file.id}`,
       visual:
         file.kind === 'image' && file.preview

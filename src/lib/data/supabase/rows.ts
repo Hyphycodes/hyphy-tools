@@ -4,6 +4,7 @@ import type {
   ApprovalEvent,
   FieldDefinition,
   FileRecord,
+  FileStorage,
   InboxItem,
   LinkPage,
   Membership,
@@ -81,6 +82,10 @@ export function spaceFrom(row: Row): Space {
     workStyle: (row.work_style as Space['workStyle']) ?? undefined,
     mileageRate: num(row.mileage_rate),
     brand: json<Space['brand']>(row.brand, { color: '#3240FF', ink: 'light', monogram: 'H' }),
+    logo:
+      row.logo_file_id && row.logo_storage
+        ? { fileId: String(row.logo_file_id), storage: row.logo_storage as FileStorage }
+        : undefined,
     timezone: String(row.timezone),
     ownerId: str(row.owner_id),
     // Joined from `space_settings`; absent for guests, whom the policy doesn't give it to.
@@ -272,6 +277,16 @@ export function fileFrom(row: Row): FileRecord {
     preview: str(row.preview),
     pages: num(row.pages),
     source: (row.source as FileRecord['source']) ?? undefined,
+    originalName: str(row.original_name),
+    mimeType: str(row.mime_type),
+    storage: (row.storage_bucket as FileStorage) ?? undefined,
+    storagePath: str(row.storage_path),
+    status: row.status === 'ready' ? undefined : (row.status as FileRecord['status']),
+    sha256: str(row.sha256),
+    width: num(row.width),
+    height: num(row.height),
+    deletedAt: iso(row.deleted_at),
+    deletedBy: str(row.deleted_by),
   });
 }
 
@@ -460,6 +475,15 @@ export const columns = {
     expiresAt: 'expires_at',
     source: 'source',
     preview: 'preview',
+    originalName: 'original_name',
+    mimeType: 'mime_type',
+    storage: 'storage_bucket',
+    storagePath: 'storage_path',
+    status: 'status',
+    sha256: 'sha256',
+    width: 'width',
+    height: 'height',
+    deletedAt: 'deleted_at',
   },
   qrCodes: {
     id: 'id',
@@ -525,6 +549,7 @@ export const tableName = {
   receipts: 'receipts',
   mileage: 'mileage_entries',
   files: 'files',
+  fileAttachments: 'file_attachments',
   qrCodes: 'qr_codes',
   linkPages: 'link_pages',
   inbox: 'inbox_items',

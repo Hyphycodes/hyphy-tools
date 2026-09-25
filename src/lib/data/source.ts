@@ -15,7 +15,7 @@ import type {
   Receipt,
   Vehicle,
 } from '@/lib/platform/types';
-import type { InviteInput, Member } from './repository';
+import type { InviteInput, Member, UploadOutcome } from './repository';
 
 /**
  * Where the repository's rows come from and where its changes go. There are two:
@@ -59,6 +59,8 @@ export type WritableTable =
   | 'receipts'
   | 'mileage'
   | 'files'
+  /** One more record for a file: `{ fileId, type, id }`. */
+  | 'fileAttachments'
   | 'qrCodes'
   | 'linkPages'
   | 'inbox'
@@ -66,7 +68,9 @@ export type WritableTable =
 
 export type Change =
   | { op: 'insert'; table: WritableTable; row: Record<string, unknown> }
-  | { op: 'update'; table: WritableTable; id: string; patch: Record<string, unknown> };
+  | { op: 'update'; table: WritableTable; id: string; patch: Record<string, unknown> }
+  /** Only files are ever deleted: an unfinished upload, or one from Trash. */
+  | { op: 'delete'; table: 'files'; id: string };
 
 /** A change to the business's own fields. A field is named by its record type and key. */
 export type FieldChange =
@@ -101,4 +105,9 @@ export interface DataSource {
   setMemberFields(personId: string, custom: Record<string, FieldValue>): Promise<void>;
   pins(): Promise<PinTarget[]>;
   setPins(pins: PinTarget[]): Promise<void>;
+  /** Finishes an upload as its uploader; the database checks the bytes arrived as promised. */
+  finishUpload(id: string): Promise<UploadOutcome>;
+  /** Sets (or clears) the business's logo; returns the one it replaced. */
+  setLogo(fileId: string | null): Promise<string | null>;
+  storageBytes(): Promise<number | null>;
 }

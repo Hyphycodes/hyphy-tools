@@ -36,6 +36,8 @@ export type ReceiptSettings = {
   requireVehicle?: boolean;
   /** People may pay with their own card and be paid back. */
   allowPersonal?: boolean;
+  /** Every receipt sent has its photo (or PDF) — a real, stored file. */
+  requirePhoto?: boolean;
   /** The category a new receipt starts on. */
   defaultCategory?: ReceiptCategory;
   approval?: ApprovalRule;
@@ -74,6 +76,7 @@ export const DEFAULT_SETTINGS: ResolvedSettings = {
     requireProject: false,
     requireVehicle: false,
     allowPersonal: true,
+    requirePhoto: false,
     approval: { mode: 'always' },
   },
   mileage: {
@@ -127,7 +130,14 @@ export function parseSettings(raw: unknown): SpaceSettings {
   };
   if (input.receipts) {
     const r = input.receipts;
-    only(r, ['requireProject', 'requireVehicle', 'allowPersonal', 'defaultCategory', 'approval']);
+    only(r, [
+      'requireProject',
+      'requireVehicle',
+      'allowPersonal',
+      'requirePhoto',
+      'defaultCategory',
+      'approval',
+    ]);
     out.receipts = {};
     if (r.requireProject !== undefined)
       out.receipts.requireProject = bool(r.requireProject, 'a project on every receipt');
@@ -135,6 +145,8 @@ export function parseSettings(raw: unknown): SpaceSettings {
       out.receipts.requireVehicle = bool(r.requireVehicle, 'a vehicle on every receipt');
     if (r.allowPersonal !== undefined)
       out.receipts.allowPersonal = bool(r.allowPersonal, 'personal expenses');
+    if (r.requirePhoto !== undefined)
+      out.receipts.requirePhoto = bool(r.requirePhoto, 'a photo on every receipt');
     if (r.defaultCategory !== undefined) {
       if (!RECEIPT_CATEGORIES.includes(r.defaultCategory as ReceiptCategory))
         throw new SettingsError('Choose one of the categories.');
@@ -241,6 +253,7 @@ export type FormRules = {
     vehicle: Requirement;
     /** Whether "Personal card (reimburse me)" is offered. */
     personalPayment: boolean;
+    photo: 'required' | 'optional';
     defaultCategory?: ReceiptCategory;
   };
   mileage: {
@@ -272,6 +285,7 @@ export function formRules(
       project: pick(on('projects'), settings.receipts.requireProject && hasProject),
       vehicle: pick(on('vehicles'), settings.receipts.requireVehicle && hasVehicle),
       personalPayment: !business || settings.receipts.allowPersonal,
+      photo: business && settings.receipts.requirePhoto ? 'required' : 'optional',
       defaultCategory: settings.receipts.defaultCategory,
     },
     mileage: {
@@ -294,6 +308,7 @@ export function submissionProblem(
     vehicleId?: string;
     paymentMethod?: string;
     purpose?: string;
+    fileId?: string;
   },
   words: { project: string; vehicle: string },
   hasVehicle: boolean,
@@ -307,6 +322,7 @@ export function submissionProblem(
       return `Choose the ${words.vehicle.toLowerCase()} this receipt is for.`;
     if (!rules.receipts.personalPayment && isPersonalPayment(record.paymentMethod))
       return 'This business doesn’t pay back personal expenses. Use a company card.';
+    if (rules.receipts.photo === 'required' && !record.fileId) return 'Add a photo of the receipt.';
     return null;
   }
   if (rules.mileage.project === 'required' && !record.projectId)

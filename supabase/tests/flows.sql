@@ -2,7 +2,7 @@
 --
 -- The same writes the repository makes (src/lib/data/core.ts over supabase/source.ts), as
 -- `authenticated` with each person's claims: a trip and a receipt through submit → return with a
--- reason → fix → approve, batch approval, pins, a file attached to a project, an invitation. It
+-- reason → fix → approve, batch approval, pins, a file uploaded to a project, an invitation. It
 -- checks what the triggers wrote (approval history, activity) and who they say did it.
 --
 -- Everything happens in one transaction that is always rolled back — the report arrives as the
@@ -141,19 +141,36 @@ begin
   if n <> 0 then failures := failures || 'Dana sees Mike''s pins'::text; end if;
   results := results || 'ok: pins persist per person and stay private'::text;
 
-  -- A file attached to Oak Brook; its activity line is written at commit with the project.
+  -- A file uploaded to Oak Brook: started (pending, invisible to others), its bytes arrive in
+  -- Storage, then finished — and only then seen, with its activity line saying where it went.
   perform pg_temp.as_person(mike);
-  insert into files (id, space_id, created_by, name, kind, size, folder, access)
-  values (file, abc, mike, 'Tile spec.pdf', 'pdf', 220000, 'Projects', 'team');
+  insert into files (id, space_id, created_by, name, original_name, kind, size, mime_type, folder,
+                     access, storage_bucket, storage_path, status)
+  values (file, abc, mike, 'Tile spec.pdf', 'Tile spec.pdf', 'pdf', 220000, 'application/pdf',
+          'Projects', 'team', 'hyphy-files',
+          format('spaces/%s/files/%s/tile-spec.pdf', abc, file), 'pending');
   insert into file_attachments (file_id, record_type, record_id) values (file, 'project', oakbrook);
-  set constraints all immediate;
+  perform pg_temp.as_person(ray);
+  select count(*) into n from files where id = file;
+  if n <> 0 then failures := failures || 'Ray sees a file still uploading'::text; end if;
+  perform pg_temp.as_person(mike);
+  if finish_upload(file) <> 'missing' then
+    failures := failures || 'A file finished before its bytes arrived'::text;
+  end if;
+  -- What Supabase Storage records when the bytes arrive.
+  perform set_config('role', 'none', true);
+  insert into storage.objects (bucket_id, name, owner_id, metadata)
+  values ('hyphy-files', format('spaces/%s/files/%s/tile-spec.pdf', abc, file), mike::text,
+          '{"size": 220000, "mimetype": "application/pdf"}');
+  perform pg_temp.as_person(mike);
+  if finish_upload(file) <> 'ready' then failures := failures || 'The upload did not finish'::text; end if;
   perform pg_temp.as_person(ray);
   select count(*) into n from files f join file_attachments a on a.file_id = f.id
-   where f.id = file and a.record_id = oakbrook;
+   where f.id = file and a.record_id = oakbrook and f.status = 'ready';
   if n <> 1 then failures := failures || 'Ray does not see the file on Oak Brook'::text; end if;
   select count(*) into n from activity where object_id = file and context_id = oakbrook and actor_id = mike;
   if n <> 1 then failures := failures || 'The file''s activity line is missing its project'::text; end if;
-  results := results || 'ok: file metadata and its project attachment persist; activity says where it went'::text;
+  results := results || 'ok: a file is seen only once its bytes arrived; its project and activity follow'::text;
 
   -- An invitation creates the identity (auth.users) and an invited membership.
   perform pg_temp.as_person(dana);

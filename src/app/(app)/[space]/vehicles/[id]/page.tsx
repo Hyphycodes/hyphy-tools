@@ -12,6 +12,7 @@ import { Icon } from '@/components/ui/icon';
 import { Page } from '@/components/ui/page';
 import { Panel, PanelHeader } from '@/components/ui/panel';
 import { thisMonth, vehicleProject } from '@/lib/insights';
+import { viewsFor } from '@/lib/files/access';
 import { openPage } from '@/lib/page';
 import { formFields } from '@/lib/platform/custom-fields';
 import { vehicleWords } from '@/lib/platform/terms';
@@ -37,6 +38,7 @@ export default async function VehiclePage({ params }: PageProps<'/[space]/vehicl
     repo.fields('vehicles'),
     repo.vehicles(),
   ]);
+  const fileViews = await viewsFor(workspace, files);
   const driver = vehicle.assignedTo ? people.get(vehicle.assignedTo) : undefined;
   const fuel = receipts.filter(
     (receipt) => receipt.category === 'fuel' && receipt.status !== 'returned',
@@ -261,7 +263,16 @@ export default async function VehiclePage({ params }: PageProps<'/[space]/vehicl
             )}
           </Panel>
           <Panel>
-            <PanelHeader title="Documents" count={files.length} />
+            <PanelHeader title="Documents" count={files.length}>
+              <CreateButton
+                request={{ id: 'file', attachTo: { type: 'vehicle', id: vehicle.id } }}
+                size="sm"
+                variant="ghost"
+                icon="upload"
+              >
+                Add
+              </CreateButton>
+            </PanelHeader>
             {files.length ? (
               <div className="pb-1.5">
                 {files.map((file) => (
@@ -272,13 +283,14 @@ export default async function VehiclePage({ params }: PageProps<'/[space]/vehicl
                     people={people}
                     timezone={tz}
                     context={file.folder}
+                    view={fileViews[file.id]}
                     compact
                   />
                 ))}
               </div>
             ) : (
               <p className="px-4 pb-4 text-[13px] text-muted">
-                Registration and insurance cards live here.
+                Registration, insurance cards, inspection reports and photos live here.
               </p>
             )}
           </Panel>

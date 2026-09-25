@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { FilePicture } from '@/components/files/file-media';
+import type { FileViews } from '@/lib/files/access';
 import type { ReactNode } from 'react';
 import { CreateButton } from '@/components/create/create-button';
 import { ActivityList } from '@/components/records/activity-list';
@@ -80,6 +82,8 @@ export type DashboardData = {
   receipts: Receipt[];
   mileage: MileageEntry[];
   files: FileRecord[];
+  /** Previews for the project photos the dashboard shows (lib/files/access.ts). */
+  fileViews: FileViews;
   qrCodes: QrCode[];
   linkPages: LinkPage[];
   month: ReturnType<typeof monthSummary>;
@@ -984,7 +988,12 @@ function MyDay({ data }: { data: DashboardData }) {
   const lead = data.people.get(project.leadId);
   const inspection = project.custom?.next_inspection as string | undefined;
   const photos = data.files
-    .filter((file) => file.kind === 'image' && file.attachedTo.some((ref) => ref.id === project.id))
+    .filter(
+      (file) =>
+        file.kind === 'image' &&
+        file.source !== 'qr' &&
+        file.attachedTo.some((ref) => ref.id === project.id),
+    )
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const others = data.projects.filter(
     (item) =>
@@ -1043,11 +1052,12 @@ function MyDay({ data }: { data: DashboardData }) {
               <Link
                 key={file.id}
                 href={`${base}/files?file=${file.id}`}
-                className="h-16 flex-1 rounded-[10px] shadow-[inset_0_0_0_1px_rgb(0_0_0/.08)] transition-transform hover:scale-[1.03]"
-                style={{ background: file.preview }}
+                className="h-16 flex-1 overflow-hidden rounded-[10px] shadow-[inset_0_0_0_1px_rgb(0_0_0/.08)] transition-transform hover:scale-[1.03]"
                 title={file.name}
                 aria-label={file.name}
-              />
+              >
+                <FilePicture file={file} view={data.fileViews[file.id]} className="size-full" />
+              </Link>
             ))}
           </div>
         )}
@@ -1271,7 +1281,7 @@ function SharedProjects({ data }: { data: DashboardData }) {
           file.attachedTo.some((ref) => ref.id === project.id),
         );
         const photos = attached
-          .filter((file) => file.kind === 'image')
+          .filter((file) => file.kind === 'image' && file.source !== 'qr')
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
         const team = project.teamIds.map((id) => data.people.get(id)).filter(Boolean) as Person[];
         const lead = data.people.get(project.leadId);
@@ -1285,7 +1295,12 @@ function SharedProjects({ data }: { data: DashboardData }) {
               aria-label={`Open ${project.name}`}
             >
               {photos.slice(0, 3).map((file) => (
-                <span key={file.id} className="flex-1" style={{ background: file.preview }} />
+                <FilePicture
+                  key={file.id}
+                  file={file}
+                  view={data.fileViews[file.id]}
+                  className="h-full flex-1"
+                />
               ))}
               <span
                 className="absolute inset-x-0 bottom-0 h-1"

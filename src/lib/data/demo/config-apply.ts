@@ -27,7 +27,10 @@ export type SpaceChanges = Partial<
     | 'modules'
     | 'settings'
   >
->;
+> & {
+  /** The business's logo; null once removed (back to its initials). */
+  logo?: Space['logo'] | null;
+};
 
 export type DemoConfig = {
   /** Changes to each Space, by Space id. */
@@ -83,9 +86,15 @@ export function applyConfig(base: Dataset, config: DemoConfig): Dataset {
   if (!spaceIds.length && !fieldSpaces.length && !config.log.length) return base;
   return {
     ...base,
-    spaces: base.spaces.map((space) =>
-      config.spaces[space.id] ? { ...space, ...config.spaces[space.id] } : space,
-    ),
+    spaces: base.spaces.map((space) => {
+      const changes = config.spaces[space.id];
+      if (!changes) return space;
+      const { logo, ...rest } = changes;
+      const next: Space = { ...space, ...rest };
+      if (logo) next.logo = logo;
+      else if (logo === null) delete next.logo;
+      return next;
+    }),
     fields: [
       ...base.fields.filter((field) => !fieldSpaces.includes(field.spaceId)),
       ...fieldSpaces.flatMap((spaceId) => config.fields[spaceId]),
@@ -142,6 +151,12 @@ export function spaceLines(before: Space, changes: SpaceChanges): Line[] {
   if (changes.businessType && changes.businessType !== before.businessType)
     lines.push({ verb: 'changed', label: 'the kind of business' });
   if (changes.settings) lines.push(...settingsLines(before.settings, changes.settings));
+  if (changes.logo !== undefined && changes.logo?.fileId !== before.logo?.fileId)
+    lines.push({
+      verb: changes.logo ? 'updated' : 'removed',
+      label: 'the business logo',
+      object: 'space',
+    });
   return lines;
 }
 
