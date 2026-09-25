@@ -283,6 +283,18 @@ export const perspectives: Perspective[] = [
     note: 'An individual, on their own',
   },
   { id: 'jerry-hyphy', personId: 'jerry', spaceSlug: 'hyphy', note: 'Owner of a small studio' },
+  {
+    id: 'jerry-se',
+    personId: 'jerry',
+    spaceSlug: 'salt-and-ember',
+    note: 'Helps run a friend’s restaurant',
+  },
+  {
+    id: 'jerry-abc',
+    personId: 'jerry',
+    spaceSlug: 'abc-construction',
+    note: 'Guest on the website project',
+  },
   { id: 'sarah-hyphy', personId: 'sarah', spaceSlug: 'hyphy', note: 'Runs operations, no billing' },
   {
     id: 'dana-abc',

@@ -3,7 +3,7 @@ import { Widget, type DashboardData } from '@/components/dashboard/widgets';
 import { Page } from '@/components/ui/page';
 import { getRepository } from '@/lib/data';
 import { requireWorkspace } from '@/lib/identity';
-import { monthSummary, spendBy } from '@/lib/insights';
+import { currentProjectFor, monthSummary, spendBy } from '@/lib/insights';
 import { dashboardFor } from '@/lib/platform/dashboard';
 import {
   daysUntil,
@@ -66,78 +66,111 @@ export default async function Home({ params }: PageProps<'/[space]'>) {
     projectSpend: spendBy(receipts, 'projectId'),
   };
   const layout = dashboardFor(space, membership);
+  const can = (permission: (typeof workspace.permissions)[number]) =>
+    workspace.permissions.includes(permission);
+  const urgent = inbox.find((item) => item.priority === 'high');
 
-  // One plain sentence about today, written for this person.
+  // A few plain sentences about today, written for this person. Specific beats clever.
   const briefing = (() => {
-    if (layout.hero === 'personal')
-      return receipts.length || mileage.length
-        ? `${formatMiles(data.month.miles)} and ${plural(data.month.receipts, 'receipt')} this month.${inbox.length ? ` ${plural(inbox.length, 'thing')} could use a look.` : ''}`
-        : 'Your own tools, and everything you make with them, in one place.';
+    if (layout.hero === 'personal') {
+      const month =
+        receipts.length || mileage.length
+          ? `${formatMiles(data.month.miles)} and ${formatCurrency(data.month.spend, { cents: false })} in receipts this month.`
+          : 'Your own tools, and everything you make with them, in one place.';
+      const next = urgent ?? inbox[0];
+      return [month, next ? `${next.title}.` : undefined].filter(Boolean).join(' ');
+    }
     if (layout.hero === 'operator') {
-      const active = projects.filter((project) => project.status === 'active').length;
-      const word = space.labels?.projects?.plural.toLowerCase() ?? 'projects';
-      return [
-        inbox.length
-          ? `${plural(inbox.length, 'item')} need${inbox.length === 1 ? 's' : ''} you`
-          : 'Nothing needs you',
-        `${active} ${word} active`,
-        workspace.permissions.includes('expenses.view_all') && data.month.spend
-          ? `${formatCurrency(data.month.spend, { cents: false })} spent this month`
-          : undefined,
-      ]
-        .filter(Boolean)
-        .join(' · ');
+      const waiting = [...receipts, ...mileage].filter((item) => item.status === 'submitted');
+      const first = can('expenses.approve')
+        ? waiting.length
+          ? `${plural(waiting.length, 'submission')} ${waiting.length === 1 ? 'is' : 'are'} waiting for your approval.`
+          : inbox.length
+            ? `Approvals are done. ${plural(inbox.length, 'other thing')} could use a look.`
+            : 'Nothing is waiting on you.'
+        : inbox.length
+          ? `${plural(inbox.length, 'thing')} could use a look.`
+          : 'Nothing is waiting on you.';
+      const second = urgent
+        ? `${urgent.title}${urgent.subject.type === 'vehicle' || urgent.subject.type === 'project' ? ` — ${urgent.subject.label}` : ''}.`
+        : undefined;
+      return [first, second].filter(Boolean).join(' ');
     }
     if (layout.hero === 'member') {
       const truck = vehicles.find((vehicle) => vehicle.assignedTo === person.id);
-      const project = projects.find(
-        (item) => item.status === 'active' && item.teamIds.includes(person.id),
-      );
+      const project = currentProjectFor(person.id, projects, activity);
       const service = truck?.nextServiceMiles ? truck.nextServiceMiles - truck.odometer : null;
+      const pending = [...receipts, ...mileage].filter(
+        (item) => item.status === 'submitted',
+      ).length;
+      const returned = [...receipts, ...mileage].filter(
+        (item) => item.status === 'rejected',
+      ).length;
       return [
-        project ? `You’re on ${project.name}` : undefined,
-        truck && service !== null
-          ? `${truck.name} is ${formatNumber(service)} miles from service`
+        project ? `You’re on ${project.name}.` : undefined,
+        returned
+          ? `${plural(returned, 'submission')} came back — take a look.`
+          : pending
+            ? `${plural(pending, 'submission')} waiting for approval.`
+            : undefined,
+        truck && service !== null && service < 2500
+          ? `${truck.name} is due for service in ${formatNumber(service)} miles.`
           : undefined,
       ]
         .filter(Boolean)
-        .join('. ')
-        .concat('.');
+        .join(' ');
     }
     const next = projects
       .map((project) => project.custom?.next_inspection as string | undefined)
-      .find(Boolean);
-    return `${plural(projects.length, space.labels?.projects?.singular.toLowerCase() ?? 'project')} shared with you by ${space.name}${
-      next ? `. Next inspection in ${daysUntil(next)} days.` : '.'
+      .filter(Boolean)
+      .sort()[0];
+    return `${plural(projects.length, space.labels?.projects?.singular.toLowerCase() ?? 'project')} shared with you by ${space.name}.${
+      next ? ` Next inspection in ${daysUntil(next)} days.` : ''
     }`;
   })();
 
   return (
     <Page wide>
-      <header className="mb-6 lg:mb-8">
-        <p className="label mb-3 flex items-center gap-2">
-          <span>{formatDateLong(new Date().toISOString(), space.timezone)}</span>
-          <span className="text-faint">/</span>
-          <span className="truncate">{space.kind === 'personal' ? 'Personal' : space.name}</span>
-        </p>
-        <h1 className="display text-[34px] text-ink sm:text-[42px] lg:text-[48px]">
-          {layout.hero === 'personal' ? 'Welcome back' : greeting(space.timezone)},{' '}
-          {person.firstName}.
-        </h1>
-        <p className="mt-2.5 max-w-[62ch] text-[15.5px] leading-relaxed text-muted lg:text-[15px]">
-          {briefing}
-        </p>
+      <header className="mb-6 flex flex-col gap-5 lg:mb-7 lg:flex-row lg:items-end lg:justify-between">
+        <div className="min-w-0">
+          <p className="label mb-3 flex items-center gap-2">
+            <span>{formatDateLong(new Date().toISOString(), space.timezone)}</span>
+            <span className="text-faint">/</span>
+            <span className="truncate">{space.kind === 'personal' ? 'Personal' : space.name}</span>
+          </p>
+          <h1 className="display text-[34px] text-ink sm:text-[42px] lg:text-[48px]">
+            {layout.hero === 'personal' ? 'Welcome back' : greeting(space.timezone)},{' '}
+            {person.firstName}.
+          </h1>
+          <p className="mt-2.5 max-w-[64ch] text-[15.5px] leading-relaxed text-ink-2/80 lg:text-[15px]">
+            {briefing}
+          </p>
+        </div>
+        {layout.hero === 'operator' && (
+          <div className="hidden shrink-0 lg:block">
+            <QuickActions count={3} variant="inline" />
+          </div>
+        )}
       </header>
 
-      <section
-        aria-label={layout.bigActions ? 'Your actions' : 'Quick actions'}
-        className="mb-6 lg:mb-8"
-      >
-        {layout.bigActions && <p className="label mb-3">Your actions</p>}
-        <QuickActions big={layout.bigActions} count={layout.bigActions ? 4 : 5} />
-      </section>
+      {(layout.hero === 'member' || layout.hero === 'guest') && (
+        <section
+          aria-label={layout.bigActions ? 'Your actions' : 'Quick actions'}
+          className="mb-6 lg:mb-8"
+        >
+          <QuickActions big={layout.bigActions} count={4} />
+        </section>
+      )}
 
-      <div className="grid gap-4 lg:gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+      {layout.top.length > 0 && (
+        <div className="mb-5 grid gap-4 lg:mb-6 lg:gap-5">
+          {layout.top.map((id) => (
+            <Widget key={id} id={id} data={data} />
+          ))}
+        </div>
+      )}
+
+      <div className="grid gap-4 lg:gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="grid min-w-0 content-start gap-4 lg:gap-5">
           {layout.main.map((id) => (
             <Widget key={id} id={id} data={data} />

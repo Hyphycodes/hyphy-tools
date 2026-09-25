@@ -14,6 +14,7 @@ import { EmptyState } from '@/components/ui/empty';
 import { Icon } from '@/components/ui/icon';
 import { Page } from '@/components/ui/page';
 import { Panel, PanelHeader } from '@/components/ui/panel';
+import { currentProjectFor } from '@/lib/insights';
 import { openPage } from '@/lib/page';
 import { formatField } from '@/lib/platform/custom-fields';
 import { formatDate, formatNumber } from '@/lib/platform/format';
@@ -44,7 +45,7 @@ export default async function PersonPage({ params }: PageProps<'/[space]/people/
       (project.teamIds.includes(id) || member.projectIds?.includes(project.id)),
   );
   const vehicle = vehicles.find((item) => item.assignedTo === id);
-  const current = working.find((project) => project.status === 'active') ?? working[0];
+  const current = currentProjectFor(id, projects, activity) ?? working[0];
   const seeMoney = can('expenses.view_all') || self;
   const fields = workspace.space.customFields?.people ?? [];
   const role = roles[member.role];
@@ -202,6 +203,7 @@ export default async function PersonPage({ params }: PageProps<'/[space]/people/
                     base={base}
                     people={people}
                     timezone={tz}
+                    compact
                   />
                 ))}
               </div>
@@ -222,6 +224,7 @@ export default async function PersonPage({ params }: PageProps<'/[space]/people/
                       people={people}
                       timezone={tz}
                       context={file.folder}
+                      compact
                     />
                   ))}
                 </div>

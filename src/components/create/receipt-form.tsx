@@ -27,7 +27,7 @@ type Photo = { kind: 'file'; url: string; name: string; pdf: boolean } | { kind:
 
 /**
  * Receipt capture. The photo stays on this device in the preview; reading the fields from it
- * automatically is Gas Receipts' job and arrives with the production build.
+ * automatically arrives with the production build.
  */
 export function ReceiptForm({ request, onDone, formId }: FormProps) {
   const workspace = useWorkspace();
@@ -49,7 +49,13 @@ export function ReceiptForm({ request, onDone, formId }: FormProps) {
   const [vehicleId, setVehicleId] = useState(
     attached?.type === 'vehicle' ? attached.id : category === 'fuel' ? (mine?.id ?? '') : '',
   );
-  const [projectId, setProjectId] = useState(attached?.type === 'project' ? attached.id : '');
+  const [projectId, setProjectId] = useState(
+    attached?.type === 'project'
+      ? attached.id
+      : attached?.type === 'vehicle' || workspace.space.kind === 'personal'
+        ? ''
+        : (workspace.options.currentProjectId ?? ''),
+  );
   const [notes, setNotes] = useState('');
   const vehicle = workspace.options.vehicles.find((item) => item.id === vehicleId);
   const [payment, setPayment] = useState('');

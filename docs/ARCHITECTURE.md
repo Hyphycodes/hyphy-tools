@@ -64,12 +64,19 @@ Nothing about tools, actions or navigation is scattered across pages.
 - **Universal Create** — `lib/platform/actions.ts`. Each action names its tool (for availability,
   color and glyph), a label that can vary by perspective ("Scan receipt" / "Submit receipt"), a
   permission and a target (a sheet form or a tool route). `createActionsFor(space, membership)`
-  filters and orders them per perspective. The + button, the phone's Create sheet, dashboard quick
+  filters and orders them per perspective; `groupActions()` sorts them into Capture, Set up and
+  Make for the menu. The + button, the phone's Create sheet, dashboard quick
   actions, `C` and ⌘K all use it; `useCreate().start(id, { attachTo })` opens any action from
   anywhere (a project's "Add expense" is the receipt action attached to that project).
 - **Navigation** — `lib/platform/navigation.ts` builds nav from module readiness and permissions.
-- **Dashboards** — `lib/platform/dashboard.ts`. Widgets declare when they apply; a role's
-  dashboard is simply the widgets that apply. There are no per-person dashboards.
+- **Dashboards** — `lib/platform/dashboard.ts`. Widgets declare when they apply and where
+  (`top`, `main`, `side`); a role's dashboard is simply the widgets that apply. There are no
+  per-person dashboards. Each perspective answers one question first: Personal “what can I do
+  right now?” (a launcher of tools with what's in them), members “what do I need to do?” (big
+  actions, their project, their submissions), operators “what needs me and how are we doing?”
+  (a pulse, then attention, projects and what happened), guests “what's shared with me?”.
+  `currentProjectFor()` in `lib/insights.ts` decides what someone is working on, so the
+  dashboard, their profile and new receipts and trips always agree.
 
 ## Activity and Inbox
 
@@ -104,12 +111,12 @@ with the same result shape (`SearchItem` in `lib/search.ts`).
 
 ## Functional vs mocked
 
-| Works for real                                                               | Simulated in the preview                             |
-| ---------------------------------------------------------------------------- | ---------------------------------------------------- |
-| PDF merge and page extract, QR PNG/SVG, image resize/convert (all on-device) | Identity (Demo Mode instead of sign-in)              |
-| Every create flow, approvals, inbox actions, turning tools on/off            | Storage: files record metadata only                  |
-| Role-scoped reads everywhere, server-side permission checks on every change  | Receipt auto-reading (sample receipt shows the flow) |
-| Mileage CSV export, link page editing, saving QR codes                       | Link page publishing, email invitations, billing     |
+| Works for real                                                                                                                                  | Simulated in the preview                             |
+| ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| PDF merge and page extract with page thumbnails (pdf-lib + PDF.js), QR PNG/SVG for links, Wi-Fi and email, image resize/convert (all on-device) | Identity (Demo Mode instead of sign-in)              |
+| Every create flow, approvals, inbox actions, turning tools on/off                                                                               | Storage: files record metadata only                  |
+| Role-scoped reads everywhere, server-side permission checks on every change                                                                     | Receipt auto-reading (sample receipt shows the flow) |
+| Mileage CSV export, link page editing, saving QR codes                                                                                          | Link page publishing, email invitations, billing     |
 
 Changes persist per browser in the Demo Mode journal until Reset (see DEMO-MODE.md).
 

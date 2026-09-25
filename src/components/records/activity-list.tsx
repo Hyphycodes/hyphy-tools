@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Avatar } from '@/components/ui/avatar';
 import { Icon, type IconName } from '@/components/ui/icon';
-import { formatRelative } from '@/lib/platform/format';
+import { formatRelative, formatTime } from '@/lib/platform/format';
 import type { ActivityEvent, ActivityVerb, ObjectRef, Person } from '@/lib/platform/types';
 
 const verbs: Record<ActivityVerb, string> = {
@@ -45,7 +45,7 @@ export function refHref(base: string, ref: Pick<ObjectRef, 'type' | 'id'>) {
     case 'file':
       return `${base}/files?file=${ref.id}`;
     case 'receipt':
-      return `${base}/tools/receipts`;
+      return `${base}/tools/receipts?receipt=${ref.id}`;
     case 'mileage':
       return `${base}/tools/mileage`;
     case 'qr':
@@ -148,11 +148,23 @@ export function ActivityList({
                       </Link>
                     </p>
                     <p className="mt-0.5 truncate text-[12.5px] text-muted">
-                      {[event.detail, event.context?.label, formatRelative(event.at, timezone)]
+                      {[
+                        event.detail,
+                        event.context?.label,
+                        grouped ? undefined : formatRelative(event.at, timezone),
+                      ]
                         .filter(Boolean)
                         .join(' · ')}
                     </p>
                   </div>
+                  {grouped && (
+                    <time
+                      dateTime={event.at}
+                      className="mono-num shrink-0 pt-0.5 text-[11px] text-faint"
+                    >
+                      {formatTime(event.at, timezone)}
+                    </time>
+                  )}
                 </li>
               );
             })}

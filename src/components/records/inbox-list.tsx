@@ -85,6 +85,7 @@ export function InboxList({
   canApprove,
   timezone,
   limit,
+  stacked = false,
 }: {
   items: InboxItem[];
   people: Person[];
@@ -93,6 +94,8 @@ export function InboxList({
   canApprove: boolean;
   timezone: string;
   limit?: number;
+  /** For narrow panels: actions sit under the text instead of beside it. */
+  stacked?: boolean;
 }) {
   const byId = new Map(people.map((person) => [person.id, person]));
   const shown = limit ? items.slice(0, limit) : items;
@@ -104,8 +107,10 @@ export function InboxList({
         return (
           <li
             key={item.id}
+            data-inbox-item={item.id}
             className={cn(
-              'flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 sm:flex-nowrap',
+              'flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-3',
+              !stacked && 'sm:flex-nowrap',
               done && 'opacity-55',
             )}
           >
@@ -130,11 +135,16 @@ export function InboxList({
                 </span>
               </p>
             </div>
-            <span className="hidden shrink-0 text-[12px] text-faint sm:block">
+            <span
+              className={cn(
+                'shrink-0 self-start pt-0.5 text-[12px] text-faint',
+                stacked ? 'block' : 'hidden sm:block sm:self-center sm:pt-0',
+              )}
+            >
               {formatRelative(item.at, timezone)}
             </span>
             {!done && (
-              <div className="ml-12 sm:ml-0">
+              <div className={cn('flex basis-full pl-[38px]', !stacked && 'sm:basis-auto sm:pl-0')}>
                 <InboxActions
                   slug={slug}
                   id={item.id}

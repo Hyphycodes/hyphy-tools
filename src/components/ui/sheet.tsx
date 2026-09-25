@@ -33,13 +33,22 @@ export function Sheet({
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal();
+    if (open && !dialog.open) {
+      dialog.showModal();
+      // Land on the form's first field where there's a keyboard (phones would pop theirs open
+      // mid-animation), otherwise on the sheet itself rather than ringing the close button.
+      const field = window.matchMedia('(pointer: fine)').matches
+        ? dialog.querySelector<HTMLElement>('[data-autofocus]')
+        : null;
+      (field ?? dialog).focus({ preventScroll: true });
+    }
     if (!open && dialog.open) dialog.close();
   }, [open]);
 
   return (
     <dialog
       ref={ref}
+      tabIndex={-1}
       aria-labelledby={titleId}
       onClose={onClose}
       onCancel={(event) => {

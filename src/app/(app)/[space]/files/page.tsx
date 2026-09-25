@@ -54,29 +54,50 @@ export default async function FilesPage({ params, searchParams }: PageProps<'/[s
           ? `${base}/people/${ref.id}`
           : `${base}/tools/receipts`;
   const visibleRef = (ref: AttachmentRef) => Boolean(name(ref));
+  const personal = workspace.space.kind === 'personal';
 
   const expiring = files.filter((file) => file.expiresAt && daysUntil(file.expiresAt) <= 30);
-  const folders = [...new Set(files.map((file) => file.folder))].sort();
+  const on = (file: FileRecord, type: AttachmentRef['type']) =>
+    file.attachedTo.some((ref) => ref.type === type && visibleRef(ref));
+  // Views follow what a file belongs to, not where it sits in a folder tree.
+  const views: { id: string; label: string; match: (file: FileRecord) => boolean }[] = [
+    { id: 'expiring', label: 'Expiring soon', match: (file) => expiring.includes(file) },
+    {
+      id: 'projects',
+      label: workspace.space.labels?.projects?.plural ?? 'Projects',
+      match: (file) => on(file, 'project'),
+    },
+    { id: 'vehicles', label: 'Vehicles', match: (file) => on(file, 'vehicle') },
+    { id: 'people', label: 'People', match: (file) => on(file, 'person') },
+    { id: 'photos', label: 'Photos', match: (file) => file.kind === 'image' },
+    { id: 'made', label: 'Made with tools', match: (file) => Boolean(file.source) },
+    {
+      id: 'loose',
+      label: personal ? 'Documents' : 'Company',
+      match: (file) => !file.attachedTo.some(visibleRef) && !file.source && file.kind !== 'image',
+    },
+  ];
+  const counted = views
+    .map((item) => ({ ...item, count: files.filter(item.match).length }))
+    .filter((item) => item.count > 0);
+  const current = counted.find((item) => item.id === view);
   const shown = files
     .filter((file) => !folder || file.folder === folder)
-    .filter((file) =>
-      view === 'expiring'
-        ? expiring.includes(file)
-        : view === 'photos'
-          ? file.kind === 'image'
-          : view === 'loose'
-            ? file.attachedTo.length === 0
-            : true,
-    )
+    .filter((file) => !current || current.match(file))
     .filter(
       (file) =>
         !q ||
         file.name.toLowerCase().includes(q) ||
+        file.folder.toLowerCase().includes(q) ||
         file.attachedTo.some((ref) => name(ref)?.toLowerCase().includes(q)),
     );
+  const linksFor = (file: FileRecord) =>
+    file.attachedTo
+      .filter(visibleRef)
+      .filter((ref) => ref.type !== 'receipt')
+      .map((ref) => ({ type: ref.type, label: name(ref)! }));
   const selected =
     typeof query.file === 'string' ? files.find((file) => file.id === query.file) : undefined;
-  const personal = workspace.space.kind === 'personal';
 
   const access = (file: FileRecord) => {
     const on = file.attachedTo.filter(visibleRef).map((ref) => name(ref));
@@ -133,33 +154,18 @@ export default async function FilesPage({ params, searchParams }: PageProps<'/[s
 
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center">
         <Chips
-          active={folder ? `folder:${folder}` : view}
+          active={folder ? '' : (current?.id ?? 'all')}
           items={[
             { id: 'all', label: 'All files', href: `${base}/files`, count: files.length },
-            ...(expiring.length
-              ? [
-                  {
-                    id: 'expiring',
-                    label: 'Expiring soon',
-                    href: link({ view: 'expiring', folder: undefined }),
-                    count: expiring.length,
-                  },
-                ]
-              : []),
-            ...(files.some((file) => file.kind === 'image')
-              ? [
-                  {
-                    id: 'photos',
-                    label: 'Photos',
-                    href: link({ view: 'photos', folder: undefined }),
-                  },
-                ]
-              : []),
-            ...folders.slice(0, 7).map((item) => ({
-              id: `folder:${item}`,
-              label: item,
-              href: link({ folder: item, view: undefined }),
+            ...counted.map((item) => ({
+              id: item.id,
+              label: item.label,
+              href: link({ view: item.id, folder: undefined }),
+              count: item.count,
             })),
+            ...(folder
+              ? [{ id: '', label: `Folder: ${folder}`, href: link({ folder: undefined }) }]
+              : []),
           ]}
         />
         <form action={`${base}/files`} className="relative lg:ml-auto lg:w-64" role="search">
@@ -316,7 +322,8 @@ export default async function FilesPage({ params, searchParams }: PageProps<'/[s
                     base={base}
                     people={people}
                     timezone={tz}
-                    context={file.attachedTo.filter(visibleRef).map(name).join(', ') || file.folder}
+                    links={linksFor(file)}
+                    context={file.folder}
                   />
                 </li>
               ))}

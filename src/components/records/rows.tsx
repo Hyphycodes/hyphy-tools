@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { ReactNode } from 'react';
 import { Avatar, AvatarStack } from '@/components/ui/avatar';
 import { cn } from '@/components/ui/cn';
 import { Icon } from '@/components/ui/icon';
@@ -13,6 +14,7 @@ import {
   formatRelative,
 } from '@/lib/platform/format';
 import type {
+  AttachmentRef,
   FileRecord,
   MileageEntry,
   Person,
@@ -73,43 +75,84 @@ export function FileThumb({
   );
 }
 
+const refIcon = {
+  project: 'projects',
+  vehicle: 'truck',
+  person: 'user',
+  receipt: 'receipt',
+} as const;
+
+const sourceName: Partial<Record<string, string>> = { pdf: 'PDF', images: 'Image Resize' };
+
+/**
+ * A file, and what it belongs to. `links` are the records it's attached to (already resolved to
+ * names the viewer may see); without them, `context` is shown as plain text.
+ */
 export function FileRow({
   file,
   base,
   people,
   timezone,
   context,
+  links,
+  compact = false,
 }: {
   file: FileRecord;
   base: string;
   people: Map<string, Person>;
   timezone: string;
   context?: string;
+  links?: { type: AttachmentRef['type']; label: string }[];
+  /** For narrow panels: no size column. */
+  compact?: boolean;
 }) {
   const by = people.get(file.createdBy);
   const expires = file.expiresAt ? daysUntil(file.expiresAt) : null;
+  const first = links?.[0];
+  const made = file.source ? sourceName[file.source] : undefined;
   return (
     <Link
       href={`${base}/files?file=${file.id}`}
+      scroll={false}
       className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-subtle"
     >
       <FileThumb file={file} />
       <div className="min-w-0 flex-1">
         <p className="truncate text-[14px] font-medium text-ink">{file.name}</p>
-        <p className="truncate text-[12.5px] text-muted">
-          {[context, by?.firstName, formatRelative(file.createdAt, timezone)]
-            .filter(Boolean)
-            .join(' · ')}
+        <p className="flex min-w-0 items-center gap-1 text-[12.5px] text-muted">
+          {first ? (
+            <span className="flex min-w-0 items-center gap-1 text-ink-2">
+              <Icon name={refIcon[first.type]} size={12.5} className="shrink-0 text-muted" />
+              <span className="truncate">{first.label}</span>
+              {links!.length > 1 && (
+                <span className="shrink-0 text-faint">+{links!.length - 1}</span>
+              )}
+            </span>
+          ) : made ? (
+            <span className="flex shrink-0 items-center gap-1 text-ink-2">
+              <Icon name={file.source === 'pdf' ? 'pdf' : 'image'} size={12.5} />
+              Made with {made}
+            </span>
+          ) : context ? (
+            <span className="max-w-[60%] shrink-0 truncate">{context}</span>
+          ) : null}
+          <span className="min-w-0 truncate text-muted">
+            {(first || made || context) && '· '}
+            {[by?.firstName, formatRelative(file.createdAt, timezone)].filter(Boolean).join(' · ')}
+          </span>
         </p>
       </div>
       {expires !== null && expires <= 30 && (
-        <span className="hidden shrink-0 items-center gap-1 rounded-full bg-caution-soft px-2 py-0.5 text-[11.5px] font-medium text-caution sm:flex">
-          <Icon name="clock" size={12} /> {expires <= 0 ? 'Expired' : `${expires}d left`}
+        <span className="flex shrink-0 items-center gap-1 rounded-full bg-caution-soft px-2 py-0.5 text-[11.5px] font-medium text-caution">
+          <Icon name="clock" size={12} /> {expires <= 0 ? 'Expired' : `${expires}d`}
+          <span className="hidden sm:inline">{expires > 0 && ' left'}</span>
         </span>
       )}
-      <span className="mono-num hidden shrink-0 text-[11.5px] text-faint sm:block">
-        {formatBytes(file.size)}
-      </span>
+      {!compact && (
+        <span className="mono-num hidden shrink-0 text-[11.5px] text-faint sm:block">
+          {formatBytes(file.size)}
+        </span>
+      )}
     </Link>
   );
 }
@@ -122,17 +165,58 @@ export function ProjectRow({
   people,
   timezone,
   spent,
+  compact,
 }: {
   project: Project;
   base: string;
   people: Map<string, Person>;
   timezone: string;
   spent?: number;
+  /** For narrow side panels: name and progress stacked, no team column. */
+  compact?: boolean;
 }) {
   const team = project.teamIds.map((id) => people.get(id)).filter(Boolean) as Person[];
   const due = project.dueDate ?? project.startDate;
   const days = daysUntil(due);
   const upcoming = !project.dueDate;
+  const when =
+    project.status === 'done'
+      ? formatDate(due, timezone)
+      : upcoming
+        ? days <= 0
+          ? 'Today'
+          : `In ${days}d`
+        : days < 0
+          ? `${-days}d late`
+          : `Due in ${days}d`;
+  if (compact)
+    return (
+      <Link
+        href={`${base}/projects/${project.id}`}
+        className="group flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-subtle"
+      >
+        <span
+          className="h-9 w-1 shrink-0 rounded-full"
+          style={{ background: project.color }}
+          aria-hidden="true"
+        />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[14px] font-medium text-ink">{project.name}</p>
+          <div className="mt-1.5 flex items-center gap-2">
+            <Progress
+              value={project.progress}
+              color={project.color}
+              className="flex-1"
+              label={`${project.name} progress`}
+            />
+            <span className="mono-num w-8 text-right text-[11px] text-muted">
+              {project.progress}%
+            </span>
+          </div>
+        </div>
+        <span className="shrink-0 text-[12px] text-muted">{when}</span>
+      </Link>
+    );
   return (
     <Link
       href={`${base}/projects/${project.id}`}
@@ -176,15 +260,7 @@ export function ProjectRow({
             !upcoming && days < 0 && project.status !== 'done' ? 'text-critical' : 'text-muted',
           )}
         >
-          {project.status === 'done'
-            ? formatDate(due, timezone)
-            : upcoming
-              ? days <= 0
-                ? 'Today'
-                : `In ${days}d`
-              : days < 0
-                ? `${-days}d late`
-                : `Due in ${days}d`}
+          {when}
         </span>
       </div>
     </Link>
@@ -266,6 +342,28 @@ const categoryIcon = {
   other: 'receipt',
 } as const;
 
+/** A row with optional inline decisions: under the text on phones, beside it on wider screens. */
+function WithActions({ row, actions }: { row: ReactNode; actions?: ReactNode }) {
+  if (!actions) return row;
+  return (
+    <div className="flex flex-wrap items-center sm:flex-nowrap sm:pr-4">
+      {row}
+      <div className="basis-full pb-3 pl-[68px] sm:basis-auto sm:pb-0 sm:pl-0">{actions}</div>
+    </div>
+  );
+}
+
+function RowShell({ href, children }: { href?: string; children: ReactNode }) {
+  const className = 'flex min-w-0 flex-1 items-center gap-3 px-4 py-2.5';
+  return href ? (
+    <Link href={href} scroll={false} className={cn(className, 'transition-colors hover:bg-subtle')}>
+      {children}
+    </Link>
+  ) : (
+    <div className={className}>{children}</div>
+  );
+}
+
 export function ReceiptRow({
   receipt,
   people,
@@ -273,6 +371,8 @@ export function ReceiptRow({
   kind,
   showPerson = true,
   context,
+  href,
+  actions,
 }: {
   receipt: Receipt;
   people: Map<string, Person>;
@@ -280,33 +380,41 @@ export function ReceiptRow({
   kind: SpaceKind;
   showPerson?: boolean;
   context?: string;
+  /** Opens the receipt's details. */
+  href?: string;
+  actions?: ReactNode;
 }) {
   const by = people.get(receipt.createdBy);
   return (
-    <div className="flex items-center gap-3 px-4 py-2.5">
-      <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-tool-receipt/70 text-ink shadow-[inset_0_0_0_1px_rgb(0_0_0/.05)]">
-        <Icon name={categoryIcon[receipt.category]} size={17} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-[14px] font-medium text-ink">{receipt.vendor}</p>
-        <p className="truncate text-[12.5px] text-muted">
-          {[
-            showPerson && kind === 'business' ? by?.firstName : undefined,
-            context,
-            receipt.gallons ? `${receipt.gallons} gal` : undefined,
-            formatDate(receipt.date, timezone),
-          ]
-            .filter(Boolean)
-            .join(' · ')}
-        </p>
-      </div>
-      <div className="flex shrink-0 flex-col items-end gap-1">
-        <span className="text-[14px] font-medium text-ink">
-          {receipt.total ? formatCurrency(receipt.total) : '—'}
-        </span>
-        <ApprovalBadge status={receipt.status} kind={kind} />
-      </div>
-    </div>
+    <WithActions
+      actions={actions}
+      row={
+        <RowShell href={href}>
+          <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-tool-receipt/70 text-ink shadow-[inset_0_0_0_1px_rgb(0_0_0/.05)]">
+            <Icon name={categoryIcon[receipt.category]} size={17} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[14px] font-medium text-ink">{receipt.vendor}</p>
+            <p className="truncate text-[12.5px] text-muted">
+              {[
+                showPerson && kind === 'business' ? by?.firstName : undefined,
+                context,
+                receipt.gallons ? `${receipt.gallons} gal` : undefined,
+                formatDate(receipt.date, timezone),
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            <span className="num text-[14px] font-medium text-ink">
+              {receipt.total ? formatCurrency(receipt.total) : '—'}
+            </span>
+            {!actions && <ApprovalBadge status={receipt.status} kind={kind} />}
+          </div>
+        </RowShell>
+      }
+    />
   );
 }
 
@@ -316,40 +424,49 @@ export function MileageRow({
   timezone,
   kind,
   showPerson = true,
+  actions,
 }: {
   entry: MileageEntry;
   people: Map<string, Person>;
   timezone: string;
   kind: SpaceKind;
   showPerson?: boolean;
+  actions?: ReactNode;
 }) {
   const by = people.get(entry.createdBy);
   return (
-    <div className="flex items-center gap-3 px-4 py-2.5">
-      <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-tool-miles/60 text-ink shadow-[inset_0_0_0_1px_rgb(0_0_0/.05)]">
-        <Icon name="route" size={17} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-[14px] font-medium text-ink">
-          {entry.from} <span className="text-faint">→</span> {entry.to}
-        </p>
-        <p className="truncate text-[12.5px] text-muted">
-          {[
-            showPerson && kind === 'business' ? by?.firstName : undefined,
-            entry.purpose,
-            formatDate(entry.date, timezone),
-          ]
-            .filter(Boolean)
-            .join(' · ')}
-        </p>
-      </div>
-      <div className="flex shrink-0 flex-col items-end gap-1">
-        <span className="text-[14px] font-medium text-ink">
-          {formatMiles(entry.miles)}
-          {entry.roundTrip && <span className="ml-1 text-[11px] font-normal text-muted">RT</span>}
-        </span>
-        <ApprovalBadge status={entry.status} kind={kind} />
-      </div>
-    </div>
+    <WithActions
+      actions={actions}
+      row={
+        <RowShell>
+          <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-tool-miles/60 text-ink shadow-[inset_0_0_0_1px_rgb(0_0_0/.05)]">
+            <Icon name="route" size={17} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[14px] font-medium text-ink">
+              {entry.from} <span className="text-faint">→</span> {entry.to}
+            </p>
+            <p className="truncate text-[12.5px] text-muted">
+              {[
+                showPerson && kind === 'business' ? by?.firstName : undefined,
+                entry.purpose,
+                formatDate(entry.date, timezone),
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            <span className="num text-[14px] font-medium text-ink">
+              {formatMiles(entry.miles)}
+              {entry.roundTrip && (
+                <span className="ml-1 text-[11px] font-normal text-muted">RT</span>
+              )}
+            </span>
+            {!actions && <ApprovalBadge status={entry.status} kind={kind} />}
+          </div>
+        </RowShell>
+      }
+    />
   );
 }

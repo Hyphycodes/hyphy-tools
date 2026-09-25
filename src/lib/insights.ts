@@ -1,5 +1,12 @@
 import { startOfMonth } from '@/lib/platform/format';
-import type { FileRecord, MileageEntry, Receipt, ReceiptCategory } from '@/lib/platform/types';
+import type {
+  ActivityEvent,
+  FileRecord,
+  MileageEntry,
+  Project,
+  Receipt,
+  ReceiptCategory,
+} from '@/lib/platform/types';
 
 /**
  * Small roll-ups computed from what the repository already returned (so they respect the same
@@ -20,8 +27,12 @@ export function monthSummary(
       inMonth(receipt.date) && (receipt.status === 'approved' || receipt.status === 'submitted'),
   );
   const byCategory = new Map<ReceiptCategory, number>();
-  for (const receipt of counted)
+  const byProject = new Map<string, number>();
+  for (const receipt of counted) {
     byCategory.set(receipt.category, (byCategory.get(receipt.category) ?? 0) + receipt.total);
+    if (receipt.projectId)
+      byProject.set(receipt.projectId, (byProject.get(receipt.projectId) ?? 0) + receipt.total);
+  }
   const trips = mileage.filter((entry) => inMonth(entry.date) && entry.status !== 'rejected');
   return {
     spend: counted.reduce((sum, receipt) => sum + receipt.total, 0),
@@ -35,6 +46,9 @@ export function monthSummary(
     files: files.filter((file) => inMonth(file.createdAt)).length,
     categories: [...byCategory.entries()]
       .map(([category, total]) => ({ category, total }))
+      .sort((a, b) => b.total - a.total),
+    projects: [...byProject.entries()]
+      .map(([projectId, total]) => ({ projectId, total }))
       .sort((a, b) => b.total - a.total),
   };
 }
@@ -57,3 +71,32 @@ export const categoryLabel: Record<ReceiptCategory, string> = {
   equipment: 'Equipment',
   other: 'Other',
 };
+
+/**
+ * The project someone is working on right now: of the open projects they're on, the one their
+ * latest activity was about, then the one they lead, then the soonest due. Dashboards, briefings
+ * and profiles all use this so they never disagree.
+ */
+export function currentProjectFor(
+  personId: string,
+  projects: Project[],
+  activity: ActivityEvent[],
+): Project | undefined {
+  const mine = projects.filter(
+    (project) => project.status === 'active' && project.teamIds.includes(personId),
+  );
+  if (!mine.length) return undefined;
+  const latest = [...activity]
+    .sort((a, b) => b.at.localeCompare(a.at))
+    .find(
+      (event) =>
+        event.actorId === personId &&
+        event.context?.type === 'project' &&
+        mine.some((project) => project.id === event.context?.id),
+    );
+  return (
+    mine.find((project) => project.id === latest?.context?.id) ??
+    mine.find((project) => project.leadId === personId) ??
+    [...mine].sort((a, b) => (a.dueDate ?? '9').localeCompare(b.dueDate ?? '9'))[0]
+  );
+}

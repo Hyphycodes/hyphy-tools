@@ -17,8 +17,9 @@ npm run dev          # http://localhost:3000
 ```
 
 No environment variables, database or accounts are needed. `/` opens the current person's main
-Space. Use the black **Demo mode** strip at the top to preview as someone else, and **Reset** to
-undo your changes.
+Space. The small **Demo** card at the bottom of the sidebar (a thin line above the top bar on
+phones, or <kbd>Shift</kbd>+<kbd>D</kbd> anywhere) previews as someone else; **Reset** undoes your
+changes.
 
 ```sh
 npm run verify       # lint + route types + TypeScript + production build
@@ -33,7 +34,7 @@ In a sandbox with a preinstalled Chromium: `PLAYWRIGHT_CHROMIUM_PATH=/path/to/ch
 | -------------- | ------------------ | --------------- | ---------------------------------------------------- |
 | Jerry          | Personal           | Personal        | Tools, receipts, miles, saved work                   |
 | Jerry          | Hyphy LLC          | Owner           | A small studio: projects, approvals, plan            |
-| Jerry          | Salt & Ember / ABC | Manager / Guest | One person, four roles (use the Space switcher)      |
+| Jerry          | Salt & Ember / ABC | Manager / Guest | One person, four roles                               |
 | Sarah Chen     | Hyphy LLC          | Manager         | Operations without settings or billing               |
 | Dana Whitfield | ABC Construction   | Owner           | Projects, vehicles, people, approvals, plan          |
 | Luis Ortega    | ABC Construction   | Admin           | People and settings, no plan                         |
@@ -84,7 +85,8 @@ tests/                     unit (rules) and end-to-end (personas, access, flows,
 | `/inbox`                                 | Needs attention: approvals, documents, mentions  |
 | `/tools`                                 | Tools library                                    |
 | `/tools/receipts` `/tools/mileage`       | Trackers with approvals and CSV export           |
-| `/tools/pdf` `/tools/qr` `/tools/images` | Utilities (ported from Hyphy Studio)             |
+| `/tools/receipts?receipt=…`              | One receipt: details, status, approve or return  |
+| `/tools/pdf` `/tools/qr` `/tools/images` | Utilities (ported from Hyphy Studio, extended)   |
 | `/tools/links`                           | Link page editor with live phone preview         |
 | `/projects` `/projects/[id]`             | Projects (a restaurant's are Events), with tabs  |
 | `/vehicles` `/vehicles/[id]`             | Vehicles: fuel, trips, papers, custom fields     |

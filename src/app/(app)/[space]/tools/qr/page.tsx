@@ -26,17 +26,24 @@ export default async function QrPage({ params, searchParams }: PageProps<'/[spac
         tool={tool}
         note={
           <span>
-            Static codes: the link is printed into the code, so print it once and it works for good.
+            The link is printed into the code itself, so print it once and it works for good.
           </span>
         }
       />
       <QrTool
         key={selected?.id ?? content ?? 'new'}
         slug={workspace.space.slug}
+        spaceName={workspace.space.kind === 'personal' ? 'Personal' : workspace.space.name}
         canSave={can('tools.use')}
         initial={
           selected
-            ? { content: selected.content, fg: selected.fg, bg: selected.bg, label: selected.label }
+            ? {
+                content: selected.content,
+                fg: selected.fg,
+                bg: selected.bg,
+                label: selected.label,
+                placement: selected.placement,
+              }
             : {
                 content:
                   content ??

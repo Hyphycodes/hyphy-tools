@@ -217,6 +217,7 @@ export default async function VehiclePage({ params }: PageProps<'/[space]/vehicl
                     people={people}
                     timezone={tz}
                     context={file.folder}
+                    compact
                   />
                 ))}
               </div>

@@ -1,17 +1,30 @@
+import Link from 'next/link';
+import type { ReactNode } from 'react';
 import { CreateButton } from '@/components/create/create-button';
 import { ReviewButtons } from '@/components/records/inbox-actions';
+import { ReceiptPaper } from '@/components/records/receipt-paper';
 import { ReceiptRow } from '@/components/records/rows';
+import { ApprovalBadge } from '@/components/records/status';
 import { ToolHeader } from '@/components/tools/tool-header';
+import { Avatar } from '@/components/ui/avatar';
+import { cn } from '@/components/ui/cn';
 import { EmptyState } from '@/components/ui/empty';
 import { Icon } from '@/components/ui/icon';
+import { ToolGlyph } from '@/components/ui/marks';
 import { Page } from '@/components/ui/page';
-import { Panel, PanelHeader } from '@/components/ui/panel';
+import { Panel } from '@/components/ui/panel';
 import { Chips } from '@/components/ui/tabs';
+import { UrlSheet } from '@/components/ui/url-sheet';
 import { categoryLabel, monthSummary } from '@/lib/insights';
 import { openPage } from '@/lib/page';
-import { formatCurrency } from '@/lib/platform/format';
+import {
+  formatCurrency,
+  formatDateLong,
+  formatNumber,
+  formatRelative,
+} from '@/lib/platform/format';
 import { getTool } from '@/lib/platform/tools';
-import type { ApprovalStatus } from '@/lib/platform/types';
+import type { ApprovalStatus, Person, Receipt } from '@/lib/platform/types';
 
 export const metadata = { title: 'Receipts' };
 
@@ -28,7 +41,8 @@ export default async function ReceiptsPage({
   searchParams,
 }: PageProps<'/[space]/tools/receipts'>) {
   const { workspace, repo, base, people, tz, can } = await openPage(params, 'receipts');
-  const view = String((await searchParams).view ?? 'all');
+  const query = await searchParams;
+  const view = String(query.view ?? 'all');
   const [receipts, projects, vehicles] = await Promise.all([
     repo.receipts(),
     repo.projects(),
@@ -38,14 +52,68 @@ export default async function ReceiptsPage({
   const approver = business && can('expenses.approve');
   const month = monthSummary({ receipts, mileage: [], files: [] }, tz);
   const pending = receipts.filter((receipt) => receipt.status === 'submitted');
-  const shown = receipts.filter((receipt) => view === 'all' || receipt.status === view);
-  const context = (projectId?: string, vehicleId?: string) =>
+  // Waiting items lead the list, so an approver works top-down without a second list.
+  const shown = receipts
+    .filter((receipt) => view === 'all' || receipt.status === view)
+    .sort(
+      (a, b) =>
+        Number(approver && b.status === 'submitted') -
+          Number(approver && a.status === 'submitted') || b.date.localeCompare(a.date),
+    );
+  const vehicleName = (id?: string) => vehicles.find((vehicle) => vehicle.id === id)?.name;
+  const projectName = (id?: string) => projects.find((project) => project.id === id)?.name;
+  const context = (receipt: Receipt) =>
+    [vehicleName(receipt.vehicleId), projectName(receipt.projectId)].filter(Boolean).join(' · ') ||
+    (business ? 'Not assigned' : undefined);
+  const href = (params: Record<string, string | undefined>) => {
+    const next = new URLSearchParams();
+    for (const [key, value] of Object.entries({
+      view: view === 'all' ? undefined : view,
+      ...params,
+    }))
+      if (value) next.set(key, value);
+    const text = next.toString();
+    return `${base}/tools/receipts${text ? `?${text}` : ''}`;
+  };
+
+  const selected =
+    typeof query.receipt === 'string' ? await repo.receipt(query.receipt) : undefined;
+  const history = selected
+    ? await repo.activity({ about: { type: 'receipt', id: selected.id } })
+    : [];
+  const gallons = receipts
+    .filter((receipt) => receipt.gallons && receipt.status !== 'rejected')
+    .reduce((sum, receipt) => sum + (receipt.gallons ?? 0), 0);
+
+  const stats: [string, string, string, string?][] = [
+    ['This month', formatCurrency(month.spend, { cents: false }), `${month.receipts} receipts`],
+    business
+      ? [
+          approver ? 'Waiting on you' : 'Waiting for approval',
+          String(pending.length),
+          pending.length
+            ? formatCurrency(pending.reduce((sum, receipt) => sum + receipt.total, 0))
+            : 'All caught up',
+          pending.length ? 'signal' : undefined,
+        ]
+      : [
+          'Needs details',
+          String(receipts.filter((receipt) => receipt.status === 'draft').length),
+          'drafts',
+        ],
     [
-      vehicles.find((vehicle) => vehicle.id === vehicleId)?.name,
-      projects.find((project) => project.id === projectId)?.name,
-    ]
-      .filter(Boolean)
-      .join(' · ') || undefined;
+      'Biggest category',
+      month.categories[0] ? categoryLabel[month.categories[0].category] : '—',
+      month.categories[0] ? formatCurrency(month.categories[0].total, { cents: false }) : '',
+    ],
+    [
+      'Fuel',
+      formatCurrency(month.categories.find((item) => item.category === 'fuel')?.total ?? 0, {
+        cents: false,
+      }),
+      `${formatNumber(gallons, 1)} gal logged`,
+    ],
+  ];
 
   return (
     <Page wide>
@@ -59,40 +127,18 @@ export default async function ReceiptsPage({
       />
 
       <div className="mb-5 grid grid-cols-2 gap-px overflow-hidden rounded-[16px] bg-line shadow-card sm:grid-cols-4">
-        {[
-          [
-            'This month',
-            formatCurrency(month.spend, { cents: false }),
-            `${month.receipts} receipts`,
-          ],
-          [
-            business ? 'Pending' : 'Needs details',
-            String(
-              business
-                ? pending.length
-                : receipts.filter((receipt) => receipt.status === 'draft').length,
-            ),
-            business ? (approver ? 'waiting on you' : 'waiting on a manager') : 'drafts',
-          ],
-          [
-            'Biggest category',
-            month.categories[0] ? categoryLabel[month.categories[0].category] : '—',
-            month.categories[0] ? formatCurrency(month.categories[0].total, { cents: false }) : '',
-          ],
-          [
-            'Fuel',
-            formatCurrency(month.categories.find((item) => item.category === 'fuel')?.total ?? 0, {
-              cents: false,
-            }),
-            `${receipts
-              .filter((receipt) => receipt.gallons)
-              .reduce((sum, receipt) => sum + (receipt.gallons ?? 0), 0)
-              .toFixed(1)} gal logged`,
-          ],
-        ].map(([label, value, note]) => (
-          <div key={label} className="bg-surface px-4 py-3.5">
-            <p className="text-[12.5px] text-muted">{label}</p>
-            <p className="mt-1 text-[22px] leading-none font-semibold tracking-[-0.02em]">
+        {stats.map(([label, value, note, tone], index) => (
+          <div key={label} className={cn('bg-surface px-4 py-3.5', index > 1 && 'hidden sm:block')}>
+            <p className="flex items-center gap-1.5 text-[12.5px] text-muted">
+              {tone && <span className="size-1.5 rounded-full bg-signal" aria-hidden="true" />}
+              {label}
+            </p>
+            <p
+              className={cn(
+                'mt-1 text-[22px] leading-none font-semibold tracking-[-0.02em]',
+                tone && 'text-signal-ink',
+              )}
+            >
               {value}
             </p>
             <p className="mt-1 text-[12px] text-faint">{note}</p>
@@ -100,128 +146,325 @@ export default async function ReceiptsPage({
         ))}
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="grid min-w-0 content-start gap-5">
-          {approver && pending.length > 0 && (
-            <Panel>
-              <PanelHeader title="Waiting on you" count={pending.length} />
-              <ul className="row-divide pb-1">
-                {pending.map((receipt) => (
-                  <li
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="min-w-0">
+          <div className="mb-3">
+            <Chips
+              active={view}
+              items={views
+                .filter(
+                  (item) =>
+                    item.id === 'all' || receipts.some((receipt) => receipt.status === item.id),
+                )
+                .filter((item) => business || item.id === 'all' || item.id === 'draft')
+                .map((item) => ({
+                  id: item.id,
+                  label: business ? item.label : item.id === 'draft' ? 'Needs details' : item.label,
+                  href: href({ view: item.id === 'all' ? undefined : item.id }),
+                  count:
+                    item.id === 'all'
+                      ? receipts.length
+                      : receipts.filter((receipt) => receipt.status === item.id).length,
+                }))}
+            />
+          </div>
+          <Panel>
+            {shown.length ? (
+              <div className="row-divide py-1">
+                {shown.map((receipt) => (
+                  <ReceiptRow
                     key={receipt.id}
-                    className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:pr-4"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <ReceiptRow
-                        receipt={receipt}
-                        people={people}
-                        timezone={tz}
-                        kind="business"
-                        context={context(receipt.projectId, receipt.vehicleId) ?? 'Not assigned'}
-                      />
-                    </div>
-                    <div className="ml-[68px] pb-3 sm:ml-0 sm:pb-0">
-                      <ReviewButtons
-                        slug={workspace.space.slug}
-                        table="receipts"
-                        id={receipt.id}
-                        label={`${receipt.vendor} · ${formatCurrency(receipt.total)}`}
-                      />
-                    </div>
-                  </li>
+                    receipt={receipt}
+                    people={people}
+                    timezone={tz}
+                    kind={workspace.space.kind}
+                    context={context(receipt)}
+                    href={href({ receipt: receipt.id })}
+                    actions={
+                      approver && receipt.status === 'submitted' ? (
+                        <ReviewButtons
+                          slug={workspace.space.slug}
+                          table="receipts"
+                          id={receipt.id}
+                          label={`${receipt.vendor} · ${formatCurrency(receipt.total)}`}
+                        />
+                      ) : undefined
+                    }
+                  />
                 ))}
-              </ul>
-            </Panel>
-          )}
-          <div className="min-w-0">
-            <div className="mb-3">
-              <Chips
-                active={view}
-                items={views
-                  .filter(
-                    (item) =>
-                      item.id === 'all' || receipts.some((receipt) => receipt.status === item.id),
-                  )
-                  .filter((item) => business || item.id === 'all' || item.id === 'draft')
-                  .map((item) => ({
-                    id: item.id,
-                    label: business
-                      ? item.label
-                      : item.id === 'draft'
-                        ? 'Needs details'
-                        : item.label,
-                    href:
-                      item.id === 'all'
-                        ? `${base}/tools/receipts`
-                        : `${base}/tools/receipts?view=${item.id}`,
-                    count:
-                      item.id === 'all'
-                        ? receipts.length
-                        : receipts.filter((receipt) => receipt.status === item.id).length,
-                  }))}
-              />
-            </div>
-            <Panel>
-              {shown.length ? (
-                <div className="row-divide py-1">
-                  {shown.map((receipt) => (
-                    <ReceiptRow
-                      key={receipt.id}
-                      receipt={receipt}
-                      people={people}
-                      timezone={tz}
-                      kind={workspace.space.kind}
-                      context={context(receipt.projectId, receipt.vehicleId)}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <EmptyState
-                  icon="receipt"
-                  title="No receipts yet"
-                  action={
+              </div>
+            ) : (
+              <EmptyState
+                icon="receipt"
+                title={view === 'all' ? 'No receipts yet' : 'Nothing here'}
+                action={
+                  view === 'all' ? (
                     <CreateButton request="receipt" variant="primary">
                       Add your first
                     </CreateButton>
-                  }
-                >
-                  Snap a receipt and it’s filed here
-                  {business ? ', with the vehicle and project it belongs to' : ''}.
-                </EmptyState>
-              )}
-            </Panel>
-          </div>
-        </div>
-        <aside className="grid content-start gap-4">
-          <Panel className="p-4">
-            <p className="flex items-center gap-2 text-[14px] font-semibold">
-              <Icon name="sparkles" size={15} className="text-muted" /> Where Receipts comes from
-            </p>
-            <p className="mt-2 text-[13px] leading-relaxed text-muted">
-              Receipts grew out of Gas Receipts, first built for one field team to turn fuel receipt
-              photos into spreadsheet rows. Reading the date, station, total and odometer
-              automatically is the next piece to move into Hyphy Tools.
-            </p>
+                  ) : undefined
+                }
+              >
+                {view === 'all'
+                  ? `Snap a receipt and it’s filed here${business ? ', with the vehicle and project it belongs to' : ''}.`
+                  : 'No receipts with this status.'}
+              </EmptyState>
+            )}
           </Panel>
-          {business && (
+        </div>
+        <aside className="hidden content-start gap-4 xl:grid">
+          {business ? (
             <Panel className="p-4">
               <p className="flex items-center gap-2 text-[14px] font-semibold">
                 <Icon name="shield" size={15} className="text-muted" /> How approval works
               </p>
-              <ol className="mt-2 grid gap-1.5 text-[13px] text-muted">
-                <li>1 · Members submit; it lands in managers’ Inbox.</li>
-                <li>2 · A manager approves or returns it with a note.</li>
-                <li>3 · Approved receipts count toward projects and vehicles.</li>
+              <ol className="mt-3 grid gap-2.5 text-[13px] text-ink-2">
+                {[
+                  ['Submit', 'A photo, the total and where it goes.'],
+                  ['Review', 'A manager approves it or sends it back with a note.'],
+                  ['Counted', 'Approved receipts add up on projects and vehicles.'],
+                ].map(([title, line], index) => (
+                  <li key={title} className="flex gap-2.5">
+                    <span className="mono-num grid size-5 shrink-0 place-items-center rounded-full bg-tool-receipt text-[10px] font-semibold text-ink">
+                      {index + 1}
+                    </span>
+                    <span>
+                      <span className="font-medium text-ink">{title}.</span>{' '}
+                      <span className="text-muted">{line}</span>
+                    </span>
+                  </li>
+                ))}
               </ol>
-              <p className="mt-3 text-[12.5px] text-faint">
+              <p className="mt-3 border-t border-line pt-3 text-[12.5px] text-faint">
                 {can('expenses.view_all')
-                  ? 'You see everyone’s receipts.'
-                  : 'You see only your own receipts.'}
+                  ? 'You see everyone’s receipts here.'
+                  : 'You see your own receipts here.'}
+              </p>
+            </Panel>
+          ) : (
+            <Panel className="p-4">
+              <p className="flex items-center gap-2 text-[14px] font-semibold">
+                <Icon name="lock" size={15} className="text-muted" /> Just for you
+              </p>
+              <p className="mt-2 text-[13px] leading-relaxed text-muted">
+                Receipts in your Personal Space are private. Export them at tax time, or keep a
+                running record of what the car and the side business cost.
               </p>
             </Panel>
           )}
         </aside>
       </div>
+
+      {selected && (
+        <UrlSheet
+          key={selected.id}
+          closeHref={href({ receipt: undefined })}
+          title={selected.vendor}
+          description={`${formatDateLong(selected.date, tz)} · ${categoryLabel[selected.category]}`}
+          leading={<ToolGlyph tool={getTool('receipts')!} size="md" />}
+          footer={
+            approver && selected.status === 'submitted' ? (
+              <ReviewButtons
+                slug={workspace.space.slug}
+                table="receipts"
+                id={selected.id}
+                label={`${selected.vendor} · ${formatCurrency(selected.total)}`}
+              />
+            ) : undefined
+          }
+        >
+          <ReceiptDetail
+            receipt={selected}
+            base={base}
+            tz={tz}
+            business={business}
+            people={people}
+            vehicle={vehicleName(selected.vehicleId)}
+            project={projectName(selected.projectId)}
+            reviewedAt={
+              history.find((event) => event.verb === 'approved' || event.verb === 'rejected')?.at
+            }
+          />
+        </UrlSheet>
+      )}
     </Page>
+  );
+}
+
+function ReceiptDetail({
+  receipt,
+  base,
+  tz,
+  business,
+  people,
+  vehicle,
+  project,
+  reviewedAt,
+}: {
+  receipt: Receipt;
+  base: string;
+  tz: string;
+  business: boolean;
+  people: Map<string, Person>;
+  vehicle?: string;
+  project?: string;
+  reviewedAt?: string;
+}) {
+  const by = people.get(receipt.createdBy);
+  const reviewer = receipt.reviewedBy ? people.get(receipt.reviewedBy) : undefined;
+  const rows: [string, ReactNode][] = [
+    ['Paid with', receipt.paymentMethod ?? '—'],
+    ...(receipt.gallons
+      ? ([
+          ['Gallons', `${receipt.gallons} gal`],
+          [
+            'Price per gallon',
+            receipt.total ? `$${(receipt.total / receipt.gallons).toFixed(3)}` : '—',
+          ],
+        ] as [string, ReactNode][])
+      : []),
+    ...(receipt.odometer
+      ? ([['Odometer', `${formatNumber(receipt.odometer)} mi`]] as [string, ReactNode][])
+      : []),
+    ...(business
+      ? ([
+          [
+            'Vehicle',
+            vehicle && receipt.vehicleId ? (
+              <Link href={`${base}/vehicles/${receipt.vehicleId}`} className="hover:underline">
+                {vehicle}
+              </Link>
+            ) : (
+              <span className="text-muted">None</span>
+            ),
+          ],
+          [
+            'Project',
+            project && receipt.projectId ? (
+              <Link href={`${base}/projects/${receipt.projectId}`} className="hover:underline">
+                {project}
+              </Link>
+            ) : (
+              <span className="text-muted">None</span>
+            ),
+          ],
+        ] as [string, ReactNode][])
+      : []),
+  ];
+  const steps: { label: string; detail: string; done: boolean; tone?: 'critical' }[] = business
+    ? [
+        {
+          label:
+            receipt.status === 'draft'
+              ? 'Saved as a draft'
+              : `Submitted by ${by?.firstName ?? 'someone'}`,
+          detail: formatRelative(receipt.createdAt, tz),
+          done: true,
+        },
+        receipt.status === 'approved'
+          ? {
+              label: `Approved${reviewer ? ` by ${reviewer.firstName}` : ''}`,
+              detail: reviewedAt
+                ? formatRelative(reviewedAt, tz)
+                : 'Counted on its project and vehicle',
+              done: true,
+            }
+          : receipt.status === 'rejected'
+            ? {
+                label: `Returned${reviewer ? ` by ${reviewer.firstName}` : ''}`,
+                detail: receipt.notes ?? (reviewedAt ? formatRelative(reviewedAt, tz) : ''),
+                done: true,
+                tone: 'critical',
+              }
+            : {
+                label: receipt.status === 'draft' ? 'Not sent yet' : 'Waiting for a manager',
+                detail:
+                  receipt.status === 'draft'
+                    ? 'Add the total, then submit'
+                    : 'Usually within a day',
+                done: false,
+              },
+      ]
+    : [];
+
+  return (
+    <div className="grid gap-5 pt-1">
+      <div className="flex items-center gap-5 rounded-[18px] bg-tool-receipt/30 p-4 shadow-[inset_0_0_0_1px_rgb(0_0_0/.04)] sm:p-5">
+        <ReceiptPaper receipt={receipt} timezone={tz} className="-rotate-2" />
+        <div className="min-w-0">
+          <p className="label !text-ink/55">Total</p>
+          <p className="display mt-1 text-[34px] leading-none text-ink">
+            {receipt.total ? formatCurrency(receipt.total) : '—'}
+          </p>
+          <div className="mt-3">
+            <ApprovalBadge status={receipt.status} kind={business ? 'business' : 'personal'} />
+          </div>
+          {by && business && (
+            <p className="mt-3 flex items-center gap-1.5 text-[12.5px] text-ink/60">
+              <Avatar person={by} size="xs" /> {by.name}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <dl className="row-divide rounded-[14px] bg-subtle px-3.5 shadow-[inset_0_0_0_1px_var(--color-line)]">
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex items-center justify-between gap-4 py-2.5 text-[13.5px]">
+            <dt className="text-muted">{label}</dt>
+            <dd className="text-right font-medium text-ink">{value}</dd>
+          </div>
+        ))}
+      </dl>
+
+      {receipt.notes && receipt.status !== 'rejected' && (
+        <p className="rounded-[14px] bg-subtle px-3.5 py-3 text-[13.5px] text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line)]">
+          “{receipt.notes}”
+        </p>
+      )}
+
+      {steps.length > 0 && (
+        <section aria-label="Status">
+          <p className="label mb-2.5">Status</p>
+          <ol className="grid gap-0">
+            {steps.map((step, index) => (
+              <li key={step.label} className="relative flex gap-3 pb-4 last:pb-0">
+                {index < steps.length - 1 && (
+                  <span
+                    className="absolute top-6 bottom-0 left-[11px] w-px bg-line-strong"
+                    aria-hidden="true"
+                  />
+                )}
+                <span
+                  className={cn(
+                    'relative grid size-6 shrink-0 place-items-center rounded-full',
+                    step.done
+                      ? step.tone === 'critical'
+                        ? 'bg-critical text-white'
+                        : 'bg-ink text-white'
+                      : 'bg-surface text-muted shadow-[inset_0_0_0_1.5px_var(--color-line-strong)]',
+                  )}
+                >
+                  <Icon
+                    name={step.done ? (step.tone === 'critical' ? 'arrow-left' : 'check') : 'clock'}
+                    size={12}
+                    strokeWidth={2.4}
+                  />
+                </span>
+                <span className="min-w-0 pt-0.5">
+                  <span className="block text-[14px] font-medium text-ink">{step.label}</span>
+                  {step.detail && (
+                    <span className="block text-[12.5px] text-muted">{step.detail}</span>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
+      <p className="text-[12px] text-faint">
+        In this preview, Hyphy keeps a receipt’s details, not the photo.
+      </p>
+    </div>
   );
 }

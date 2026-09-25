@@ -44,10 +44,24 @@ Hyphy's own tool pictograms from Studio).
   get a 2×2 grid of their four actions on Home.
 - Grids never overflow: panels and form fields carry `min-w-0`; every page is checked at 390px.
 
+## Composition
+
+- **Tools look like what they make.** Tool pages start with a slim header in the tool's color and
+  go straight to the work: PDFs show their pages, QR codes draw as you type, a link page is edited
+  on the phone itself. The Tools library is a bento of those tools with a live line each ("2 saved
+  codes") and one next step, never a grid of identical cards.
+- **Dashboards answer a question, not show widgets.** A sentence up top says what matters today in
+  specifics ("6 submissions are waiting for your approval"), then the page follows that order.
+- **Records open in place.** A receipt opens as a sheet (bottom on phones, drawer on desktop) whose
+  state lives in the URL, so it can be linked to and closed with Back.
+- **Relationships are always visible.** Files, receipts and trips show what they belong to — a
+  project, a vehicle, a person, the tool that made them — with that record's icon.
+
 ## Motion
 
 One ease (`cubic-bezier(.16,1,.3,1)`), 150–400ms. Panels rise in with a small stagger, sheets
-slide, the Create plus rotates to a close. Nothing loops. `prefers-reduced-motion` removes motion.
+slide, the Create plus rotates to a close, an inbox item you act on tints with its outcome and
+slides away. Nothing loops. `prefers-reduced-motion` removes motion.
 
 ## Voice
 

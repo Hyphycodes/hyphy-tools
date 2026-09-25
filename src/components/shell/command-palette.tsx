@@ -23,10 +23,12 @@ const CommandContext = createContext<CommandValue>({ open: () => {} });
 export const useCommand = () => useContext(CommandContext);
 
 const GROUP_ORDER: SearchItem['group'][] = [
+  'Needs attention',
   'Actions',
   'Projects',
   'Vehicles',
   'People',
+  'Receipts',
   'Files',
   'Tools',
   'Go to',
@@ -55,7 +57,9 @@ function score(item: SearchItem, query: string[]) {
     else if (rest.some((part) => part.startsWith(word))) total += 1;
     else return 0;
   }
-  return total + (item.group === 'Actions' ? 0.5 : 0);
+  // A title that starts with what you typed beats one that merely contains it.
+  const starts = item.title.toLowerCase().startsWith(query.join(' ')) ? 1 : 0;
+  return total + starts + (item.boost ?? 0) + (item.group === 'Actions' ? 0.5 : 0);
 }
 
 function isTyping(target: EventTarget | null) {
@@ -130,9 +134,12 @@ function CommandPalette({
     const terms = words(deferred);
     let ranked: SearchItem[];
     if (!terms.length) {
+      // Before you type: what needs you, what you'd make, the work in motion, where to go.
       ranked = [
-        ...items.filter((item) => item.group === 'Actions').slice(0, 5),
-        ...items.filter((item) => item.group === 'Go to').slice(0, 8),
+        ...items.filter((item) => item.group === 'Needs attention'),
+        ...items.filter((item) => item.group === 'Actions').slice(0, 4),
+        ...items.filter((item) => item.group === 'Projects' && (item.boost ?? 0) > 0).slice(0, 3),
+        ...items.filter((item) => item.group === 'Go to').slice(0, 6),
         ...items.filter((item) => item.group === 'Spaces'),
       ];
     } else {
@@ -243,17 +250,27 @@ function CommandPalette({
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2"
       >
         {flat.length === 0 ? (
-          <div className="px-4 py-14 text-center">
+          <div className="flex flex-col items-center px-4 py-14 text-center">
+            <span className="mb-4 grid size-11 place-items-center rounded-[13px] bg-well text-muted">
+              <Icon name="search" size={20} />
+            </span>
             <p className="text-[15px] font-medium">Nothing matches “{query}”.</p>
-            <p className="mt-1 text-[13.5px] text-muted">
-              Try a project, a person, a vehicle or a tool.
+            <p className="mt-1 max-w-[40ch] text-[13.5px] text-muted">
+              Search finds projects, people, vehicles, receipts, files and tools you can see here —
+              or type what you want to do, like “log mileage”.
             </p>
           </div>
         ) : (
           groups.map((group) => (
             <div key={group.group} className="mb-1">
               <p className="label px-3 pt-2.5 pb-1.5">
-                {deferred || group.group !== 'Actions' ? group.group : 'Suggested'}
+                {deferred
+                  ? group.group
+                  : group.group === 'Actions'
+                    ? 'Create'
+                    : group.group === 'Projects'
+                      ? 'In motion'
+                      : group.group}
               </p>
               {group.items.map((item) => {
                 const index = flat.indexOf(item);

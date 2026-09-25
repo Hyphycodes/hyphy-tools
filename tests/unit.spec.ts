@@ -1,14 +1,16 @@
 import { expect, test } from '@playwright/test';
 import { applyJournal } from '@/lib/data/demo/journal-apply';
 import { seed } from '@/lib/data/demo/seed';
-import { createActionsFor } from '@/lib/platform/actions';
+import { currentProjectFor } from '@/lib/insights';
+import { createActionsFor, groupActions } from '@/lib/platform/actions';
 import { validateField } from '@/lib/platform/custom-fields';
 import { dashboardFor } from '@/lib/platform/dashboard';
 import { navigationFor } from '@/lib/platform/navigation';
 import { can, permissionsFor } from '@/lib/platform/roles';
 import { availability, getTool } from '@/lib/platform/tools';
 import type { Space } from '@/lib/platform/types';
-import { parseRange } from '@/lib/tools/pdf';
+import { formatRange, parseRange } from '@/lib/tools/pdf';
+import { kindOf, parseWifi, wifiPayload } from '@/lib/tools/qr';
 
 /* Pure rules, no browser. Run with `npm test`. */
 
@@ -104,6 +106,18 @@ test.describe('Universal Create', () => {
   test('guests can only upload', () => {
     expect(ids('abc-construction', 'guest')).toEqual(['photos', 'file']);
   });
+  test('the menu groups actions: capture, then set up, then make', () => {
+    const groups = groupActions(createActionsFor(space('abc-construction'), { role: 'owner' }));
+    expect(groups.map((group) => group.id)).toEqual(['capture', 'setup', 'make']);
+    expect(groups[0].actions.map((action) => action.id)).toEqual([
+      'receipt',
+      'file',
+      'mileage',
+      'photos',
+    ]);
+    const member = groupActions(createActionsFor(space('abc-construction'), { role: 'member' }));
+    expect(member.map((group) => group.id)).toEqual(['capture']);
+  });
   test('labels follow the Space and role', () => {
     const labels = (slug: string | Space, role: 'owner' | 'member') =>
       createActionsFor(typeof slug === 'string' ? space(slug) : slug, { role }).map(
@@ -127,22 +141,32 @@ test.describe('navigation and dashboards compose from the same rules', () => {
     expect(nav.settings).toBeUndefined();
   });
   test('each role gets its own dashboard', () => {
-    expect(dashboardFor(space('abc-construction'), { role: 'owner' }).main).toEqual([
-      'attention',
-      'projects',
-      'month',
-    ]);
-    expect(dashboardFor(space('abc-construction'), { role: 'owner' }).side).toContain('plan');
-    expect(dashboardFor(space('abc-construction'), { role: 'manager' }).side).not.toContain('plan');
+    const owner = dashboardFor(space('abc-construction'), { role: 'owner' });
+    expect(owner.top).toEqual(['pulse']);
+    expect(owner.main).toEqual(['attention', 'projects', 'activity']);
+    expect(owner.side).toEqual(['team', 'money', 'fleet']);
+    // A restaurant has no vehicles, so its codes take that place.
+    expect(dashboardFor(space('salt-and-ember'), { role: 'owner' }).side).toContain('codes');
+    expect(dashboardFor(space('abc-construction'), { role: 'manager' }).top).toEqual(['pulse']);
     expect(dashboardFor(space('abc-construction'), { role: 'member' }).main).toEqual([
       'my-day',
+      'notices',
       'my-submissions',
     ]);
+    expect(dashboardFor(space('abc-construction'), { role: 'guest' }).top).toEqual(['notices']);
     expect(dashboardFor(space('abc-construction'), { role: 'guest' }).main).toEqual([
       'shared-projects',
       'shared-files',
     ]);
     expect(dashboardFor(personal, { role: 'owner' }).hero).toBe('personal');
+    expect(dashboardFor(personal, { role: 'owner' }).top).toEqual(['launcher']);
+  });
+  test('Mike’s current project is the one he last worked on, everywhere', () => {
+    expect(currentProjectFor('mike', data.projects, data.activity)?.id).toBe('prj_oakbrook');
+    // Without activity, the soonest-due project he's on.
+    expect(currentProjectFor('mike', data.projects, [])?.id).toBe('prj_oakbrook');
+    expect(currentProjectFor('chris', data.projects, data.activity)).toBeDefined();
+    expect(currentProjectFor('rosa', [], data.activity)).toBeUndefined();
   });
 });
 
@@ -230,6 +254,34 @@ test.describe('Demo Mode journal', () => {
 });
 
 test.describe('tools', () => {
+  test('PDF page ranges read back as the shortest text', () => {
+    expect(formatRange([0, 1, 2, 4])).toBe('1-3, 5');
+    expect(formatRange([4, 0, 0, 1])).toBe('1-2, 5');
+    expect(formatRange([])).toBe('');
+    expect(parseRange(formatRange([1, 2, 3, 7, 9]), 10)).toEqual([1, 2, 3, 7, 9]);
+  });
+  test('Wi-Fi codes escape and read back', () => {
+    const details = {
+      ssid: 'Salt;Ember "Guest"',
+      password: 'a:b,c\\d',
+      security: 'WPA' as const,
+      hidden: true,
+    };
+    const payload = wifiPayload(details);
+    expect(payload).toBe('WIFI:T:WPA;S:Salt\\;Ember \\"Guest\\";P:a\\:b\\,c\\\\d;H:true;;');
+    expect(parseWifi(payload)).toEqual(details);
+    expect(wifiPayload({ ...details, ssid: ' ' })).toBe('');
+    expect(parseWifi('WIFI:T:nopass;S:Cafe;;')).toEqual({
+      ssid: 'Cafe',
+      password: '',
+      security: 'nopass',
+      hidden: false,
+    });
+    expect(kindOf('WIFI:T:WPA;S:x;P:y;;')).toBe('wifi');
+    expect(kindOf('https://example.com')).toBe('link');
+    expect(kindOf('mailto:hi@example.com')).toBe('email');
+    expect(kindOf('hello')).toBe('text');
+  });
   test('PDF page ranges', () => {
     expect(parseRange('1-3, 5', 10)).toEqual([0, 1, 2, 4]);
     expect(parseRange('8-', 10)).toEqual([7, 8, 9]);

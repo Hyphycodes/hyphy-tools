@@ -20,6 +20,8 @@ import {
   formatDate,
   formatMiles,
   formatRelative,
+  formatRelativeInline,
+  plural,
 } from '@/lib/platform/format';
 import { roles } from '@/lib/platform/roles';
 import type { FieldType } from '@/lib/platform/types';
@@ -211,8 +213,8 @@ export default async function ProjectPage({
                           'Spent',
                           formatCurrency(spent, { cents: false }),
                           project.budget
-                            ? `of ${formatCurrency(project.budget, { cents: false })}`
-                            : `${counted.length} receipts`,
+                            ? `of ${formatCurrency(project.budget, { cents: false })} budget`
+                            : plural(counted.length, 'receipt'),
                         ],
                       ]
                     : []),
@@ -221,7 +223,7 @@ export default async function ProjectPage({
                         [
                           'Miles',
                           formatMiles(Math.round(miles * 10) / 10),
-                          `${mileage.length} trips`,
+                          plural(mileage.length, 'trip'),
                         ],
                       ]
                     : []),
@@ -230,7 +232,7 @@ export default async function ProjectPage({
                     'Photos',
                     String(photos.length),
                     photos[0]
-                      ? `latest ${formatRelative(photos[0].createdAt, tz).toLowerCase()}`
+                      ? `latest ${formatRelativeInline(photos[0].createdAt, tz)}`
                       : 'none yet',
                   ],
                 ].map(([label, value, note]) => (
@@ -258,9 +260,9 @@ export default async function ProjectPage({
                   <span className="w-16 text-[12.5px] text-muted">Budget</span>
                   <Progress
                     value={(spent / project.budget) * 100}
-                    color="var(--color-ink)"
+                    color={spent > project.budget ? 'var(--color-critical)' : 'var(--color-ink)'}
                     className="flex-1"
-                    label="Budget used"
+                    label="Expense budget used"
                   />
                   <span className="text-[13px] font-medium">
                     {spent > 0 && spent / project.budget < 0.01
@@ -289,6 +291,92 @@ export default async function ProjectPage({
                   ))}
                 </div>
               </Panel>
+            )}
+
+            {(money || documents.length > 0) && (
+              <div className="grid gap-5 lg:grid-cols-2">
+                {money && (
+                  <Panel>
+                    <PanelHeader
+                      title="Costs"
+                      href={tabHref('expenses')}
+                      action={can('expenses.view_all') ? 'Expenses' : 'Yours'}
+                    >
+                      {receipts.length + mileage.length > 0 && (
+                        <span className="mr-auto -ml-1 text-[12.5px] text-muted">
+                          {[
+                            receipts.length ? formatCurrency(spent) : undefined,
+                            mileage.length ? formatMiles(Math.round(miles * 10) / 10) : undefined,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </span>
+                      )}
+                    </PanelHeader>
+                    {receipts.length + mileage.length > 0 ? (
+                      <div className="row-divide pb-1.5">
+                        {[
+                          ...receipts.map((receipt) => ({
+                            at: receipt.date,
+                            node: (
+                              <ReceiptRow
+                                key={receipt.id}
+                                receipt={receipt}
+                                people={people}
+                                timezone={tz}
+                                kind={workspace.space.kind}
+                                href={`${base}/tools/receipts?receipt=${receipt.id}`}
+                              />
+                            ),
+                          })),
+                          ...mileage.map((entry) => ({
+                            at: entry.date,
+                            node: (
+                              <MileageRow
+                                key={entry.id}
+                                entry={entry}
+                                people={people}
+                                timezone={tz}
+                                kind={workspace.space.kind}
+                              />
+                            ),
+                          })),
+                        ]
+                          .sort((a, b) => b.at.localeCompare(a.at))
+                          .slice(0, 4)
+                          .map((item) => item.node)}
+                      </div>
+                    ) : (
+                      <EmptyState compact icon="receipt" title="No costs yet">
+                        Receipts and trips filed to this {labels.singular.toLowerCase()} add up
+                        here.
+                      </EmptyState>
+                    )}
+                  </Panel>
+                )}
+                <Panel>
+                  <PanelHeader title="Documents" count={documents.length} href={tabHref('files')} />
+                  {documents.length ? (
+                    <div className="pb-1.5">
+                      {documents.slice(0, 4).map((file) => (
+                        <FileRow
+                          key={file.id}
+                          file={file}
+                          base={base}
+                          people={people}
+                          timezone={tz}
+                          context={file.folder}
+                          compact
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyState compact icon="files" title="No documents yet">
+                      Contracts, permits and plans attached here stay with the job.
+                    </EmptyState>
+                  )}
+                </Panel>
+              </div>
             )}
 
             <Panel>
@@ -401,6 +489,7 @@ export default async function ProjectPage({
                   people={people}
                   timezone={tz}
                   kind={workspace.space.kind}
+                  href={`${base}/tools/receipts?receipt=${receipt.id}`}
                   context={
                     receipt.vehicleId
                       ? vehicles.find((vehicle) => vehicle.id === receipt.vehicleId)?.name

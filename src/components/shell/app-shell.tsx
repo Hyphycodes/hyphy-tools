@@ -39,15 +39,12 @@ export function AppShell({
           <CommandProvider items={search}>
             {demo && <DemoBar demo={demo} />}
             <div className="lg:flex">
-              <Sidebar demo={Boolean(demo)} />
+              <Sidebar />
               <div className="min-w-0 flex-1">
                 <MobileTopBar />
                 <main
                   id="main"
-                  className={cn(
-                    'min-h-[calc(100dvh-56px)] lg:my-2 lg:mr-2 lg:rounded-[20px] lg:bg-surface lg:shadow-card',
-                    demo ? 'lg:min-h-[calc(100dvh-56px)]' : 'lg:min-h-[calc(100dvh-16px)]',
-                  )}
+                  className="min-h-[calc(100dvh-56px)] lg:my-2 lg:mr-2 lg:min-h-[calc(100dvh-16px)] lg:rounded-[20px] lg:bg-surface lg:shadow-card"
                 >
                   {children}
                 </main>
@@ -64,7 +61,7 @@ export function AppShell({
 
 /* ---------- desktop sidebar ---------- */
 
-function Sidebar({ demo }: { demo: boolean }) {
+function Sidebar() {
   const workspace = useWorkspace();
   const command = useCommand();
   const create = useCreate();
@@ -75,10 +72,7 @@ function Sidebar({ demo }: { demo: boolean }) {
 
   return (
     <aside
-      className={cn(
-        'sticky z-30 hidden w-[252px] shrink-0 flex-col px-3 pt-3 pb-3 lg:flex',
-        demo ? 'top-10 h-[calc(100dvh-40px)]' : 'top-0 h-dvh',
-      )}
+      className="sticky top-0 z-30 hidden h-dvh w-[252px] shrink-0 flex-col px-3 pt-3 pb-3 lg:flex"
       aria-label="Main"
     >
       <SpaceSwitcher />

@@ -4,7 +4,6 @@ import { useId, useState, useTransition } from 'react';
 import { saveLinkPage } from '@/app/(app)/[space]/actions';
 import { Button, buttonClass } from '@/components/ui/button';
 import { cn } from '@/components/ui/cn';
-import { Field, Input, Textarea } from '@/components/ui/form';
 import { Icon } from '@/components/ui/icon';
 import { useToast } from '@/components/ui/toast';
 import type { LinkItem, LinkPage } from '@/lib/platform/types';
@@ -47,7 +46,14 @@ const THEMES: Record<
   },
 };
 
-/** Link Pages: one link for everything, edited with a live phone preview. */
+/** Inputs that look like the page they're editing: no box until you're in them. */
+const inline =
+  'w-full bg-transparent text-center outline-none rounded-[10px] placeholder:text-current placeholder:opacity-45 transition-shadow focus:shadow-[0_0_0_2px_currentColor]';
+
+/**
+ * Link Pages: one link for everything. You edit the page itself — tap the name, the bio or a
+ * link on the phone and type. Page-wide choices (finish, address) sit beside it.
+ */
 export function LinkEditor({ slug, page, base }: { slug: string; page?: LinkPage; base: string }) {
   const id = useId();
   const toast = useToast();
@@ -59,193 +65,72 @@ export function LinkEditor({ slug, page, base }: { slug: string; page?: LinkPage
   const [links, setLinks] = useState<LinkItem[]>(
     page?.links ?? [{ id: 'l1', label: '', url: 'https://' }],
   );
+  const [selected, setSelected] = useState<string | null>(null);
+  const [savedState, setSavedState] = useState(() =>
+    JSON.stringify({ title, handle, bio, theme, links }),
+  );
   const style = THEMES[theme];
   const cleanHandle = handle.toLowerCase().replace(/[^a-z0-9-]/g, '');
+  const dirty = JSON.stringify({ title, handle, bio, theme, links }) !== savedState;
 
-  const update = (index: number, patch: Partial<LinkItem>) =>
+  const update = (linkId: string, patch: Partial<LinkItem>) =>
     setLinks((current) =>
-      current.map((link, position) => (position === index ? { ...link, ...patch } : link)),
+      current.map((link) => (link.id === linkId ? { ...link, ...patch } : link)),
     );
-  const move = (index: number, direction: number) =>
+  const move = (linkId: string, direction: number) =>
     setLinks((current) => {
+      const index = current.findIndex((link) => link.id === linkId);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= current.length) return current;
       const next = [...current];
-      [next[index], next[index + direction]] = [next[index + direction], next[index]];
+      [next[index], next[target]] = [next[target], next[index]];
       return next;
     });
+  const remove = (linkId: string) => {
+    setLinks((current) => current.filter((link) => link.id !== linkId));
+    setSelected(null);
+  };
+  const add = () => {
+    const next = { id: `l${Date.now()}`, label: '', url: 'https://' };
+    setLinks((current) => [...current, next]);
+    setSelected(next.id);
+    // Focus the new pill's label once it renders.
+    requestAnimationFrame(() =>
+      document.getElementById(`${id}-label-${next.id}`)?.focus({ preventScroll: false }),
+    );
+  };
 
   const save = () =>
     start(async () => {
+      const kept = links.filter((link) => link.label.trim() && link.url.trim());
       const result = await saveLinkPage(slug, {
         id: page?.id,
         title,
         handle: cleanHandle,
         bio,
         theme,
-        links: links.filter((link) => link.label && link.url),
+        links: kept,
       });
+      if (result.ok) setSavedState(JSON.stringify({ title, handle, bio, theme, links }));
       toast(
         result.ok
-          ? { title: `@${cleanHandle} saved`, description: result.message }
+          ? { title: `@${cleanHandle} saved`, description: `${kept.length} links · ${style.name}` }
           : { title: result.error, icon: 'alert' },
       );
     });
 
-  return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-      <div className="grid content-start gap-5 rounded-[20px] bg-surface p-5 shadow-card">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Name" htmlFor={`${id}-title`}>
-            <Input
-              id={`${id}-title`}
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder="Your name or business"
-            />
-          </Field>
-          <Field label="Handle" htmlFor={`${id}-handle`}>
-            <div className="relative">
-              <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted">
-                @
-              </span>
-              <Input
-                id={`${id}-handle`}
-                value={handle}
-                onChange={(event) => setHandle(event.target.value)}
-                className="pl-7 lg:pl-7"
-                autoCapitalize="off"
-              />
-            </div>
-          </Field>
-        </div>
-        <Field label="Bio" htmlFor={`${id}-bio`} optional>
-          <Textarea
-            id={`${id}-bio`}
-            value={bio}
-            onChange={(event) => setBio(event.target.value)}
-            rows={2}
-            maxLength={160}
-          />
-        </Field>
-        <div>
-          <p className="mb-2 text-[13.5px] font-medium text-ink-2">Finish</p>
-          <div className="flex flex-wrap gap-2">
-            {(Object.keys(THEMES) as LinkPage['theme'][]).map((key) => (
-              <button
-                key={key}
-                type="button"
-                aria-pressed={theme === key}
-                onClick={() => setTheme(key)}
-                className={cn(
-                  'flex items-center gap-2 rounded-full py-1 pr-3 pl-1 text-[13px] transition-all',
-                  theme === key ? 'bg-ink text-white' : 'bg-well text-ink-2 hover:bg-ink/10',
-                )}
-              >
-                <span
-                  className="size-6 rounded-full shadow-[inset_0_0_0_1px_rgb(0_0_0/.12)]"
-                  style={{ background: THEMES[key].bg }}
-                />
-                {THEMES[key].name}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div>
-          <div className="mb-2 flex items-center justify-between">
-            <p className="text-[13.5px] font-medium text-ink-2">Links</p>
-            <span className="mono-num text-[11px] text-faint">{links.length}/12</span>
-          </div>
-          <ol className="grid gap-2">
-            {links.map((link, index) => (
-              <li
-                key={link.id}
-                className="flex items-start gap-2 rounded-[14px] bg-subtle p-2 shadow-[inset_0_0_0_1px_var(--color-line)]"
-              >
-                <div className="flex flex-col">
-                  <button
-                    type="button"
-                    aria-label="Move up"
-                    disabled={index === 0}
-                    onClick={() => move(index, -1)}
-                    className="grid size-8 place-items-center rounded-[8px] text-muted hover:bg-ink/5 disabled:opacity-30"
-                  >
-                    <Icon name="chevron-down" size={15} className="rotate-180" />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Move down"
-                    disabled={index === links.length - 1}
-                    onClick={() => move(index, 1)}
-                    className="grid size-8 place-items-center rounded-[8px] text-muted hover:bg-ink/5 disabled:opacity-30"
-                  >
-                    <Icon name="chevron-down" size={15} />
-                  </button>
-                </div>
-                <div className="grid min-w-0 flex-1 gap-1.5">
-                  <Input
-                    aria-label="Label"
-                    value={link.label}
-                    onChange={(event) => update(index, { label: event.target.value })}
-                    placeholder="Label"
-                  />
-                  <Input
-                    aria-label="Link"
-                    value={link.url}
-                    onChange={(event) => update(index, { url: event.target.value })}
-                    placeholder="https://"
-                    className="text-muted"
-                  />
-                </div>
-                <button
-                  type="button"
-                  aria-label="Remove link"
-                  onClick={() =>
-                    setLinks((current) => current.filter((_, position) => position !== index))
-                  }
-                  className="grid size-8 place-items-center rounded-[8px] text-muted hover:bg-ink/5"
-                >
-                  <Icon name="x" size={15} />
-                </button>
-              </li>
-            ))}
-          </ol>
-          {links.length < 12 && (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="mt-2"
-              onClick={() =>
-                setLinks((current) => [
-                  ...current,
-                  { id: `l${Date.now()}`, label: '', url: 'https://' },
-                ])
-              }
-            >
-              <Icon name="plus" size={15} /> Add a link
-            </Button>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-2 border-t border-line pt-4">
-          <Button variant="primary" onClick={save} disabled={saving || !title || !cleanHandle}>
-            {saving ? 'Saving…' : 'Save link page'}
-          </Button>
-          {cleanHandle && (
-            <Link
-              href={`${base}/tools/qr?content=${encodeURIComponent(`https://hyphy.example/@${cleanHandle}`)}`}
-              className={buttonClass()}
-            >
-              <Icon name="qr" size={16} /> Make a QR code
-            </Link>
-          )}
-        </div>
-        <p className="text-[12.5px] text-faint">
-          Publishing to a public address arrives with accounts. Saving keeps it in this Space.
-        </p>
-      </div>
+  const empty = links.filter((link) => !link.label.trim() || link.url.trim() === 'https://');
 
-      <div className="lg:sticky lg:top-6 lg:self-start">
-        <div className="mx-auto w-[300px] rounded-[44px] bg-ink p-2.5 shadow-pop">
+  return (
+    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-6">
+      {/* The page itself, edited in place. */}
+      <div className="relative overflow-hidden rounded-[26px] bg-subtle px-3 py-6 shadow-[inset_0_0_0_1px_var(--color-line)] sm:px-6 sm:py-8 [background-image:radial-gradient(rgb(22_21_15/.07)_1px,transparent_1px)] [background-size:18px_18px]">
+        <p className="mb-4 flex items-center justify-center gap-1.5 text-[12.5px] text-muted">
+          <Icon name="pencil" size={13} /> Tap anything on the page to change it
+        </p>
+        <div className="mx-auto w-full max-w-[330px] rounded-[46px] bg-ink p-2.5 shadow-pop">
           <div
-            className="relative h-[560px] overflow-hidden rounded-[36px] px-5 pt-12"
+            className="scrollbar-none relative flex min-h-[580px] flex-col overflow-y-auto rounded-[38px] px-5 pt-12 pb-6 transition-colors duration-500"
             style={{ background: style.bg, color: style.fg }}
           >
             <span
@@ -253,37 +138,257 @@ export function LinkEditor({ slug, page, base }: { slug: string; page?: LinkPage
               aria-hidden="true"
             />
             <span
-              className="mx-auto grid size-16 place-items-center rounded-full text-[22px] font-bold"
+              className="mx-auto grid size-16 shrink-0 place-items-center rounded-full text-[22px] font-bold transition-colors duration-500"
               style={{ background: style.avatar, color: theme === 'paper' ? '#fff' : '#16150F' }}
+              aria-hidden="true"
             >
-              {(title || 'H').slice(0, 1)}
+              {(title || 'H').slice(0, 1).toUpperCase()}
             </span>
-            <p className="mt-3 text-center text-[17px] font-semibold">{title || 'Your name'}</p>
-            <p className="text-center text-[12px] opacity-60">@{cleanHandle || 'handle'}</p>
-            {bio && <p className="mt-3 text-center text-[12.5px] leading-snug opacity-80">{bio}</p>}
-            <div className="mt-5 grid gap-2.5">
-              {links
-                .filter((link) => link.label)
-                .map((link) => (
-                  <span
-                    key={link.id}
-                    className="block truncate rounded-full px-4 py-3 text-center text-[13px] font-medium"
-                    style={{
-                      background: style.button,
-                      color: style.buttonFg,
-                      boxShadow:
-                        theme === 'paper' ? 'inset 0 0 0 1px rgba(22,21,15,.12)' : undefined,
-                    }}
-                  >
-                    {link.label}
-                  </span>
-                ))}
+            <input
+              aria-label="Name"
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="Your name"
+              maxLength={60}
+              className={cn(inline, 'mt-3 py-0.5 text-[17px] font-semibold')}
+            />
+            <div className="flex items-center justify-center text-[12px] opacity-60">
+              <span aria-hidden="true">@</span>
+              <input
+                aria-label="Handle"
+                value={handle}
+                onChange={(event) => setHandle(event.target.value)}
+                placeholder="handle"
+                maxLength={30}
+                autoCapitalize="off"
+                spellCheck={false}
+                className={cn(inline, 'w-auto max-w-[180px] py-0.5 text-left')}
+                style={{ width: `${Math.max(6, (handle || 'handle').length) + 1}ch` }}
+              />
             </div>
-            <p className="absolute inset-x-0 bottom-5 text-center text-[10.5px] opacity-40">
+            <textarea
+              aria-label="Bio"
+              value={bio}
+              onChange={(event) => setBio(event.target.value)}
+              placeholder="A line about you — what people should know"
+              maxLength={160}
+              rows={bio.length > 70 ? 3 : 2}
+              className={cn(
+                inline,
+                'mt-2.5 resize-none px-1 py-1 text-[12.5px] leading-snug opacity-85',
+              )}
+            />
+            <ol className="mt-4 grid gap-2.5">
+              {links.map((link, index) => {
+                const on = selected === link.id;
+                return (
+                  <li key={link.id} className="animate-rise">
+                    <div
+                      className={cn(
+                        'rounded-[22px] transition-shadow',
+                        on && 'shadow-[0_0_0_2px_currentColor]',
+                      )}
+                      style={{
+                        background: style.button,
+                        color: style.buttonFg,
+                        boxShadow:
+                          !on && theme === 'paper'
+                            ? 'inset 0 0 0 1px rgba(22,21,15,.12)'
+                            : undefined,
+                      }}
+                    >
+                      <input
+                        id={`${id}-label-${link.id}`}
+                        aria-label={`Link ${index + 1} label`}
+                        value={link.label}
+                        onFocus={() => setSelected(link.id)}
+                        onChange={(event) => update(link.id, { label: event.target.value })}
+                        placeholder="Name this link"
+                        maxLength={60}
+                        className="w-full bg-transparent px-4 py-3 text-center text-[13px] font-medium outline-none placeholder:text-current placeholder:opacity-45"
+                      />
+                      {on && (
+                        <div className="animate-fade px-2 pb-2">
+                          <input
+                            aria-label={`Link ${index + 1} address`}
+                            value={link.url}
+                            onChange={(event) => update(link.id, { url: event.target.value })}
+                            placeholder="https://"
+                            inputMode="url"
+                            autoCapitalize="off"
+                            spellCheck={false}
+                            className="w-full rounded-[12px] bg-black/[.06] px-3 py-2 text-center text-[12px] outline-none placeholder:text-current placeholder:opacity-45 focus:bg-black/[.1]"
+                            style={
+                              theme === 'paper' || theme === 'signal'
+                                ? undefined
+                                : { background: 'rgba(255,255,255,.1)' }
+                            }
+                          />
+                          <div className="mt-1.5 flex items-center justify-center gap-0.5">
+                            {[
+                              {
+                                label: 'Move up',
+                                icon: 'arrow-left' as const,
+                                rotate: 'rotate-90',
+                                onClick: () => move(link.id, -1),
+                                disabled: index === 0,
+                              },
+                              {
+                                label: 'Move down',
+                                icon: 'arrow-left' as const,
+                                rotate: '-rotate-90',
+                                onClick: () => move(link.id, 1),
+                                disabled: index === links.length - 1,
+                              },
+                              {
+                                label: 'Remove link',
+                                icon: 'trash' as const,
+                                rotate: '',
+                                onClick: () => remove(link.id),
+                                disabled: false,
+                              },
+                              {
+                                label: 'Done',
+                                icon: 'check' as const,
+                                rotate: '',
+                                onClick: () => setSelected(null),
+                                disabled: false,
+                              },
+                            ].map((tool) => (
+                              <button
+                                key={tool.label}
+                                type="button"
+                                aria-label={tool.label}
+                                title={tool.label}
+                                disabled={tool.disabled}
+                                onClick={tool.onClick}
+                                className="grid size-8 place-items-center rounded-full opacity-70 transition-opacity hover:bg-black/5 hover:opacity-100 disabled:opacity-20"
+                              >
+                                <Icon name={tool.icon} size={14} className={tool.rotate} />
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+            {links.length < 12 && (
+              <button
+                type="button"
+                onClick={add}
+                className="mt-2.5 flex items-center justify-center gap-1.5 rounded-[22px] border-[1.5px] border-dashed border-current py-3 text-[13px] font-medium opacity-55 transition-opacity hover:opacity-100"
+              >
+                <Icon name="plus" size={14} /> Add a link
+              </button>
+            )}
+            <p className="mt-auto pt-8 text-center text-[10.5px] opacity-40">
               Made with Hyphy Tools
             </p>
           </div>
         </div>
+      </div>
+
+      {/* The page-wide choices. */}
+      <div className="grid content-start gap-4 lg:sticky lg:top-6 lg:self-start">
+        <section
+          aria-labelledby={`${id}-finish`}
+          className="rounded-[20px] bg-surface p-4 shadow-card"
+        >
+          <h2 id={`${id}-finish`} className="label mb-3">
+            Finish
+          </h2>
+          <div className="grid grid-cols-4 gap-2">
+            {(Object.keys(THEMES) as LinkPage['theme'][]).map((key) => {
+              const option = THEMES[key];
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  aria-pressed={theme === key}
+                  onClick={() => setTheme(key)}
+                  className="group grid justify-items-center gap-1.5 text-[12px]"
+                >
+                  <span
+                    className={cn(
+                      'flex h-[74px] w-full flex-col items-center gap-1 rounded-[14px] px-2 pt-3 transition-all',
+                      theme === key
+                        ? 'ring-2 ring-signal ring-offset-2'
+                        : 'shadow-[inset_0_0_0_1px_rgb(0_0_0/.1)] group-hover:-translate-y-0.5',
+                    )}
+                    style={{ background: option.bg }}
+                  >
+                    <span className="size-3.5 rounded-full" style={{ background: option.avatar }} />
+                    {[0, 1, 2].map((bar) => (
+                      <span
+                        key={bar}
+                        className="h-2 w-full rounded-full"
+                        style={{
+                          background: option.button,
+                          boxShadow:
+                            key === 'paper' ? 'inset 0 0 0 1px rgba(22,21,15,.12)' : undefined,
+                        }}
+                      />
+                    ))}
+                  </span>
+                  <span className={theme === key ? 'font-medium text-ink' : 'text-muted'}>
+                    {option.name}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="rounded-[20px] bg-surface p-4 shadow-card">
+          <h2 className="label mb-2">Address</h2>
+          <p className="truncate rounded-[12px] bg-subtle px-3 py-2.5 font-mono text-[12.5px] text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line)]">
+            hyphy.example/<span className="text-ink">@{cleanHandle || 'handle'}</span>
+          </p>
+          <p className="mt-2 text-[12.5px] text-muted">
+            Publishing to this address arrives with accounts. Saving keeps the page in this Space.
+          </p>
+          {empty.length > 0 && (
+            <p className="mt-3 flex items-center gap-2 text-[12.5px] text-caution">
+              <Icon name="alert" size={14} />
+              {empty.length === 1 ? 'One link needs' : `${empty.length} links need`} a name and an
+              address — {empty.length === 1 ? 'it' : 'they'} won’t be saved until then.
+            </p>
+          )}
+          <div className="mt-4 grid gap-2">
+            <Button
+              variant="primary"
+              onClick={save}
+              disabled={saving || !title || !cleanHandle || !dirty}
+            >
+              {saving ? (
+                'Saving…'
+              ) : dirty ? (
+                'Save link page'
+              ) : (
+                <>
+                  <Icon name="check" size={16} /> Saved
+                </>
+              )}
+            </Button>
+            {cleanHandle && (
+              <Link
+                href={`${base}/tools/qr?content=${encodeURIComponent(`https://hyphy.example/@${cleanHandle}`)}`}
+                className={buttonClass()}
+              >
+                <Icon name="qr" size={16} /> Make a QR code for it
+              </Link>
+            )}
+          </div>
+          {dirty && (
+            <p className="mt-2.5 flex items-center justify-center gap-1.5 text-[12px] text-muted">
+              <span className="size-1.5 rounded-full bg-caution" aria-hidden="true" /> Unsaved
+              changes
+            </p>
+          )}
+        </section>
       </div>
     </div>
   );

@@ -5,8 +5,10 @@ account, database or setup. It is a preview tool, not security.
 
 ## What it does
 
-- **Preview As.** The black strip at the top shows who you are. Pick a person and a Space (or use
-  the quick-switch avatars on wide screens, or search "preview" in ⌘K). The choice is stored in the
+- **Preview As.** A small dark card in the sidebar's footer (a thin line above the top bar on
+  phones) shows who you are. Click it, press <kbd>Shift</kbd>+<kbd>D</kbd> anywhere, or search
+  "preview" in ⌘K, then pick a person and one of their Spaces. It stays out of the page on purpose,
+  so the product can be judged as it will ship. The choice is stored in the
   `hyphy_preview_as` cookie so the server renders the right person on the first paint.
 - **Your changes.** Receipts, trips, projects, invites, saved codes and tool toggles are written
   to a per-browser journal (`hyphy_demo_journal.*` cookies, capped at ~7 KB — the oldest changes
@@ -24,10 +26,12 @@ Everything Demo Mode is confined to:
 | `src/lib/identity/demo-source.ts`     | The demo `IdentitySource` (reads the cookie)     |
 | `src/lib/data/demo/`                  | Seed, clock, journal, demo `Repository`          |
 | `src/lib/demo/actions.ts`, `model.ts` | Preview As / Reset server actions and their data |
-| `src/components/demo/demo-bar.tsx`    | The strip and the Preview As sheet               |
+| `src/components/demo/demo-bar.tsx`    | The dock and the Preview As sheet                |
 
 The product itself never checks for Demo Mode. The single condition is in the Space layout:
-render `<DemoBar>` when `session.source === 'demo'`. The command bar's "Preview as" results come
+render `<DemoBar>` when `session.source === 'demo'`. (On desktop the sidebar makes room for the
+dock through one CSS rule in `globals.css`, keyed on the dock's `data-demo-dock` attribute; it
+goes away with the dock.) The command bar's "Preview as" results come
 from the same demo model and disappear with it.
 
 ## Removing it

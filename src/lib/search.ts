@@ -11,12 +11,14 @@ import type { DemoModel } from '@/lib/demo/model';
 export type SearchItem = {
   id: string;
   group:
+    | 'Needs attention'
     | 'Actions'
     | 'Go to'
     | 'Tools'
     | 'Projects'
     | 'Vehicles'
     | 'People'
+    | 'Receipts'
     | 'Files'
     | 'Spaces'
     | 'Preview as';
@@ -26,6 +28,8 @@ export type SearchItem = {
   href?: string;
   create?: CreateAction['id'];
   preview?: { personId: string; space: string };
+  /** Breaks ties in ranking: active work above finished work. */
+  boost?: number;
   visual:
     | { kind: 'icon'; icon: IconName }
     | { kind: 'tool'; icon: IconName; color: string; ink: 'dark' | 'light' }
@@ -53,15 +57,35 @@ export async function buildSearchIndex(
 ): Promise<SearchItem[]> {
   const { space } = workspace;
   const base = `/${space.slug}`;
-  const [projects, vehicles, members, files] = await Promise.all([
+  const [projects, vehicles, members, files, inbox, receipts, directory] = await Promise.all([
     repo.projects(),
     repo.vehicles(),
     nav.space.some((item) => item.id === 'people') ? repo.members() : Promise.resolve([]),
     repo.files(),
+    repo.inbox(),
+    tools.some(
+      (tool) =>
+        tool.id === 'receipts' && availability(tool, space, workspace.membership).state === 'ready',
+    )
+      ? repo.receipts()
+      : Promise.resolve([]),
+    repo.directory(),
   ]);
   const projectWord = space.labels?.projects?.singular ?? 'Project';
+  const nameOf = (id?: string) => directory.find((person) => person.id === id)?.firstName;
+  const projectName = (id?: string) => projects.find((project) => project.id === id)?.name;
 
   return [
+    ...inbox.slice(0, 3).map<SearchItem>((item) => ({
+      id: `inbox-${item.id}`,
+      group: 'Needs attention',
+      title: item.title,
+      subtitle: [nameOf(item.fromId), item.detail].filter(Boolean).join(' · '),
+      keywords: 'inbox approve attention',
+      href: `${base}/inbox`,
+      boost: item.priority === 'high' ? 0.4 : 0,
+      visual: { kind: 'icon', icon: item.priority === 'high' ? 'alert' : 'inbox' },
+    })),
     ...actions.map<SearchItem>((action) => ({
       id: `action-${action.id}`,
       group: 'Actions',
@@ -102,6 +126,7 @@ export async function buildSearchIndex(
       subtitle: [projectWord, project.location, project.client].filter(Boolean).join(' · '),
       keywords: project.summary,
       href: `${base}/projects/${project.id}`,
+      boost: project.status === 'active' ? 0.3 : project.status === 'done' ? -0.3 : 0,
       visual: { kind: 'icon', icon: 'projects' },
     })),
     ...vehicles.map<SearchItem>((vehicle) => ({
@@ -110,6 +135,7 @@ export async function buildSearchIndex(
       title: vehicle.name,
       subtitle: `${vehicle.year} ${vehicle.make} ${vehicle.model} · ${vehicle.plate}`,
       href: `${base}/vehicles/${vehicle.id}`,
+      boost: 0.2,
       visual: { kind: 'icon', icon: 'truck' },
     })),
     ...members.map<SearchItem>((member) => ({
@@ -119,17 +145,53 @@ export async function buildSearchIndex(
       subtitle: `${member.title} · ${roles[member.role].label}`,
       keywords: member.person.email,
       href: `${base}/people/${member.personId}`,
+      boost: 0.2,
       visual: { kind: 'person', initials: member.person.initials, hue: member.person.hue },
+    })),
+    ...receipts.slice(0, 60).map<SearchItem>((receipt) => ({
+      id: `receipt-${receipt.id}`,
+      group: 'Receipts',
+      title: receipt.vendor,
+      subtitle: [
+        receipt.total ? `$${receipt.total.toFixed(2)}` : 'No total yet',
+        space.kind === 'business' ? nameOf(receipt.createdBy) : undefined,
+        projectName(receipt.projectId),
+      ]
+        .filter(Boolean)
+        .join(' · '),
+      keywords: `receipt expense ${receipt.category} ${receipt.status === 'submitted' ? 'pending' : receipt.status}`,
+      href: `${base}/tools/receipts?receipt=${receipt.id}`,
+      visual: { kind: 'icon', icon: 'receipt' },
     })),
     ...files.slice(0, 80).map<SearchItem>((file) => ({
       id: `file-${file.id}`,
       group: 'Files',
       title: file.name,
-      subtitle: file.folder,
+      subtitle: [
+        file.attachedTo
+          .map((ref) =>
+            ref.type === 'project'
+              ? projectName(ref.id)
+              : ref.type === 'vehicle'
+                ? vehicles.find((vehicle) => vehicle.id === ref.id)?.name
+                : undefined,
+          )
+          .filter(Boolean)[0],
+        file.folder,
+      ]
+        .filter(Boolean)
+        .join(' · '),
       href: `${base}/files?file=${file.id}`,
       visual: {
         kind: 'icon',
-        icon: file.kind === 'image' ? 'image' : file.kind === 'archive' ? 'archive' : 'file-text',
+        icon:
+          file.kind === 'image'
+            ? 'image'
+            : file.kind === 'archive'
+              ? 'archive'
+              : file.kind === 'pdf'
+                ? 'pdf'
+                : 'file-text',
       },
     })),
     ...workspace.session.memberships

@@ -270,6 +270,37 @@
   }
 }
 
+/* An inbox item you just acted on: tinted with the outcome, then it slides away. */
+[data-inbox-item][data-leaving] {
+  pointer-events: none;
+  animation: inbox-leave 0.55s var(--ease-out) forwards;
+}
+[data-inbox-item][data-leaving='rejected'] {
+  --leave-tint: var(--color-critical-soft);
+}
+@keyframes inbox-leave {
+  0% {
+    background: transparent;
+  }
+  35% {
+    background: var(--leave-tint, var(--color-positive-soft));
+    transform: none;
+    opacity: 1;
+  }
+  100% {
+    background: var(--leave-tint, var(--color-positive-soft));
+    transform: translateX(14px);
+    opacity: 0.35;
+  }
+}
+
+/* On desktop, the sidebar makes room for the Demo Mode dock while it's there. */
+@media (min-width: 1024px) {
+  html:has([data-demo-dock]) aside[aria-label='Main'] {
+    padding-bottom: 68px;
+  }
+}
+
 /* An open sheet or palette freezes the page behind it. */
 html:has(dialog[open]) {
   overflow: hidden;

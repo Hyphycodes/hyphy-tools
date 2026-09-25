@@ -10,7 +10,8 @@ import { formatBytes } from '@/lib/platform/format';
 
 /*
  * Image Resize, ported from Hyphy Studio (src/components/tools/image-tool.tsx). The conversion
- * pipeline, limits and messages are unchanged; the interface is Hyphy Tools', and results can be
+ * pipeline and limits are unchanged. New here: images start converting the moment they're added
+ * (1920 px wide by default), a file never comes back bigger than it went in, and results can be
  * saved to Files.
  */
 
@@ -33,10 +34,12 @@ const READABLE = /\.(jpe?g|png|webp|gif|avif|hei[cf])$/i;
 
 type Format = (typeof FORMATS)[number]['value'];
 type Size = { width: number; height: number };
-type Result = Size & { size: number; url: string; name: string };
+type Result = Size & { size: number; url: string; name: string; kept?: boolean };
 type Item = {
   id: number;
   file: File;
+  /** The original, shown until the result is ready. */
+  preview?: string;
   state: 'ready' | 'working' | 'done' | 'error';
   source?: Size;
   result?: Result;
@@ -107,15 +110,18 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
   const [saving, startSaving] = useTransition();
   const id = useId();
   const [items, setItems] = useState<Item[]>([]);
-  const [maxWidth, setMaxWidth] = useState('');
+  const [maxWidth, setMaxWidth] = useState('1920');
   const [format, setFormat] = useState<Format>('original');
   const [quality, setQuality] = useState(80);
   const [busy, setBusy] = useState(false);
   const [over, setOver] = useState(false);
   const [message, setMessage] = useState('');
+  const [applied, setApplied] = useState('');
+  const settings = `${maxWidth}|${format}|${quality}`;
   const nextId = useRef(0);
   const run = useRef(0);
   const urls = useRef(new Set<string>());
+  const input = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const created = urls.current;
@@ -137,44 +143,12 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
       current.map((item) => (item.id === itemId ? { ...item, ...changes } : item)),
     );
 
-  function add(files: FileList | null) {
-    if (!files?.length || busy) return;
-    const accepted: File[] = [];
-    const notImages: string[] = [];
-    const tooBig: string[] = [];
-    let skipped = 0;
-    for (const file of Array.from(files)) {
-      if (!file.type.startsWith('image/') && !READABLE.test(file.name)) notImages.push(file.name);
-      else if (file.size > MAX_BYTES) tooBig.push(file.name);
-      else if (items.length + accepted.length >= MAX_FILES) skipped += 1;
-      else accepted.push(file);
-    }
-    const notes: string[] = [];
-    if (accepted.length) {
-      const entries = accepted.map((file) => ({
-        id: nextId.current++,
-        file,
-        state: 'ready' as const,
-      }));
-      setItems((current) => [...current, ...entries]);
-      notes.push(`Added ${accepted.length} ${accepted.length === 1 ? 'image' : 'images'}.`);
-    }
-    if (notImages.length) {
-      const verb = notImages.length === 1 ? 'isn’t an image' : 'aren’t images';
-      notes.push(`${list(notImages)} ${verb} this tool can read. Try JPG, PNG or WebP.`);
-    }
-    if (tooBig.length)
-      notes.push(`${list(tooBig)} ${tooBig.length === 1 ? 'is' : 'are'} over 40 MB.`);
-    if (skipped) notes.push(`${MAX_FILES} images at a time — ${skipped} skipped.`);
-    setMessage(notes.join(' '));
-  }
-
-  async function convertAll() {
+  async function convertAll(queue: Item[] = items) {
     const token = ++run.current;
-    const queue = items;
+    setApplied(settings);
     const parsed = Number.parseInt(maxWidth, 10);
     const limit = parsed > 0 ? parsed : null;
-    queue.forEach((item) => release(item.result?.url));
+    queue.forEach((item) => item.result?.url !== item.preview && release(item.result?.url));
     setItems((current) =>
       current.map((item) => ({ ...item, state: 'ready', result: undefined, error: undefined })),
     );
@@ -184,6 +158,7 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
     let before = 0;
     let after = 0;
     let larger = 0;
+    let kept = 0;
     for (const [index, item] of queue.entries()) {
       setMessage(`Working on ${index + 1} of ${queue.length}: ${item.file.name}`);
       patch(item.id, { state: 'working' });
@@ -192,22 +167,30 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
         const output = await convert(item.file, limit, type, quality);
         if (run.current !== token) return;
         if (output.blob.type !== type) fallbacks.add(OUTPUTS[type].name);
-        const url = URL.createObjectURL(output.blob);
+        // Same size and format, but heavier? Hand back the original rather than a worse file.
+        const keep =
+          output.blob.size >= item.file.size &&
+          output.width === output.source.width &&
+          output.blob.type === item.file.type;
+        const blob = keep ? item.file : output.blob;
+        const url = keep && item.preview ? item.preview : URL.createObjectURL(blob);
         urls.current.add(url);
         const base = item.file.name.replace(/\.[^.]+$/, '') || 'image';
         const extension = OUTPUTS[output.blob.type]?.extension ?? 'png';
         before += item.file.size;
-        after += output.blob.size;
-        if (output.blob.size > item.file.size) larger += 1;
+        after += blob.size;
+        if (blob.size > item.file.size) larger += 1;
+        if (keep) kept += 1;
         patch(item.id, {
           state: 'done',
           source: output.source,
           result: {
             width: output.width,
             height: output.height,
-            size: output.blob.size,
+            size: blob.size,
             url,
-            name: `${base}-${output.width}w.${extension}`,
+            name: keep ? item.file.name : `${base}-${output.width}w.${extension}`,
+            kept: keep,
           },
         });
       } catch (error) {
@@ -229,6 +212,12 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
       const names = [...fallbacks].join(' or ');
       notes.push(`This browser can’t write ${names}, so those were saved as PNG.`);
     }
+    if (kept) {
+      const count = kept === 1 ? 'One image was' : `${kept} images were`;
+      notes.push(
+        `${count} already as small as it gets, so ${kept === 1 ? 'it’s' : 'they’re'} unchanged.`,
+      );
+    }
     if (larger) {
       const count = larger === 1 ? 'One file' : `${larger} files`;
       notes.push(`${count} came out larger than the original. Try WebP or a lower quality.`);
@@ -236,6 +225,55 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
     setBusy(false);
     setMessage(notes.join(' '));
   }
+
+  function add(files: FileList | null) {
+    if (!files?.length || busy) return;
+    const accepted: File[] = [];
+    const notImages: string[] = [];
+    const tooBig: string[] = [];
+    let skipped = 0;
+    for (const file of Array.from(files)) {
+      if (!file.type.startsWith('image/') && !READABLE.test(file.name)) notImages.push(file.name);
+      else if (file.size > MAX_BYTES) tooBig.push(file.name);
+      else if (items.length + accepted.length >= MAX_FILES) skipped += 1;
+      else accepted.push(file);
+    }
+    const notes: string[] = [];
+    let queue: Item[] | null = null;
+    if (accepted.length) {
+      const entries = accepted.map((file) => {
+        const preview = URL.createObjectURL(file);
+        urls.current.add(preview);
+        return { id: nextId.current++, file, preview, state: 'ready' as const };
+      });
+      queue = [...items, ...entries];
+      setItems(queue);
+      notes.push(`Added ${accepted.length} ${accepted.length === 1 ? 'image' : 'images'}.`);
+    }
+    if (notImages.length) {
+      const verb = notImages.length === 1 ? 'isn’t an image' : 'aren’t images';
+      notes.push(`${list(notImages)} ${verb} this tool can read. Try JPG, PNG or WebP.`);
+    }
+    if (tooBig.length)
+      notes.push(`${list(tooBig)} ${tooBig.length === 1 ? 'is' : 'are'} over 40 MB.`);
+    if (skipped) notes.push(`${MAX_FILES} images at a time — ${skipped} skipped.`);
+    setMessage(notes.join(' '));
+    // Adding is the whole job: convert right away with the current settings.
+    if (queue) void convertAll(queue);
+  }
+
+  // Images picked before the page finished loading never reached the change handler: take them now.
+  useEffect(() => {
+    const element = input.current;
+    if (!element?.files?.length) return;
+    const picked = element.files;
+    queueMicrotask(() => {
+      add(picked);
+      element.value = '';
+    });
+    // Once, on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function clear() {
     run.current += 1;
@@ -247,6 +285,18 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
   }
 
   const hasFiles = (event: DragEvent) => Array.from(event.dataTransfer.types).includes('Files');
+  const stale = items.length > 0 && !busy && settings !== applied;
+  const downloadAll = () =>
+    finished.forEach((item, index) =>
+      setTimeout(() => {
+        const link = document.createElement('a');
+        link.href = item.result!.url;
+        link.download = item.result!.name;
+        document.body.append(link);
+        link.click();
+        link.remove();
+      }, index * 250),
+    );
   const working = items.findIndex((item) => item.state === 'working');
   const finished = items.filter((item) => item.result);
   const totalBefore = finished.reduce((sum, item) => sum + item.file.size, 0);
@@ -307,6 +357,7 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
             {over ? 'Release to add' : 'Drop images here'}
           </p>
           <input
+            ref={input}
             id={`${id}-files`}
             type="file"
             accept="image/jpeg,image/png,image/webp,image/gif,image/avif"
@@ -409,11 +460,24 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <Button variant="primary" disabled={busy || items.length === 0} onClick={convertAll}>
-            {busy
-              ? `Converting ${Math.max(working, 0) + 1} of ${items.length}…`
-              : 'Resize & convert'}
-          </Button>
+          {finished.length > 0 && !stale && !busy ? (
+            <Button variant="primary" onClick={downloadAll}>
+              <Icon name="download" size={16} />
+              {finished.length === 1 ? 'Download' : `Download all ${finished.length}`}
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              disabled={busy || items.length === 0}
+              onClick={() => convertAll()}
+            >
+              {busy
+                ? `Converting ${Math.max(working, 0) + 1} of ${items.length}…`
+                : stale && finished.length
+                  ? `Apply to ${items.length === 1 ? 'the image' : `all ${items.length}`}`
+                  : 'Resize & convert'}
+            </Button>
+          )}
           {items.length > 0 && (
             <Button variant="ghost" onClick={clear}>
               Clear
@@ -443,8 +507,8 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
         {items.length === 0 ? (
           <ol className="grid gap-3 px-4 pt-2 pb-6 text-[14px] text-muted">
             {[
-              'Add photos or screenshots.',
-              'Pick a width and a format.',
+              'Add photos or screenshots — they shrink right away.',
+              'Change the width or format if you like.',
               'Download lighter files, or save them to Files.',
             ].map((line, index) => (
               <li key={line} className="flex items-center gap-3 rounded-[12px] bg-subtle px-3 py-3">
@@ -467,13 +531,16 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
                   data-state={item.state}
                 >
                   <span className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-[10px] bg-well text-[10px] font-medium text-muted uppercase">
-                    {result ? (
+                    {result || item.preview ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
-                        src={result.url}
+                        src={result?.url ?? item.preview}
                         alt=""
                         decoding="async"
-                        className="size-full object-cover"
+                        className={cn(
+                          'size-full object-cover transition-opacity',
+                          !result && 'opacity-60',
+                        )}
                       />
                     ) : (
                       (/\.([a-z0-9]{1,4})$/i.exec(item.file.name)?.[1] ?? 'img')
@@ -484,6 +551,8 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
                     <span className="block truncate text-[12.5px] text-muted">
                       {item.state === 'error' ? (
                         <span className="text-critical">{item.error}</span>
+                      ) : result?.kept && source ? (
+                        `${source.width}×${source.height} · ${formatBytes(item.file.size)} · already as small as it gets`
                       ) : result && source ? (
                         `${source.width}×${source.height} → ${result.width}×${result.height} · ${formatBytes(item.file.size)} → ${formatBytes(result.size)}`
                       ) : (
@@ -491,7 +560,7 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
                       )}
                     </span>
                   </span>
-                  {result && (
+                  {result && !result.kept && (
                     <span
                       className={cn(
                         'mono-num text-[12px] font-medium',
@@ -517,6 +586,7 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
                     aria-label={`Remove ${item.file.name}`}
                     onClick={() => {
                       release(result?.url);
+                      release(item.preview);
                       setItems((current) => current.filter((entry) => entry.id !== item.id));
                     }}
                     className="grid size-9 place-items-center rounded-[9px] text-muted hover:bg-ink/5"

@@ -39,9 +39,31 @@ export function MileageForm({ request, onDone, formId }: FormProps) {
   const [start, setStart] = useState(vehicle ? String(vehicle.odometer) : '');
   const [end, setEnd] = useState('');
   const [projectId, setProjectId] = useState(
-    request.attachTo?.type === 'project' ? request.attachTo.id : '',
+    request.attachTo?.type === 'project'
+      ? request.attachTo.id
+      : workspace.space.kind === 'business'
+        ? (workspace.options.currentProjectId ?? '')
+        : '',
   );
   const [purpose, setPurpose] = useState('');
+  const recent = workspace.options.recentTrips;
+
+  // Heading to a job site files the trip to that job.
+  const pickDestination = (place: string) => {
+    setTo(place);
+    const project = workspace.options.projects.find((item) => item.name === place);
+    if (project) setProjectId(project.id);
+  };
+  const repeat = (trip: (typeof recent)[number]) => {
+    setMode('miles');
+    setFrom(trip.from);
+    setTo(trip.to);
+    setRoundTrip(trip.roundTrip);
+    setMiles(String(trip.roundTrip ? Math.round((trip.miles / 2) * 10) / 10 : trip.miles));
+    setPurpose(trip.purpose);
+    if (trip.vehicleId !== undefined) setVehicleId(trip.vehicleId);
+    if (trip.projectId) setProjectId(trip.projectId);
+  };
 
   const oneWay = mode === 'miles' ? Number(miles) : Number(end) - Number(start);
   const total =
@@ -90,6 +112,39 @@ export function MileageForm({ request, onDone, formId }: FormProps) {
         <Icon name="route" size={28} className="mb-1 text-ink/40" />
       </div>
 
+      {recent.length > 0 && (
+        <div className="mt-4">
+          <p className="mb-2 text-[13px] text-muted">Same trip again?</p>
+          <div className="scrollbar-none -mx-5 flex gap-2 overflow-x-auto px-5 lg:mx-0 lg:flex-wrap lg:px-0">
+            {recent.map((trip) => {
+              const on = from === trip.from && to === trip.to;
+              return (
+                <button
+                  key={`${trip.from}-${trip.to}`}
+                  type="button"
+                  onClick={() => repeat(trip)}
+                  aria-pressed={on}
+                  className={cn(
+                    'flex shrink-0 flex-col items-start rounded-[14px] px-3 py-2 text-left transition-all active:scale-[.97]',
+                    on
+                      ? 'bg-ink text-white'
+                      : 'bg-surface shadow-[inset_0_0_0_1px_var(--color-line-strong)] hover:bg-subtle',
+                  )}
+                >
+                  <span className="max-w-[220px] truncate text-[13.5px] font-medium">
+                    {trip.from.split(',')[0]} → {trip.to.split(',')[0]}
+                  </span>
+                  <span className={cn('text-[12px]', on ? 'text-white/65' : 'text-muted')}>
+                    {formatMiles(trip.miles)}
+                    {trip.roundTrip ? ' round trip' : ''}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <Section>
         <Segmented
           name={`${id}-mode`}
@@ -110,7 +165,7 @@ export function MileageForm({ request, onDone, formId }: FormProps) {
                 inputMode="decimal"
                 placeholder="0.0"
                 className="num"
-                autoFocus
+                data-autofocus
               />
             </Field>
             <Toggle
@@ -159,7 +214,7 @@ export function MileageForm({ request, onDone, formId }: FormProps) {
           <Input
             id={`${id}-to`}
             value={to}
-            onChange={(event) => setTo(event.target.value)}
+            onChange={(event) => pickDestination(event.target.value)}
             list={`${id}-places`}
             required
             placeholder="Job site, supplier…"
@@ -171,13 +226,17 @@ export function MileageForm({ request, onDone, formId }: FormProps) {
           ))}
         </datalist>
         {places.length > 1 && (
-          <div className="scrollbar-none -mt-1 flex gap-1.5 overflow-x-auto">
+          <div className="scrollbar-none -mx-5 -mt-1 flex gap-1.5 overflow-x-auto px-5 lg:mx-0 lg:flex-wrap lg:px-0">
             {places.slice(1, 6).map((place) => (
               <button
                 key={place}
                 type="button"
-                onClick={() => setTo(place)}
-                className="shrink-0 rounded-full bg-well px-3 py-1.5 text-[13px] text-ink-2 hover:bg-ink/10"
+                onClick={() => pickDestination(place)}
+                aria-pressed={to === place}
+                className={cn(
+                  'shrink-0 rounded-full px-3 py-1.5 text-[13px] transition-colors',
+                  to === place ? 'bg-ink text-white' : 'bg-well text-ink-2 hover:bg-ink/10',
+                )}
               >
                 {place}
               </button>
@@ -303,7 +362,7 @@ export function ProjectForm({ onDone, formId }: FormProps) {
             value={name}
             onChange={(event) => setName(event.target.value)}
             required
-            autoFocus
+            data-autofocus
             placeholder={events ? 'Harvest dinner' : '1845 Oak St'}
           />
         </Field>
@@ -385,7 +444,12 @@ export function ProjectForm({ onDone, formId }: FormProps) {
               onChange={(event) => setDueDate(event.target.value)}
             />
           </Field>
-          <Field label="Budget" htmlFor={`${id}-budget`} optional>
+          <Field
+            label="Expense budget"
+            htmlFor={`${id}-budget`}
+            optional
+            hint="What receipts on this can add up to."
+          >
             <Input
               id={`${id}-budget`}
               value={budget}
@@ -453,7 +517,7 @@ export function PersonForm({ onDone, formId }: FormProps) {
             value={name}
             onChange={(event) => setName(event.target.value)}
             required
-            autoFocus
+            data-autofocus
             autoComplete="off"
           />
         </Field>
@@ -612,7 +676,7 @@ export function VehicleForm({ onDone, formId }: FormProps) {
             value={values.name}
             onChange={set('name')}
             required
-            autoFocus
+            data-autofocus
             placeholder="Truck 36"
           />
         </Field>

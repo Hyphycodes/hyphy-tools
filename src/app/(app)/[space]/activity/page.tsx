@@ -32,7 +32,7 @@ export default async function ActivityPage({
   const personal = workspace.space.kind === 'personal';
 
   return (
-    <Page>
+    <Page narrow>
       <PageHeader
         title={personal ? 'History' : 'Activity'}
         description={

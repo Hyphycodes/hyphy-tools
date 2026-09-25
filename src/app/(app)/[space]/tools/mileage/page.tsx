@@ -7,7 +7,8 @@ import { EmptyState } from '@/components/ui/empty';
 import { Page } from '@/components/ui/page';
 import { Panel, PanelHeader } from '@/components/ui/panel';
 import { openPage } from '@/lib/page';
-import { formatMiles, formatNumber } from '@/lib/platform/format';
+import { cn } from '@/components/ui/cn';
+import { formatMiles, formatNumber, formatRelative, plural } from '@/lib/platform/format';
 import { getTool } from '@/lib/platform/tools';
 import type { MileageEntry } from '@/lib/platform/types';
 
@@ -36,6 +37,7 @@ export default async function MileagePage({ params }: PageProps<'/[space]/tools/
       .filter((entry) => entry.status !== 'rejected')
       .reduce((sum, entry) => sum + entry.miles, 0);
   const thisMonth = months.get(monthKey(new Date().toISOString())) ?? [];
+  const latest = [...entries].sort((a, b) => b.date.localeCompare(a.date))[0];
 
   const csv: (string | number)[][] = [
     [
@@ -75,63 +77,56 @@ export default async function MileagePage({ params }: PageProps<'/[space]/tools/
         }
       />
       <div className="mb-5 grid grid-cols-2 gap-px overflow-hidden rounded-[16px] bg-line shadow-card sm:grid-cols-4">
-        {[
+        {(
           [
-            'This month',
-            formatMiles(Math.round(counted(thisMonth) * 10) / 10),
-            `${thisMonth.length} trips`,
-          ],
-          [
-            'All time here',
-            formatMiles(Math.round(counted(entries) * 10) / 10),
-            `${entries.length} trips`,
-          ],
-          [
-            business ? 'Pending' : 'Round trips',
-            String(business ? pending.length : entries.filter((entry) => entry.roundTrip).length),
-            business ? (approver ? 'waiting on you' : 'awaiting approval') : 'this Space',
-          ],
-          [
-            'Longest trip',
-            entries.length ? formatMiles(Math.max(...entries.map((entry) => entry.miles))) : '—',
-            '',
-          ],
-        ].map(([label, value, note]) => (
-          <div key={label} className="bg-surface px-4 py-3.5">
-            <p className="text-[12.5px] text-muted">{label}</p>
-            <p className="mt-1 text-[22px] leading-none font-semibold tracking-[-0.02em]">
+            [
+              'This month',
+              formatMiles(Math.round(counted(thisMonth) * 10) / 10),
+              plural(thisMonth.length, 'trip'),
+            ],
+            business
+              ? [
+                  approver ? 'Waiting on you' : 'Waiting for approval',
+                  String(pending.length),
+                  pending.length
+                    ? formatMiles(Math.round(counted(pending) * 10) / 10)
+                    : 'All caught up',
+                  pending.length ? 'signal' : undefined,
+                ]
+              : [
+                  'Round trips',
+                  String(entries.filter((entry) => entry.roundTrip).length),
+                  'this Space',
+                ],
+            [
+              'Last trip',
+              latest ? formatMiles(latest.miles) : '—',
+              latest ? `${latest.to.split(',')[0]} · ${formatRelative(latest.date, tz)}` : '',
+            ],
+            [
+              'Longest trip',
+              entries.length ? formatMiles(Math.max(...entries.map((entry) => entry.miles))) : '—',
+              '',
+            ],
+          ] as [string, string, string, string?][]
+        ).map(([label, value, note, tone], index) => (
+          <div key={label} className={cn('bg-surface px-4 py-3.5', index > 1 && 'hidden sm:block')}>
+            <p className="flex items-center gap-1.5 text-[12.5px] text-muted">
+              {tone && <span className="size-1.5 rounded-full bg-signal" aria-hidden="true" />}
+              {label}
+            </p>
+            <p
+              className={cn(
+                'mt-1 text-[22px] leading-none font-semibold tracking-[-0.02em]',
+                tone && 'text-signal-ink',
+              )}
+            >
               {value}
             </p>
-            <p className="mt-1 text-[12px] text-faint">{note}</p>
+            <p className="mt-1 truncate text-[12px] text-faint">{note}</p>
           </div>
         ))}
       </div>
-
-      {approver && pending.length > 0 && (
-        <Panel className="mb-5">
-          <PanelHeader title="Waiting on you" count={pending.length} />
-          <ul className="row-divide pb-1">
-            {pending.map((entry) => (
-              <li
-                key={entry.id}
-                className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:pr-4"
-              >
-                <div className="min-w-0 flex-1">
-                  <MileageRow entry={entry} people={people} timezone={tz} kind="business" />
-                </div>
-                <div className="ml-[68px] pb-3 sm:ml-0 sm:pb-0">
-                  <ReviewButtons
-                    slug={workspace.space.slug}
-                    table="mileage"
-                    id={entry.id}
-                    label={`${formatMiles(entry.miles)} · ${entry.to}`}
-                  />
-                </div>
-              </li>
-            ))}
-          </ul>
-        </Panel>
-      )}
 
       {entries.length === 0 ? (
         <Panel>
@@ -162,15 +157,31 @@ export default async function MileagePage({ params }: PageProps<'/[space]/tools/
                 </span>
               </PanelHeader>
               <div className="row-divide pb-1.5">
-                {list.map((entry) => (
-                  <MileageRow
-                    key={entry.id}
-                    entry={entry}
-                    people={people}
-                    timezone={tz}
-                    kind={workspace.space.kind}
-                  />
-                ))}
+                {[...list]
+                  .sort(
+                    (a, b) =>
+                      Number(approver && b.status === 'submitted') -
+                      Number(approver && a.status === 'submitted'),
+                  )
+                  .map((entry) => (
+                    <MileageRow
+                      key={entry.id}
+                      entry={entry}
+                      people={people}
+                      timezone={tz}
+                      kind={workspace.space.kind}
+                      actions={
+                        approver && entry.status === 'submitted' ? (
+                          <ReviewButtons
+                            slug={workspace.space.slug}
+                            table="mileage"
+                            id={entry.id}
+                            label={`${formatMiles(entry.miles)} · ${entry.to}`}
+                          />
+                        ) : undefined
+                      }
+                    />
+                  ))}
               </div>
             </Panel>
           ))}

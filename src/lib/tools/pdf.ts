@@ -17,3 +17,15 @@ export function parseRange(input: string, total: number): number[] | null {
   }
   return pages.length ? pages : null;
 }
+
+/** Zero-based page indexes → the shortest range text: [0,1,2,4] → "1-3, 5". */
+export function formatRange(indexes: number[]): string {
+  const pages = [...new Set(indexes)].sort((a, b) => a - b).map((index) => index + 1);
+  const parts: string[] = [];
+  for (let i = 0; i < pages.length; i += 1) {
+    const start = pages[i];
+    while (i + 1 < pages.length && pages[i + 1] === pages[i] + 1) i += 1;
+    parts.push(start === pages[i] ? String(start) : `${start}-${pages[i]}`);
+  }
+  return parts.join(', ');
+}

@@ -35,6 +35,18 @@ export type ShellModel = {
     }[];
     places: string[];
     people: { id: string; name: string; initials: string; hue: string; role: Role }[];
+    /** Where this person is working now, so new receipts and trips land there by default. */
+    currentProjectId?: string;
+    /** Their last few distinct trips, to log the same one again in a tap. */
+    recentTrips: {
+      from: string;
+      to: string;
+      miles: number;
+      roundTrip: boolean;
+      purpose: string;
+      vehicleId?: string;
+      projectId?: string;
+    }[];
   };
   labels: { project: string; projects: string };
 };

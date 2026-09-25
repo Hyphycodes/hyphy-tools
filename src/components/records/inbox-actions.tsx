@@ -1,5 +1,5 @@
 'use client';
-import { useTransition } from 'react';
+import { useTransition, type MouseEvent } from 'react';
 import { resolveInboxItem, reviewItem } from '@/app/(app)/[space]/actions';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
@@ -28,15 +28,29 @@ export function InboxActions({
     (kind === 'receipt-approval' || kind === 'mileage-review' || kind === 'unassigned-receipt') &&
     (subject.type === 'receipt' || subject.type === 'mileage');
 
-  const act = (work: () => ReturnType<typeof resolveInboxItem>) =>
+  // The row marks itself as leaving right away, so the decision feels instant; the refreshed list
+  // then drops it. If the server says no, it comes back.
+  const act = (
+    event: MouseEvent<HTMLElement>,
+    outcome: 'approved' | 'rejected' | 'done',
+    work: () => ReturnType<typeof resolveInboxItem>,
+  ) => {
+    const row = event.currentTarget.closest<HTMLElement>('[data-inbox-item]');
+    row?.setAttribute('data-leaving', outcome);
     start(async () => {
       const result = await work();
+      if (!result.ok) row?.removeAttribute('data-leaving');
       toast(
         result.ok
-          ? { title: result.message ?? 'Done', description: subject.label }
+          ? {
+              title: result.message ?? 'Done',
+              description: subject.label,
+              icon: outcome === 'rejected' ? 'arrow-left' : 'check',
+            }
           : { title: result.error, icon: 'alert' },
       );
     });
+  };
 
   if (reviewable) {
     const table = subject.type === 'receipt' ? 'receipts' : 'mileage';
@@ -46,7 +60,9 @@ export function InboxActions({
           size={size}
           variant="ghost"
           disabled={pending}
-          onClick={() => act(() => reviewItem(slug, table, subject.id, 'rejected'))}
+          onClick={(event) =>
+            act(event, 'rejected', () => reviewItem(slug, table, subject.id, 'rejected'))
+          }
         >
           Return
         </Button>
@@ -54,7 +70,9 @@ export function InboxActions({
           size={size}
           variant="primary"
           disabled={pending}
-          onClick={() => act(() => reviewItem(slug, table, subject.id, 'approved'))}
+          onClick={(event) =>
+            act(event, 'approved', () => reviewItem(slug, table, subject.id, 'approved'))
+          }
         >
           Approve
         </Button>
@@ -66,7 +84,7 @@ export function InboxActions({
       size={size}
       variant="ghost"
       disabled={pending}
-      onClick={() => act(() => resolveInboxItem(slug, id))}
+      onClick={(event) => act(event, 'done', () => resolveInboxItem(slug, id))}
     >
       Done
     </Button>
@@ -92,7 +110,11 @@ export function ReviewButtons({
       const result = await reviewItem(slug, table, id, decision);
       toast(
         result.ok
-          ? { title: result.message ?? 'Done', description: label }
+          ? {
+              title: result.message ?? 'Done',
+              description: label,
+              icon: decision === 'rejected' ? 'arrow-left' : 'check',
+            }
           : { title: result.error, icon: 'alert' },
       );
     });

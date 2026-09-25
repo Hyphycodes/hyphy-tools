@@ -28,12 +28,22 @@ export type CreateActionId =
 
 type Perspective = 'personal' | Role;
 
+/** How the Create menu groups actions: record what happened, set up the business, make something. */
+export type CreateGroup = 'capture' | 'setup' | 'make';
+
+export const createGroups: { id: CreateGroup; label: string }[] = [
+  { id: 'capture', label: 'Capture' },
+  { id: 'setup', label: 'Set up' },
+  { id: 'make', label: 'Make' },
+];
+
 type CreateActionDefinition = {
   id: CreateActionId;
   /** The tool it belongs to, for availability, color and glyph. */
   toolId: string;
   label: string | (Partial<Record<Perspective, string>> & { default: string });
   hint: string;
+  group: CreateGroup;
   icon?: IconName;
   permission?: Permission;
   target: { type: 'form'; form: CreateFormId } | { type: 'route'; path: string };
@@ -48,7 +58,8 @@ const definitions: CreateActionDefinition[] = [
       personal: 'Scan receipt',
       member: 'Submit receipt',
     },
-    hint: 'Photo, total and where it goes',
+    hint: 'Snap it, file it',
+    group: 'capture',
     icon: 'scan',
     permission: 'expenses.submit',
     target: { type: 'form', form: 'receipt' },
@@ -57,7 +68,8 @@ const definitions: CreateActionDefinition[] = [
     id: 'mileage',
     toolId: 'mileage',
     label: 'Log mileage',
-    hint: 'A trip, in a few taps',
+    hint: 'A trip in a few taps',
+    group: 'capture',
     permission: 'expenses.submit',
     target: { type: 'form', form: 'mileage' },
   },
@@ -66,6 +78,7 @@ const definitions: CreateActionDefinition[] = [
     toolId: 'files',
     label: { default: 'Upload photos', member: 'Upload job photos' },
     hint: 'Straight to the project',
+    group: 'capture',
     icon: 'camera',
     permission: 'files.upload',
     target: { type: 'form', form: 'photos' },
@@ -74,7 +87,8 @@ const definitions: CreateActionDefinition[] = [
     id: 'project',
     toolId: 'projects',
     label: 'Create project',
-    hint: 'A job, with its costs and files',
+    hint: 'Costs, files and team',
+    group: 'setup',
     permission: 'projects.manage',
     target: { type: 'form', form: 'project' },
   },
@@ -82,7 +96,8 @@ const definitions: CreateActionDefinition[] = [
     id: 'person',
     toolId: 'people',
     label: 'Add person',
-    hint: 'Invite someone and pick their role',
+    hint: 'Invite and pick a role',
+    group: 'setup',
     icon: 'user-plus',
     permission: 'people.manage',
     target: { type: 'form', form: 'person' },
@@ -91,7 +106,8 @@ const definitions: CreateActionDefinition[] = [
     id: 'vehicle',
     toolId: 'vehicles',
     label: 'Add vehicle',
-    hint: 'Assign it and track its costs',
+    hint: 'Assign it, track its costs',
+    group: 'setup',
     permission: 'vehicles.manage',
     target: { type: 'form', form: 'vehicle' },
   },
@@ -99,7 +115,8 @@ const definitions: CreateActionDefinition[] = [
     id: 'file',
     toolId: 'files',
     label: 'Upload file',
-    hint: 'Attach it to the right record',
+    hint: 'Attach it to the work',
+    group: 'capture',
     icon: 'upload',
     permission: 'files.upload',
     target: { type: 'form', form: 'file' },
@@ -109,13 +126,15 @@ const definitions: CreateActionDefinition[] = [
     toolId: 'pdf',
     label: { default: 'Process PDF', personal: 'Work with PDF' },
     hint: 'Merge, split, reorder',
+    group: 'make',
     target: { type: 'route', path: '/tools/pdf' },
   },
   {
     id: 'qr',
     toolId: 'qr',
     label: 'Create QR code',
-    hint: 'For signs, menus and cards',
+    hint: 'For signs, menus, cards',
+    group: 'make',
     target: { type: 'route', path: '/tools/qr' },
   },
   {
@@ -123,13 +142,15 @@ const definitions: CreateActionDefinition[] = [
     toolId: 'links',
     label: 'Create link page',
     hint: 'One link for everything',
+    group: 'make',
     target: { type: 'route', path: '/tools/links' },
   },
   {
     id: 'images',
     toolId: 'images',
     label: 'Resize images',
-    hint: 'Lighter files, same picture',
+    hint: 'Resize and convert',
+    group: 'make',
     target: { type: 'route', path: '/tools/images' },
   },
 ];
@@ -149,6 +170,7 @@ export type CreateAction = {
   toolId: string;
   label: string;
   hint: string;
+  group: CreateGroup;
   icon: IconName;
   color: string;
   ink: 'dark' | 'light';
@@ -200,12 +222,20 @@ export function createActionsFor(
             ? `Create ${projectLabel.toLowerCase()}`
             : label,
         hint: definition.hint,
+        group: definition.group,
         icon: definition.icon ?? tool.icon,
         color: tool.color,
         ink: tool.ink,
         target: definition.target,
       };
     });
+}
+
+/** Actions in menu order: grouped (Capture, Set up, Make), most useful first within a group. */
+export function groupActions(actions: CreateAction[]) {
+  return createGroups
+    .map((group) => ({ ...group, actions: actions.filter((action) => action.group === group.id) }))
+    .filter((group) => group.actions.length > 0);
 }
 
 /** The first few actions, for dashboards. */

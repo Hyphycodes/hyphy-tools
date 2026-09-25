@@ -11,10 +11,7 @@ export default async function LinksPage({ params }: PageProps<'/[space]/tools/li
   const [page] = await repo.linkPages();
   return (
     <Page wide>
-      <ToolHeader
-        tool={getTool('links')!}
-        note={page ? <span>Editing @{page.handle}</span> : undefined}
-      />
+      <ToolHeader tool={getTool('links')!} />
       <LinkEditor key={page?.id ?? 'new'} slug={workspace.space.slug} page={page} base={base} />
     </Page>
   );

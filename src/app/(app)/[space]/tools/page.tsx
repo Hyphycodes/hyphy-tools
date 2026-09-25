@@ -1,17 +1,17 @@
 import Link from 'next/link';
+import { CreateButton } from '@/components/create/create-button';
 import { ToolPreview } from '@/components/tools/previews';
 import { Badge } from '@/components/ui/badge';
-import { buttonClass } from '@/components/ui/button';
 import { cn } from '@/components/ui/cn';
 import { Icon } from '@/components/ui/icon';
 import { ToolGlyph } from '@/components/ui/marks';
 import { Page, PageHeader } from '@/components/ui/page';
-import { Chips } from '@/components/ui/tabs';
 import { openPage } from '@/lib/page';
+import type { CreateActionId } from '@/lib/platform/actions';
+import { formatCurrency, formatMiles, formatRelative, plural } from '@/lib/platform/format';
 import {
   availability,
   availabilityNote,
-  categories,
   statusLabel,
   toolName,
   tools,
@@ -20,13 +20,22 @@ import {
 
 export const metadata = { title: 'Tools' };
 
+/** What each tool's card offers as its one next step. */
+const primary: Record<string, { id: CreateActionId; label: string }> = {
+  receipts: { id: 'receipt', label: 'Add a receipt' },
+  mileage: { id: 'mileage', label: 'Log a trip' },
+  pdf: { id: 'pdf', label: 'Merge PDFs' },
+  qr: { id: 'qr', label: 'New code' },
+  links: { id: 'link-page', label: 'Edit page' },
+  images: { id: 'images', label: 'Resize images' },
+};
+
 /**
- * The Tools library: what each tool does, whether it works here, and what you've already made
- * with it. Read straight from the registry, so a new tool appears here the moment it's added.
+ * The Tools library: what you can do here, what you made last, and what's coming. Read straight
+ * from the registry, so a new tool appears here the moment it's added.
  */
-export default async function ToolsPage({ params, searchParams }: PageProps<'/[space]/tools'>) {
-  const { workspace, repo, base, can } = await openPage(params);
-  const view = String((await searchParams).view ?? 'all');
+export default async function ToolsPage({ params }: PageProps<'/[space]/tools'>) {
+  const { workspace, repo, base, can, tz } = await openPage(params);
   const { space, membership } = workspace;
   const [receipts, mileage, qrCodes, linkPages, files, projects, vehicles, members] =
     await Promise.all([
@@ -39,294 +48,356 @@ export default async function ToolsPage({ params, searchParams }: PageProps<'/[s
       repo.vehicles(),
       repo.members(),
     ]);
+  const made = (source: string) => files.filter((file) => file.source === source);
   const usage: Record<string, string | undefined> = {
-    receipts: receipts.length ? `${receipts.length} receipts` : undefined,
-    mileage: mileage.length ? `${mileage.length} trips` : undefined,
-    qr: qrCodes.length ? `${qrCodes.length} saved codes` : undefined,
-    links: linkPages.length
-      ? `${linkPages.length} link page${linkPages.length === 1 ? '' : 's'}`
+    receipts: receipts.length ? `${plural(receipts.length, 'receipt')} here` : undefined,
+    mileage: mileage.length ? `${plural(mileage.length, 'trip')} here` : undefined,
+    qr: qrCodes.length ? `${plural(qrCodes.length, 'saved code')}` : undefined,
+    links: linkPages[0]
+      ? `@${linkPages[0].handle} · ${plural(linkPages[0].links.length, 'link')}`
       : undefined,
-    pdf: files.filter((file) => file.source === 'pdf').length
-      ? `${files.filter((file) => file.source === 'pdf').length} merged PDFs`
-      : undefined,
-    images: files.filter((file) => file.source === 'images').length
-      ? `${files.filter((file) => file.source === 'images').length} resized`
-      : undefined,
+    pdf: made('pdf').length ? `${plural(made('pdf').length, 'merged PDF')} saved` : undefined,
+    images: made('images').length ? `${plural(made('images').length, 'image')} resized` : undefined,
     projects: projects.length
       ? `${projects.length} ${toolName(
           tools.find((tool) => tool.id === 'projects')!,
           space,
         ).toLowerCase()}`
       : undefined,
-    vehicles: vehicles.length ? `${vehicles.length} vehicles` : undefined,
-    people: members.length ? `${members.length} people` : undefined,
-    files: files.length ? `${files.length} files` : undefined,
+    vehicles: vehicles.length ? plural(vehicles.length, 'vehicle') : undefined,
+    people: members.length ? plural(members.length, 'person', 'people') : undefined,
+    files: files.length ? plural(files.length, 'file') : undefined,
   };
 
   const states = new Map(tools.map((tool) => [tool.id, availability(tool, space, membership)]));
   const ready = (tool: ToolDefinition) => states.get(tool.id)?.state === 'ready';
-  const filtered = tools.filter((tool) =>
-    view === 'ready'
-      ? ready(tool)
-      : view === 'soon'
-        ? tool.status === 'soon'
-        : view === 'teams'
-          ? tool.bestFor !== 'personal' && tool.spaceKinds.includes('business')
-          : true,
+
+  // Lead with what this kind of Space reaches for: a field team's receipts, a restaurant's codes.
+  const order =
+    space.kind === 'personal'
+      ? ['pdf', 'qr', 'receipts', 'mileage', 'links', 'images']
+      : space.modules.includes('vehicles')
+        ? ['receipts', 'mileage', 'pdf', 'qr', 'links', 'images']
+        : ['qr', 'links', 'receipts', 'pdf', 'images', 'mileage'];
+  const utilities = tools
+    .filter((tool) => tool.kind !== 'module' && tool.status !== 'soon' && ready(tool))
+    .sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+  // Two feature tiles, then the rest share a row evenly — whatever a Space has turned on.
+  const small = Math.max(utilities.length - 2, 0);
+  const spans: Record<number, string> = {
+    1: 'lg:col-span-12',
+    2: 'lg:col-span-6',
+    3: 'lg:col-span-4',
+    4: 'lg:col-span-3',
+  };
+  const modules = tools.filter((tool) => tool.kind === 'module' && tool.status !== 'soon');
+  const unavailable = tools.filter(
+    (tool) => tool.kind !== 'module' && tool.status !== 'soon' && !ready(tool),
   );
-  const featured =
-    tools.find(
-      (tool) =>
-        tool.id ===
-          (space.kind === 'personal'
-            ? 'pdf'
-            : space.modules.includes('vehicles')
-              ? 'receipts'
-              : 'qr') && ready(tool),
-    ) ?? tools.find((tool) => ready(tool) && tool.kind !== 'module');
+  const soon = tools.filter((tool) => tool.status === 'soon');
+
+  // The last few things made with any tool, so coming back is one click.
+  const recent = [
+    ...files
+      .filter((file) => file.source)
+      .map((file) => ({
+        id: file.id,
+        tool: file.source!,
+        title: file.name,
+        meta: file.source === 'pdf' ? `${file.pages ?? ''} pages` : 'Resized',
+        at: file.createdAt,
+        href: `${base}/files?file=${file.id}`,
+      })),
+    ...qrCodes.map((code) => ({
+      id: code.id,
+      tool: 'qr',
+      title: code.label,
+      meta: code.placement ?? 'QR code',
+      at: code.createdAt,
+      href: `${base}/tools/qr?code=${code.id}`,
+    })),
+    ...linkPages.map((page) => ({
+      id: page.id,
+      tool: 'links',
+      title: `@${page.handle}`,
+      meta: plural(page.links.length, 'link'),
+      at: page.updatedAt,
+      href: `${base}/tools/links`,
+    })),
+    ...receipts.map((receipt) => ({
+      id: receipt.id,
+      tool: 'receipts',
+      title: receipt.vendor,
+      meta: receipt.total ? formatCurrency(receipt.total) : 'Needs a total',
+      at: receipt.createdAt,
+      href: `${base}/tools/receipts?receipt=${receipt.id}`,
+    })),
+    ...mileage.map((entry) => ({
+      id: entry.id,
+      tool: 'mileage',
+      title: entry.to,
+      meta: formatMiles(entry.miles),
+      at: entry.createdAt,
+      href: `${base}/tools/mileage`,
+    })),
+  ]
+    .filter((item) => utilities.some((tool) => tool.id === item.tool))
+    .sort((a, b) => b.at.localeCompare(a.at))
+    .slice(0, 4);
 
   return (
     <Page wide>
       <PageHeader
         title="Tools"
-        description="Small, sharp tools that each do one job — and remember what you made with them in this Space."
+        description={
+          space.kind === 'personal'
+            ? 'Small, sharp tools for everyday jobs. Everything you make is saved here, private to you.'
+            : `Small, sharp tools for everyday jobs. What you make is saved to ${space.name}, where the team can find it.`
+        }
       />
 
-      {featured && view === 'all' && (
-        <section
-          className="relative mb-8 grid overflow-hidden rounded-[26px] md:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]"
-          style={{ background: `color-mix(in oklab, ${featured.color} 38%, white)` }}
-          aria-label={`Featured: ${featured.name}`}
-        >
-          <div className="relative z-10 p-6 sm:p-8">
-            <div className="flex items-center gap-3">
-              <ToolGlyph tool={featured} size="lg" />
-              <Badge tone={featured.status === 'beta' ? 'signal' : 'positive'} dot>
-                {statusLabel[featured.status]}
-              </Badge>
-            </div>
-            <h2 className="display mt-5 text-[34px] sm:text-[44px]">{featured.tagline}</h2>
-            <p className="mt-3 max-w-[46ch] text-[15px] leading-relaxed text-ink/70">
-              {featured.description}
-            </p>
-            <ul className="mt-5 grid gap-2 text-[14px] text-ink/80">
-              {featured.highlights.map((line) => (
-                <li key={line} className="flex items-center gap-2">
-                  <span className="grid size-5 place-items-center rounded-full bg-ink text-white">
-                    <Icon name="check" size={12} strokeWidth={2.6} />
-                  </span>
-                  {line}
+      {recent.length > 0 && (
+        <section aria-labelledby="recent" className="mb-8">
+          <h2 id="recent" className="label mb-3">
+            Jump back in
+          </h2>
+          <ul className="scrollbar-none -mx-4 flex gap-2.5 overflow-x-auto px-4 pb-1 sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 xl:grid-cols-4">
+            {recent.map((item) => {
+              const tool = tools.find((entry) => entry.id === item.tool)!;
+              return (
+                <li key={`${item.tool}-${item.id}`} className="w-[240px] shrink-0 sm:w-auto">
+                  <Link
+                    href={item.href}
+                    className="group flex items-center gap-3 rounded-[16px] bg-surface p-2.5 pr-3.5 shadow-card transition-all hover:-translate-y-0.5 hover:shadow-lift"
+                  >
+                    <ToolGlyph tool={tool} size="md" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13.5px] font-medium text-ink">
+                        {item.title}
+                      </span>
+                      <span className="block truncate text-[12px] text-muted">
+                        {item.meta} · {formatRelative(item.at, tz)}
+                      </span>
+                    </span>
+                  </Link>
                 </li>
-              ))}
-            </ul>
-            <div className="mt-6 flex flex-wrap items-center gap-3">
-              <Link
-                href={`${base}${featured.path}`}
-                className={buttonClass({ variant: 'primary', size: 'lg' })}
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
+      {utilities.length > 0 && (
+        <section aria-label="Your tools" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-12">
+          {utilities.map((tool, index) => {
+            const big = index < 2;
+            const action = primary[tool.id];
+            return (
+              <article
+                key={tool.id}
+                className={cn(
+                  'group relative flex animate-rise flex-col overflow-hidden rounded-[24px] transition-[transform,box-shadow] duration-300 hover:-translate-y-0.5 hover:shadow-lift',
+                  big ? spans[Math.min(utilities.length, 2)] : spans[Math.min(small, 4)],
+                )}
+                style={{
+                  background: `color-mix(in oklab, ${tool.color} ${big ? 30 : 24}%, white)`,
+                  animationDelay: `${index * 40}ms`,
+                }}
               >
-                Open {featured.name} <Icon name="arrow-right" size={17} />
-              </Link>
-              {featured.privacy && (
-                <span className="flex items-center gap-1.5 text-[13px] text-ink/60">
-                  <Icon name="lock" size={14} /> {featured.privacy}
+                <Link
+                  href={`${base}${tool.path}`}
+                  className="absolute inset-0 z-0 rounded-[24px]"
+                  aria-label={`Open ${tool.name}`}
+                />
+                <div
+                  className={cn(
+                    'pointer-events-none relative overflow-hidden',
+                    big ? 'h-[200px] lg:h-[230px]' : 'h-[150px]',
+                  )}
+                  aria-hidden="true"
+                >
+                  <div className="absolute inset-0 origin-center scale-[.9] transition-transform duration-500 ease-out group-hover:scale-100">
+                    <ToolPreview id={tool.id} />
+                  </div>
+                </div>
+                <div
+                  className={cn(
+                    'pointer-events-none relative flex flex-1 flex-col px-4 pb-4 sm:px-5 sm:pb-5',
+                  )}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <ToolGlyph tool={tool} size={big ? 'md' : 'sm'} />
+                    <h3
+                      className={cn(
+                        'font-semibold tracking-[-0.015em] text-ink',
+                        big ? 'text-[20px]' : 'text-[16px]',
+                      )}
+                    >
+                      {tool.name}
+                    </h3>
+                    {tool.status === 'beta' && (
+                      <Badge tone="signal" className="bg-white/70">
+                        {statusLabel.beta}
+                      </Badge>
+                    )}
+                  </div>
+                  <p
+                    className={cn(
+                      'mt-2 text-ink/70',
+                      big ? 'max-w-[46ch] text-[14.5px] leading-relaxed' : 'text-[13.5px]',
+                    )}
+                  >
+                    {big ? tool.description : tool.tagline}
+                  </p>
+                  <div className="mt-auto flex items-end justify-between gap-3 pt-4">
+                    <p className="min-w-0 text-[12.5px] text-ink/55">
+                      {usage[tool.id] ?? (tool.privacy && big ? tool.privacy : 'Nothing made yet')}
+                    </p>
+                    {action && (
+                      <span className="pointer-events-auto relative z-10 shrink-0">
+                        <CreateButton
+                          request={action.id}
+                          size="sm"
+                          variant={big ? 'primary' : 'secondary'}
+                          className={big ? undefined : '!bg-white/85 hover:!bg-white'}
+                        >
+                          {action.label}
+                        </CreateButton>
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </section>
+      )}
+
+      {modules.some(ready) && (
+        <section aria-labelledby="business" className="mt-10">
+          <h2 id="business" className="label mb-3">
+            {space.kind === 'personal' ? 'Also in your Space' : `Running ${space.name}`}
+          </h2>
+          <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+            {modules.filter(ready).map((tool) => (
+              <Link
+                key={tool.id}
+                href={`${base}${tool.path}`}
+                className="group flex items-center gap-3 rounded-[18px] bg-surface p-3 shadow-card transition-all hover:-translate-y-0.5 hover:shadow-lift"
+              >
+                <ToolGlyph tool={tool} size="md" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[14px] font-medium text-ink">
+                    {toolName(tool, space)}
+                  </span>
+                  <span className="block truncate text-[12px] text-muted">
+                    {usage[tool.id] ?? tool.tagline}
+                  </span>
                 </span>
-              )}
-            </div>
-          </div>
-          <div className="relative hidden min-h-[260px] md:block">
-            <ToolPreview id={featured.id} />
+                <Icon
+                  name="arrow-right"
+                  size={15}
+                  className="hidden text-faint transition-transform group-hover:translate-x-0.5 sm:block"
+                />
+              </Link>
+            ))}
           </div>
         </section>
       )}
 
-      <div className="mb-6">
-        <Chips
-          active={view}
-          items={[
-            { id: 'all', label: 'All tools', href: `${base}/tools`, count: tools.length },
-            {
-              id: 'ready',
-              label: `Ready in ${space.kind === 'personal' ? 'Personal' : space.name}`,
-              href: `${base}/tools?view=ready`,
-              count: tools.filter(ready).length,
-            },
-            ...(space.kind === 'business'
-              ? [{ id: 'teams', label: 'For teams', href: `${base}/tools?view=teams` }]
-              : []),
-            {
-              id: 'soon',
-              label: 'Coming soon',
-              href: `${base}/tools?view=soon`,
-              count: tools.filter((tool) => tool.status === 'soon').length,
-            },
-          ]}
-        />
-      </div>
+      {space.kind === 'personal' && (
+        <section
+          aria-labelledby="teams"
+          className="mt-10 flex flex-col gap-4 rounded-[22px] bg-subtle p-5 shadow-[inset_0_0_0_1px_var(--color-line)] sm:flex-row sm:items-center"
+        >
+          <div className="flex -space-x-2">
+            {modules
+              .filter(
+                (tool) =>
+                  tool.spaceKinds.includes('business') && !tool.spaceKinds.includes('personal'),
+              )
+              .map((tool) => (
+                <ToolGlyph key={tool.id} tool={tool} size="md" className="ring-2 ring-subtle" />
+              ))}
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 id="teams" className="text-[15px] font-semibold text-ink">
+              Projects, Vehicles and People come with a business Space
+            </h2>
+            <p className="mt-0.5 text-[13.5px] text-muted">
+              The same tools, plus a place for a team’s jobs, trucks and paperwork — with approvals
+              built in.
+            </p>
+          </div>
+        </section>
+      )}
 
-      <div className="grid gap-12">
-        {categories.map((category) => {
-          const list = filtered.filter((tool) => tool.category === category.id);
-          if (!list.length) return null;
-          return (
-            <section
-              key={category.id}
-              aria-labelledby={`cat-${category.id}`}
-              className="grid gap-4 lg:grid-cols-[200px_minmax(0,1fr)] lg:gap-8"
-            >
-              <div className="lg:sticky lg:top-14 lg:self-start lg:pt-1">
-                <h2 id={`cat-${category.id}`} className="display text-[24px]">
-                  {category.name}
-                </h2>
-                <p className="mt-1 text-[13.5px] text-muted">{category.line}</p>
-                <p className="mono-num mt-3 hidden text-[11px] text-faint lg:block">
-                  {list.length} {list.length === 1 ? 'tool' : 'tools'}
-                </p>
-              </div>
-              <div className="grid gap-3">
-                {list.map((tool) => {
+      {(unavailable.length > 0 || soon.length > 0) && (
+        <div className="mt-10 grid gap-8 lg:grid-cols-2">
+          {unavailable.length > 0 && (
+            <section aria-labelledby="unavailable">
+              <h2 id="unavailable" className="label mb-3">
+                Not on here
+              </h2>
+              <ul className="grid gap-2">
+                {unavailable.map((tool) => {
                   const state = states.get(tool.id)!;
-                  const isReady = state.state === 'ready';
-                  const canTurnOn = state.state === 'off' && can('space.manage');
-                  const href =
-                    isReady && tool.path
-                      ? `${base}${tool.path}`
-                      : canTurnOn
-                        ? `${base}/settings#tools`
-                        : undefined;
-                  const body = (
-                    <>
-                      <div
-                        className="relative h-[132px] shrink-0 overflow-hidden sm:h-auto sm:w-[240px]"
-                        style={{
-                          background: isReady
-                            ? `color-mix(in oklab, ${tool.color} ${tool.ink === 'light' ? 7 : 32}%, white)`
-                            : 'var(--color-subtle)',
-                        }}
-                      >
-                        {tool.kind === 'module' || !isReady ? (
-                          <div className="flex h-full flex-col justify-between p-4">
-                            <ToolGlyph
-                              tool={tool}
-                              size="lg"
-                              className={cn(!isReady && 'opacity-50 grayscale-[.4]')}
-                            />
-                            {isReady && usage[tool.id] && (
-                              <p className="text-[22px] leading-none font-semibold tracking-[-0.02em] text-ink">
-                                {usage[tool.id]!.split(' ')[0]}
-                                <span className="ml-1.5 text-[12.5px] font-normal text-ink/55">
-                                  {usage[tool.id]!.split(' ').slice(1).join(' ')}
-                                </span>
-                              </p>
-                            )}
-                          </div>
-                        ) : (
-                          <>
-                            <div className="absolute inset-0 origin-center scale-[.92] transition-transform duration-500 group-hover:scale-100">
-                              <ToolPreview id={tool.id} />
-                            </div>
-                            <ToolGlyph tool={tool} size="sm" className="absolute top-3 left-3" />
-                          </>
+                  const turnOn = state.state === 'off' && can('space.manage');
+                  return (
+                    <li key={tool.id}>
+                      <div className="flex items-center gap-3 rounded-[16px] bg-surface p-3 shadow-card">
+                        <ToolGlyph tool={tool} size="md" className="opacity-60 grayscale-[.5]" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[14px] font-medium text-ink">
+                            {tool.name}
+                          </span>
+                          <span className="block truncate text-[12.5px] text-muted">
+                            {availabilityNote(state, space)}
+                          </span>
+                        </span>
+                        {turnOn && (
+                          <Link
+                            href={`${base}/settings#tools`}
+                            className="text-[13px] font-medium text-signal-ink hover:underline"
+                          >
+                            Turn on
+                          </Link>
                         )}
                       </div>
-                      <div className="flex min-w-0 flex-1 flex-col p-4 sm:py-4 sm:pr-5 sm:pl-5">
-                        <div className="flex items-center gap-2">
-                          <h3 className="text-[17px] font-semibold tracking-[-0.01em] text-ink">
-                            {toolName(tool, space)}
-                          </h3>
-                          <Badge
-                            tone={
-                              tool.status === 'available'
-                                ? 'positive'
-                                : tool.status === 'beta'
-                                  ? 'signal'
-                                  : 'outline'
-                            }
-                            dot={tool.status !== 'soon'}
-                          >
-                            {statusLabel[tool.status]}
-                          </Badge>
-                          {href && (
-                            <Icon
-                              name="arrow-up-right"
-                              size={18}
-                              className="ml-auto text-faint transition-colors group-hover:text-ink"
-                            />
-                          )}
-                        </div>
-                        <p className="mt-0.5 text-[14px] text-ink-2">{tool.tagline}</p>
-                        <p className="mt-1.5 max-w-[62ch] text-[13px] leading-relaxed text-muted">
-                          {tool.description}
-                        </p>
-                        <ul className="mt-3 flex flex-wrap gap-1.5">
-                          {tool.highlights.map((line) => (
-                            <li
-                              key={line}
-                              className="rounded-full bg-subtle px-2.5 py-1 text-[12px] text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line)]"
-                            >
-                              {line}
-                            </li>
-                          ))}
-                        </ul>
-                        <div className="mt-auto flex flex-wrap items-center gap-x-4 gap-y-1 pt-4 text-[12.5px]">
-                          <span
-                            className={cn(
-                              'flex items-center gap-1.5 font-medium',
-                              isReady ? 'text-positive' : 'text-muted',
-                            )}
-                          >
-                            <span
-                              className={cn(
-                                'size-1.5 rounded-full',
-                                isReady ? 'bg-positive' : 'bg-faint',
-                              )}
-                            />
-                            {canTurnOn
-                              ? 'Off here — turn it on in Settings'
-                              : availabilityNote(state, space)}
-                          </span>
-                          <span className="text-muted">
-                            {tool.bestFor === 'both'
-                              ? 'Personal & teams'
-                              : tool.bestFor === 'teams'
-                                ? 'Best for teams'
-                                : 'Personal'}
-                          </span>
-                          {isReady && tool.kind !== 'module' && usage[tool.id] && (
-                            <span className="text-muted">{usage[tool.id]} here</span>
-                          )}
-                          {tool.privacy && (
-                            <span className="flex items-center gap-1 text-muted">
-                              <Icon name="lock" size={12} /> {tool.privacy}
-                            </span>
-                          )}
-                          {tool.origin === 'studio' && (
-                            <span className="text-faint">From Hyphy Studio</span>
-                          )}
-                        </div>
-                      </div>
-                    </>
-                  );
-                  const card =
-                    'group flex flex-col overflow-hidden rounded-[20px] bg-surface shadow-card transition-all sm:flex-row';
-                  return href ? (
-                    <Link
-                      key={tool.id}
-                      href={href}
-                      className={cn(card, 'hover:-translate-y-0.5 hover:shadow-lift')}
-                    >
-                      {body}
-                    </Link>
-                  ) : (
-                    <div key={tool.id} className={card}>
-                      {body}
-                    </div>
+                    </li>
                   );
                 })}
-              </div>
+              </ul>
             </section>
-          );
-        })}
-      </div>
+          )}
+          {soon.length > 0 && (
+            <section aria-labelledby="soon">
+              <h2 id="soon" className="label mb-3">
+                Coming soon
+              </h2>
+              <ul className="grid gap-2">
+                {soon.map((tool) => (
+                  <li
+                    key={tool.id}
+                    className="flex items-center gap-3 rounded-[16px] p-3 shadow-[inset_0_0_0_1px_var(--color-line-strong)] [background-image:repeating-linear-gradient(135deg,transparent_0_6px,rgb(22_21_15/.025)_6px_7px)]"
+                  >
+                    <ToolGlyph tool={tool} size="md" className="opacity-70" />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-2 text-[14px] font-medium text-ink">
+                        {tool.name}
+                        <Badge tone="outline">{statusLabel.soon}</Badge>
+                      </span>
+                      <span className="block truncate text-[12.5px] text-muted">
+                        {tool.tagline}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </div>
+      )}
     </Page>
   );
 }

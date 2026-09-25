@@ -60,10 +60,13 @@ export function Page({
   children,
   className,
   wide,
+  narrow,
 }: {
   children: ReactNode;
   className?: string;
   wide?: boolean;
+  /** Reading-width pages, like the activity feed. */
+  narrow?: boolean;
 }) {
   return (
     <div
@@ -73,7 +76,7 @@ export function Page({
         className,
       )}
     >
-      {children}
+      {narrow ? <div className="max-w-[880px]">{children}</div> : children}
     </div>
   );
 }

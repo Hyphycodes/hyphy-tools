@@ -78,6 +78,14 @@ export function formatRelative(iso: string, timezone = DEFAULT_TZ, now = Date.no
   return formatDate(iso, timezone);
 }
 
+/** formatRelative for the middle of a sentence: "edited yesterday", "edited Tuesday". */
+export function formatRelativeInline(iso: string, timezone = DEFAULT_TZ, now = Date.now()) {
+  const text = formatRelative(iso, timezone, now);
+  return /^(Today|Tomorrow|Yesterday|In )/.test(text)
+    ? text[0].toLowerCase() + text.slice(1)
+    : text;
+}
+
 /** Days from now until a date (negative when past). */
 export function daysUntil(iso: string, now = Date.now()) {
   return Math.ceil((new Date(iso).getTime() - now) / 86400000);

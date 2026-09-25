@@ -42,11 +42,41 @@ export function CreateButton({
 }
 
 /** The dashboard's quick actions, straight from the Create registry. */
-export function QuickActions({ count = 5, big = false }: { count?: number; big?: boolean }) {
+export function QuickActions({
+  count = 5,
+  big = false,
+  variant = 'tiles',
+}: {
+  count?: number;
+  big?: boolean;
+  /** `inline`: a few small buttons beside a page title. */
+  variant?: 'tiles' | 'inline';
+}) {
   const create = useCreate();
   const { actions } = useWorkspace();
   const shown = actions.slice(0, count);
   if (!shown.length) return null;
+
+  if (variant === 'inline')
+    return (
+      <div className="flex items-center gap-1.5">
+        {shown.map((action) => (
+          <button
+            key={action.id}
+            type="button"
+            onClick={() => create.start(action.id)}
+            className="group flex h-9 items-center gap-2 rounded-full bg-surface py-1 pr-3.5 pl-1 text-[13px] font-medium text-ink shadow-card transition-all hover:shadow-lift active:scale-[.97]"
+          >
+            <ToolGlyph
+              tool={{ color: action.color, ink: action.ink, icon: action.icon }}
+              size="sm"
+              className="!rounded-full transition-transform group-hover:scale-105"
+            />
+            {action.label}
+          </button>
+        ))}
+      </div>
+    );
 
   if (big)
     return (
