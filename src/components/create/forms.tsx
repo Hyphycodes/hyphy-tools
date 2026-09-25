@@ -108,8 +108,9 @@ export function MileageForm({ request, onDone, formId }: FormProps) {
   const needsApproval = workspace.setup.approval.mileage?.mode === 'always';
   const places = workspace.options.places;
   const business = workspace.space.kind === 'business';
-  // A personal car is paid back at the business's own rate — never a tax table's.
-  const rate = business && !vehicleId ? workspace.space.mileageRate : undefined;
+  // A personal car is paid back at the business's own rate — never a tax table's. A trip being
+  // fixed keeps the rate it was logged at.
+  const rate = business && !vehicleId ? (editing?.rate ?? workspace.space.mileageRate) : undefined;
   const noCompanyVehicle = !rules.personalVehicle && !showVehicles;
   const missing = () => {
     const found = answerProblems(fields, 'mileage', answers);

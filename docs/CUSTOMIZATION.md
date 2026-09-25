@@ -163,9 +163,11 @@ No preset sets a mileage rate. That rate is the business's decision (see Mileage
 - **Existing businesses are never overwritten.** The seeded demo businesses keep exactly their
   setup. There is no migration that "applies presets".
 - **Changing the kind** asks **"Update recommended setup?"** and lists what the new kind would add
-  (tools to turn on, fields to add, words to use), then offers **Keep my current setup** or **Apply
-  recommended additions**. Applying only adds: no tool is turned off, no field is archived or
-  changed, no answer, rule or record is touched. Fields whose key or name already exists are skipped.
+  (tools to turn on, fields to add, words to use, and — when the new kind runs projects
+  differently — how, e.g. "Run them as events: each on its day, with a room and a host, no
+  progress"), then offers **Keep my current setup** or **Apply recommended additions**. Applying
+  only adds: no tool is turned off, no field is archived or changed, no answer, rule or record is
+  touched. Fields whose key or name already exists are skipped.
 
 ## Receipts
 
@@ -173,7 +175,7 @@ No preset sets a mileage rate. That rate is the business's decision (see Mileage
 
 | Rule                          | Default       | Notes                                                                                                            |
 | ----------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------- |
-| A job on every receipt        | Optional      | Only while Projects is on                                                                                        |
+| A job on every receipt        | Optional      | Only while Projects is on, and only for people who can see a job to pick                                         |
 | A vehicle on every receipt    | Optional      | Only for people who have a vehicle to pick                                                                       |
 | A photo of the receipt        | —             | "Coming with file storage": it can be required once Hyphy stores files. Until then there is no photo requirement |
 | Personal expenses (paid back) | Allowed       | Off: the "Personal card (reimburse me)" payment disappears, and the server and database refuse it                |
@@ -200,7 +202,7 @@ exact form an employee will see.
   (`paidBack()` in `lib/insights.ts`). Trips logged before this existed were given the business's
   rate at the time of the migration.
 - **Trips in personal vehicles**: allowed (paid back) or not (company vehicles only).
-- **A job on every trip**: optional or required.
+- **A job on every trip**: optional or required (only asked of people who can see a job to pick).
 - **What the trip was for**: optional or required.
 - **Round trip** stays on the form as before.
 - **Approval**: every trip, or not needed.
@@ -311,4 +313,5 @@ asks for it immediately. See docs/DEMO-MODE.md.
 | `src/lib/data/demo/config*.ts`                                  | Demo Mode's setup cookie                                                              |
 | `supabase/migrations/20260930000000_business_customization.sql` | Tables, checks, triggers, policies                                                    |
 | `supabase/migrations/20260930010000_mileage_rate_snapshot.sql`  | Each trip keeps the rate it was logged at                                             |
-| `supabase/tests/customization.sql`                              | 82 database checks, always rolled back                                                |
+| `supabase/migrations/20260930020000_setup_rule_fixes.sql`       | The job rule asks only people with a job to pick; words and accent checked apart      |
+| `supabase/tests/customization.sql`                              | 86 database checks, always rolled back                                                |

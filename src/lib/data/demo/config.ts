@@ -2,7 +2,7 @@ import 'server-only';
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
 import { cookies } from 'next/headers';
 import { RuleError } from '../repository';
-import { emptyConfig, LOG_LIMIT, type DemoConfig } from './config-apply';
+import { cleanConfig, emptyConfig, LOG_LIMIT, type DemoConfig } from './config-apply';
 
 /**
  * Demo Mode's memory for business setup (fields, rules, words, tools), kept apart from the record
@@ -23,14 +23,9 @@ function encode(config: DemoConfig) {
 
 function decode(value: string): DemoConfig {
   try {
-    const parsed = JSON.parse(inflateRawSync(Buffer.from(value, 'base64url')).toString('utf8'));
-    if (!parsed || typeof parsed !== 'object') return emptyConfig();
-    return {
-      spaces: parsed.spaces && typeof parsed.spaces === 'object' ? parsed.spaces : {},
-      fields: parsed.fields && typeof parsed.fields === 'object' ? parsed.fields : {},
-      log: Array.isArray(parsed.log) ? parsed.log : [],
-      changes: Number.isInteger(parsed.changes) ? parsed.changes : 0,
-    };
+    return cleanConfig(
+      JSON.parse(inflateRawSync(Buffer.from(value, 'base64url')).toString('utf8')),
+    );
   } catch {
     return emptyConfig();
   }

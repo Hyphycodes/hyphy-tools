@@ -42,6 +42,38 @@ export type DemoConfig = {
 
 export const emptyConfig = (): DemoConfig => ({ spaces: {}, fields: {}, log: [], changes: 0 });
 
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const isField = (value: unknown): value is FieldDefinition =>
+  isObject(value) &&
+  ['id', 'spaceId', 'appliesTo', 'label', 'type'].every((key) => typeof value[key] === 'string');
+const isEvent = (value: unknown): value is ActivityEvent =>
+  isObject(value) &&
+  typeof value.id === 'string' &&
+  typeof value.at === 'string' &&
+  isObject(value.object);
+
+/**
+ * A setup read back from the browser, keeping only entries of the right shape. The cookie is
+ * written by the server, but a stale or hand-edited one must never break a page.
+ */
+export function cleanConfig(parsed: unknown): DemoConfig {
+  if (!isObject(parsed)) return emptyConfig();
+  const entries = (value: unknown) => (isObject(value) ? Object.entries(value) : []);
+  return {
+    spaces: Object.fromEntries(
+      entries(parsed.spaces).filter(([, changes]) => isObject(changes)),
+    ) as DemoConfig['spaces'],
+    fields: Object.fromEntries(
+      entries(parsed.fields)
+        .filter(([, list]) => Array.isArray(list))
+        .map(([spaceId, list]) => [spaceId, (list as unknown[]).filter(isField)]),
+    ),
+    log: Array.isArray(parsed.log) ? parsed.log.filter(isEvent) : [],
+    changes: Number.isInteger(parsed.changes) ? (parsed.changes as number) : 0,
+  };
+}
+
 /** How many setup lines Demo Mode keeps; older ones fall away first. */
 export const LOG_LIMIT = 12;
 

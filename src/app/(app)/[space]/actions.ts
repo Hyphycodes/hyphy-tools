@@ -29,7 +29,7 @@ import {
 } from '@/lib/platform/custom-fields';
 import type { Permission } from '@/lib/platform/roles';
 import { grantableRoles, roles } from '@/lib/platform/roles';
-import { businessTypes, isBusinessType, presetAdditions } from '@/lib/platform/business-types';
+import { isBusinessType, presetAdditions } from '@/lib/platform/business-types';
 import { plans } from '@/lib/platform/plans';
 import { cleanLabels, vehicleWords } from '@/lib/platform/terms';
 import { teamFor } from '@/lib/teams';
@@ -207,6 +207,11 @@ async function hasVehicle(repo: Repo, workspace: Workspace) {
   return workspace.space.modules.includes('vehicles') && (await repo.vehicles()).length > 0;
 }
 
+/** Whether this person can see a project to pick (a project rule only asks them if so). */
+async function hasProject(repo: Repo, workspace: Workspace) {
+  return workspace.space.modules.includes('projects') && (await repo.projects()).length > 0;
+}
+
 /** The business's rules for something being sent, in its own words. */
 async function checkRules(
   repo: Repo,
@@ -223,6 +228,7 @@ async function checkRules(
       vehicle: vehicleWords(workspace.space).singular,
     },
     await hasVehicle(repo, workspace),
+    await hasProject(repo, workspace),
   );
   if (problem) throw new InputError(problem);
 }
@@ -587,7 +593,7 @@ export async function changeBusinessType(slug: string, type: string, apply: bool
     const modules = Array.from(new Set([...space.modules, ...inPlan]));
     await repo.updateSpace({
       businessType: type,
-      workStyle: businessTypes[type].workStyle,
+      ...(additions.workStyle ? { workStyle: additions.workStyle } : {}),
       labels: { ...space.labels, ...additions.labels },
       ...(inPlan.length ? { modules } : {}),
     });
@@ -640,8 +646,9 @@ export async function saveMileageRules(slug: string, input: Input) {
   return run(slug, async () => {
     const { repo, workspace } = await setup(slug);
     const raw = String(input.rate ?? '').replace(/[$,\s]/g, '');
-    const rate = raw === '' ? null : Number(raw);
-    if (rate !== null && (!Number.isFinite(rate) || rate <= 0 || rate > 5))
+    // Kept to a tenth of a cent, and never rounded down to nothing.
+    const rate = raw === '' ? null : Math.round(Number(raw) * 1000) / 1000;
+    if (rate !== null && (!Number.isFinite(rate) || rate < 0.01 || rate > 5))
       throw new InputError('Choose a rate between $0.01 and $5.00 a mile.');
     const mileage = parseSettings({
       mileage: {
@@ -652,9 +659,8 @@ export async function saveMileageRules(slug: string, input: Input) {
       },
     }).mileage;
     await repo.updateSettings({ mileage });
-    const rounded = rate === null ? null : Math.round(rate * 1000) / 1000;
-    if (rounded !== (workspace.space.mileageRate ?? null))
-      await repo.updateSpace({ mileageRate: rounded as number });
+    if (rate !== (workspace.space.mileageRate ?? null))
+      await repo.updateSpace({ mileageRate: rate as number });
     return { ok: true, message: 'Mileage rules saved' };
   });
 }

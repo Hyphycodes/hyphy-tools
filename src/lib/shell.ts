@@ -127,7 +127,11 @@ export async function buildShellModel(workspace: Workspace, repo: Repository): P
       fields: (['receipts', 'mileage', 'projects', 'vehicles', 'people'] as const).flatMap((type) =>
         activeFields(fields, type).filter((field) => fieldUsable(field, space.modules)),
       ),
-      rules: formRules(space, space.modules.includes('vehicles') && vehicles.length > 0),
+      rules: formRules(
+        space,
+        space.modules.includes('vehicles') && vehicles.length > 0,
+        space.modules.includes('projects') && projects.length > 0,
+      ),
       // Approvers and Personal Spaces file straight through.
       approval: {
         receipt: business && !approver ? settings.receipts.approval : null,

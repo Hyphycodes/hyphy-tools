@@ -254,11 +254,13 @@ export type FormRules = {
 /**
  * What a business's forms ask for, given its rules and the tools it has on. A rule about a tool
  * that's off asks for nothing: turning Vehicles off never leaves "Vehicle *" on a receipt nobody
- * can fill in. `hasVehicle` is whether this person has a vehicle they could pick.
+ * can fill in. `hasVehicle` / `hasProject`: whether this person has one they could pick — a rule
+ * never asks for something the form has no way to choose.
  */
 export function formRules(
   space: Pick<Space, 'kind' | 'settings' | 'modules'>,
   hasVehicle = true,
+  hasProject = true,
 ): FormRules {
   const settings = resolveSettings(space);
   const business = space.kind === 'business';
@@ -267,13 +269,13 @@ export function formRules(
     !enabled ? 'off' : required && business ? 'required' : 'optional';
   return {
     receipts: {
-      project: pick(on('projects'), settings.receipts.requireProject),
+      project: pick(on('projects'), settings.receipts.requireProject && hasProject),
       vehicle: pick(on('vehicles'), settings.receipts.requireVehicle && hasVehicle),
       personalPayment: !business || settings.receipts.allowPersonal,
       defaultCategory: settings.receipts.defaultCategory,
     },
     mileage: {
-      project: pick(on('projects'), settings.mileage.requireProject),
+      project: pick(on('projects'), settings.mileage.requireProject && hasProject),
       purpose: settings.mileage.requirePurpose && business ? 'required' : 'optional',
       personalVehicle: !business || !on('vehicles') || settings.mileage.allowPersonalVehicles,
     },
@@ -295,8 +297,9 @@ export function submissionProblem(
   },
   words: { project: string; vehicle: string },
   hasVehicle: boolean,
+  hasProject = true,
 ): string | null {
-  const rules = formRules(space, hasVehicle);
+  const rules = formRules(space, hasVehicle, hasProject);
   if (kind === 'receipt') {
     if (rules.receipts.project === 'required' && !record.projectId)
       return `Choose the ${words.project.toLowerCase()} this receipt is for.`;

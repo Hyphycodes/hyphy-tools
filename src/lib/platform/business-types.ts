@@ -278,6 +278,8 @@ export type PresetAdditions = {
   fields: PresetField[];
   /** New words, when the kind names things differently from what the business uses now. */
   labels: SpaceLabels;
+  /** A different way of running projects (jobs, events, engagements), when the kind has one. */
+  workStyle?: WorkStyle;
 };
 
 /**
@@ -285,7 +287,7 @@ export type PresetAdditions = {
  * is turned off, no field is archived or changed, and words change only if the owner says so.
  */
 export function presetAdditions(
-  space: Pick<Space, 'modules' | 'labels'>,
+  space: Pick<Space, 'modules' | 'labels' | 'workStyle'>,
   fields: Pick<FieldDefinition, 'id' | 'appliesTo' | 'label'>[],
   type: BusinessType,
 ): PresetAdditions {
@@ -310,11 +312,15 @@ export function presetAdditions(
       .filter((field) => after.has(field.appliesTo as ModuleId) || field.appliesTo === 'people')
       .filter((field) => field.type !== 'vehicle' || after.has('vehicles')),
     labels,
+    ...(preset.workStyle !== (space.workStyle ?? 'engagements')
+      ? { workStyle: preset.workStyle }
+      : {}),
   };
 }
 
 export function hasAdditions(additions: PresetAdditions) {
   return (
+    Boolean(additions.workStyle) ||
     additions.modules.length > 0 ||
     additions.fields.length > 0 ||
     Object.keys(additions.labels).length > 0

@@ -315,8 +315,11 @@ export function checkValues(
       errors[field.id] = problem;
       continue;
     }
+    // An answer nobody changed isn't re-judged (the person it names may have left since), as in
+    // the database.
     if (
       hasValue(value) &&
+      value !== previous[field.id] &&
       (field.type === 'person' || field.type === 'project' || field.type === 'vehicle') &&
       options.exists &&
       !options.exists(field.type, String(value))

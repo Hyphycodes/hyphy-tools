@@ -322,6 +322,30 @@ begin
     pg_temp.did('prj_oak1845'))));
   checks := checks + 1;
   if err is not null then failures := failures || ('Someone without a vehicle was asked for one: ' || err); end if;
+  -- Nor does the project rule stop someone who can't see any project (their form has none).
+  perform pg_temp.as_admin();
+  update projects set team_ids = array_remove(team_ids, andre),
+         lead_id = case when lead_id = andre then dana else lead_id end
+   where space_id = abc;
+  perform pg_temp.as_person(andre);
+  select count(*) into n from projects where space_id = abc;
+  err := pg_temp.error_of(pg_temp.receipt(abc, andre, ', custom|, ''{"cost_code": "100 — General"}'''));
+  checks := checks + 2;
+  if n <> 0 then failures := failures || 'Andre still sees a project after leaving every team'::text; end if;
+  if err is not null then failures := failures || ('Someone who can see no project was asked for one: ' || err); end if;
+  -- Words are checked on their own: a mark from before the accent list doesn't block them.
+  perform pg_temp.as_admin();
+  perform set_config('hyphy.seeding', 'on', true);
+  update spaces set brand = '{"color": "teal"}' where id = abc;
+  perform set_config('hyphy.seeding', '', true);
+  perform pg_temp.as_person(dana);
+  err := pg_temp.error_of(format($$update spaces set labels = '{"projects": {"singular": "Job", "plural": "Jobs"}}' where id = %L$$, abc));
+  checks := checks + 2;
+  if err is not null then failures := failures || ('An old accent blocked saving the words: ' || err); end if;
+  if pg_temp.error_of(format($$update spaces set labels = '{"projects": {"singular": "Job"}}' where id = %L$$, abc)) is null then
+    failures := failures || 'Words of the wrong shape were saved'::text;
+  end if;
+  perform pg_temp.error_of(format($$update spaces set brand = '{"color": "#13784A", "ink": "light", "monogram": "AB"}' where id = %L$$, abc));
 
   perform pg_temp.as_person(dana);
   checks := checks + 3;

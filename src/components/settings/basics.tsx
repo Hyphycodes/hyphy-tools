@@ -25,6 +25,7 @@ import {
 import { termChoices, termQuestions, type TermKey } from '@/lib/platform/terms';
 import { getTool } from '@/lib/platform/tools';
 import type { FieldDefinition } from '@/lib/platform/types';
+import { workStyleLines } from '@/lib/platform/work';
 
 export function NameForm() {
   const workspace = useWorkspace();
@@ -113,7 +114,7 @@ export function KindChooser({ fields }: { fields: FieldDefinition[] }) {
           onClose={() => setAsking(false)}
           width="sm"
           title="Update recommended setup?"
-          description={`${businessTypes[choice].label} businesses usually start with a little more. Nothing you have is changed or removed either way.`}
+          description={`${businessTypes[choice].label} businesses usually start with a little more. Nothing you have is removed either way.`}
           footer={
             <>
               <Button variant="ghost" onClick={() => change(false)} disabled={pending}>
@@ -144,6 +145,12 @@ export function KindChooser({ fields }: { fields: FieldDefinition[] }) {
                   </b>{' '}
                   <span className="text-muted">(optional to start)</span>
                 </span>
+              </li>
+            )}
+            {additions.workStyle && (
+              <li className="flex gap-2.5">
+                <Icon name="calendar" size={16} className="mt-0.5 shrink-0 text-muted" />
+                <span>{workStyleLines[additions.workStyle]}</span>
               </li>
             )}
             {words && (

@@ -84,3 +84,10 @@ export function keyDate(
 ) {
   return profile.schedule === 'on' ? project.startDate : project.dueDate;
 }
+
+/** How a way of working changes the project pages, for asking before switching. */
+export const workStyleLines: Record<WorkStyle, string> = {
+  jobs: 'Run them as jobs: due dates, progress, job sites, trucks and trips',
+  events: 'Run them as events: each on its day, with a room and a host, no progress',
+  engagements: 'Run them as client work: due dates and progress',
+};

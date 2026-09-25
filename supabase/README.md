@@ -19,6 +19,7 @@ or on plain Postgres (with `tests/prelude.sql` standing in for what Supabase pro
 | `migrations/20260929010000_team_indexes.sql`           | Indexes for who revoked an invitation and who removed a member (advisor follow-up)                                                                                                                           |
 | `migrations/20260930000000_business_customization.sql` | Business customization: rules (`space_settings`), fields (`custom_fields`), answers on records, every answer and rule checked, who approves, filing without approval, setup activity (docs/CUSTOMIZATION.md) |
 | `migrations/20260930010000_mileage_rate_snapshot.sql`  | Each trip keeps the per-mile rate it was logged at, stamped by the database; a new rate never re-prices old trips                                                                                            |
+| `migrations/20260930020000_setup_rule_fixes.sql`       | The job rule asks only people with a job to pick; words and accent are checked separately (so an old accent never blocks saving words)                                                                       |
 | `tests/customization.sql`                              | Business setup attacked from every side: other businesses, wrong answers, stopped fields, roles, approvals, rates, removed members; always rolled back                                                       |
 | `tests/teams.sql`                                      | Businesses, invitations and team management as real accounts — including everything that must fail; always rolled back                                                                                       |
 | `tests/accounts.sql`                                   | The account bootstrap: once and idempotent, nobody bootstraps or edits anyone else, personas untouched; always rolled back                                                                                   |
@@ -109,10 +110,10 @@ psql "$DATABASE_ADMIN_URL" -f supabase/tests/isolation.sql     # attack suite, r
 HYPHY_DATA=supabase HYPHY_DEMO_RESET=on npm run dev
 ```
 
-**`hyphy-tools-dev`** (hosted, `jgvrqdausbjkfsspjgce`) holds all eleven migrations, with the
+**`hyphy-tools-dev`** (hosted, `jgvrqdausbjkfsspjgce`) holds all twelve migrations, with the
 migration history's versions matching the files (`real_accounts` and `business_spaces` checked there
 with `tests/accounts.sql` and `tests/teams.sql`; `business_customization` and
-`mileage_rate_snapshot` with `tests/customization.sql`, 82 checks), the dev tools and the seeded
+`mileage_rate_snapshot` and `setup_rule_fixes` with `tests/customization.sql`, 86 checks), the dev tools and the seeded
 world. It was checked with the same files: `tests/isolation.sql` (every attack
 refused), `tests/flows.sql` (every write path as real people) and `tests/fingerprint.sql`, whose
 hash is identical to the local database's — every persona sees exactly the same rows on hosted

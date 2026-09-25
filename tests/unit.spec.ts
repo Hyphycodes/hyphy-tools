@@ -873,7 +873,13 @@ test.describe('the invitation email', () => {
 
 /* ---------- business customization (Phase 2C) ---------- */
 
-import { applyConfig, emptyConfig, fieldLine, spaceLines } from '@/lib/data/demo/config-apply';
+import {
+  applyConfig,
+  cleanConfig,
+  emptyConfig,
+  fieldLine,
+  spaceLines,
+} from '@/lib/data/demo/config-apply';
 import { createRepository } from '@/lib/data/core';
 import { visibleTo } from '@/lib/data/demo/visibility';
 import type { Change, DataSource, FieldChange } from '@/lib/data/source';
@@ -1490,5 +1496,80 @@ test.describe('a trip keeps the rate it was logged at', () => {
       );
     }
     expect(own.rate).toBe(0.7);
+  });
+});
+
+test.describe('setup never asks for what can’t be given', () => {
+  const abc = seed(Date.UTC(2026, 8, 24, 18)).spaces.find(
+    (item) => item.slug === 'abc-construction',
+  )!;
+  const strict = {
+    ...abc,
+    settings: { receipts: { requireProject: true }, mileage: { requireProject: true } },
+  };
+  const words = { project: 'Job', vehicle: 'Truck' };
+  test('a job is required only of people who can see a job to pick', () => {
+    expect(formRules(strict, true, true).receipts.project).toBe('required');
+    expect(formRules(strict, true, false).receipts.project).toBe('optional');
+    expect(formRules(strict, true, false).mileage.project).toBe('optional');
+    expect(submissionProblem(strict, 'receipt', {}, words, false, true)).toBe(
+      'Choose the job this receipt is for.',
+    );
+    expect(submissionProblem(strict, 'receipt', {}, words, false, false)).toBeNull();
+  });
+  test('an answer nobody changed isn’t re-judged; a new one is', () => {
+    const foreman = {
+      id: 'foreman',
+      spaceId: abc.id,
+      appliesTo: 'projects' as const,
+      label: 'Foreman',
+      type: 'person' as const,
+      position: 0,
+    };
+    const permit = { ...foreman, id: 'permit', label: 'Permit', type: 'text' as const };
+    // Sam left the business; his name stays on the job while someone fixes the permit.
+    const nobody = () => false;
+    const kept = checkValues(
+      [foreman, permit],
+      'projects',
+      { permit: 'B-2291' },
+      {
+        previous: { foreman: 'sam' },
+        exists: nobody,
+      },
+    );
+    expect(kept.errors).toEqual({});
+    expect(kept.values).toEqual({ foreman: 'sam', permit: 'B-2291' });
+    const changed = checkValues(
+      [foreman],
+      'projects',
+      { foreman: 'ghost' },
+      {
+        previous: { foreman: 'sam' },
+        exists: nobody,
+      },
+    );
+    expect(changed.errors).toEqual({ foreman: 'Choose one from the list.' });
+  });
+  test('a new kind that runs projects differently says so before it changes', () => {
+    expect(presetAdditions(abc, [], 'hospitality').workStyle).toBe('events');
+    expect(presetAdditions(abc, [], 'construction').workStyle).toBeUndefined();
+    expect(hasAdditions({ modules: [], fields: [], labels: {}, workStyle: 'events' })).toBe(true);
+  });
+  test('a setup cookie of the wrong shape is ignored, never a broken page', () => {
+    expect(cleanConfig('nope')).toEqual(emptyConfig());
+    const cleaned = cleanConfig({
+      spaces: { sp_abc: { mileageRate: 0.8 }, sp_bad: 'x' },
+      fields: { sp_abc: [null, 7, { id: 'cost_code' }], sp_bad: 'x' },
+      log: [null, { id: 'a' }],
+      changes: 'many',
+    });
+    expect(cleaned).toEqual({
+      spaces: { sp_abc: { mileageRate: 0.8 } },
+      fields: { sp_abc: [] },
+      log: [],
+      changes: 0,
+    });
+    expect(() => applyConfig(seed(Date.UTC(2026, 8, 24, 18)), cleaned)).not.toThrow();
   });
 });
