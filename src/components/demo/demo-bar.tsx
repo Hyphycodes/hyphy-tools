@@ -16,8 +16,8 @@ function isTyping(target: EventTarget | null) {
 }
 
 /**
- * Demo Mode. A small, clearly-marked dock that stays out of the product's way: a card in the
- * sidebar's footer on desktop (the sidebar makes room for it), a thin line above the top bar on
+ * Demo Mode. A small, clearly-marked dock that stays out of the product's way: one slim control in
+ * the sidebar's footer on desktop (the sidebar makes room for it), a thin line above the top bar on
  * phones. It opens Preview As (become
  * anyone, in any of their Spaces) and resets the demo. It talks only to `lib/demo/actions` and
  * disappears when the identity source isn't the demo one — the product never knows it's there.
@@ -86,38 +86,24 @@ export function DemoBar({ demo }: { demo: DemoModel }) {
           )}
         </div>
 
-        {/* Desktop: a small card in the sidebar's footer, clear of the page. */}
-        <div className="fixed bottom-3 left-3 z-40 hidden w-[228px] animate-rise items-center gap-0.5 rounded-[14px] bg-night p-1 text-white shadow-lift lg:flex">
+        {/* Desktop: one slim control under the profile — who you are is already right above it. */}
+        <div className="fixed bottom-3 left-3 z-40 hidden h-10 w-[228px] animate-rise items-center gap-0.5 rounded-[12px] bg-night p-1 text-white shadow-lift lg:flex">
           <button
             type="button"
             onClick={() => setOpen(true)}
             title="Preview as someone else (Shift+D)"
             aria-label={`Preview as someone else — now ${current?.person.name}, ${role}`}
-            className="flex min-w-0 flex-1 items-center gap-2 rounded-[10px] py-1 pr-1.5 pl-1 text-left text-[12.5px] transition-colors hover:bg-white/10"
+            className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-[9px] pr-2 pl-1.5 text-left text-[12.5px] transition-colors hover:bg-white/10"
           >
-            {current && <Avatar person={current.person} size="sm" />}
-            <span className="flex min-w-0 flex-1 flex-col leading-[1.2]">
-              <span className="flex items-center gap-1.5">
-                <span className="truncate font-medium text-white">{current?.person.name}</span>
-              </span>
-              <span className="truncate text-[11px] text-white/50">
-                {role}
-                {perspective && perspective.space.kind !== 'personal' && (
-                  <> · {perspective.spaceName}</>
-                )}
-              </span>
+            <span className="rounded-[5px] bg-tool-receipt px-1.5 py-px font-mono text-[9px] font-semibold tracking-[0.08em] text-ink uppercase">
+              Demo
             </span>
-            <Icon name="chevrons" size={13} className="shrink-0 text-white/40" />
+            <span className="min-w-0 flex-1 truncate text-white/80">Preview as…</span>
+            <span className="font-mono text-[10.5px] text-white/35">⇧D</span>
           </button>
           {reset(
-            'flex h-9 items-center gap-1 rounded-[10px] px-2 text-[12px] text-white/55 transition-colors hover:bg-white/10 hover:text-white',
+            'flex h-8 items-center gap-1 rounded-[9px] px-2 text-[12px] text-white/55 transition-colors hover:bg-white/10 hover:text-white',
           )}
-          <span
-            className="absolute -top-2 left-3 flex items-center gap-1 rounded-full bg-tool-receipt px-1.5 py-px font-mono text-[8.5px] font-semibold tracking-[0.08em] text-ink uppercase"
-            aria-hidden="true"
-          >
-            Demo
-          </span>
         </div>
       </div>
 

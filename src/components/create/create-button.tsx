@@ -1,6 +1,6 @@
 'use client';
 import type { ReactNode } from 'react';
-import { Button } from '@/components/ui/button';
+import { Button, ButtonLink } from '@/components/ui/button';
 import { cn } from '@/components/ui/cn';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { ToolGlyph } from '@/components/ui/marks';
@@ -16,6 +16,7 @@ export function CreateButton({
   size = 'md',
   icon,
   className,
+  fallbackHref,
 }: {
   request: CreateActionId | CreateRequest;
   children: ReactNode;
@@ -23,11 +24,19 @@ export function CreateButton({
   size?: 'sm' | 'md';
   icon?: IconName;
   className?: string;
+  /** Where to go instead when this action isn't in this person's Create menu (a tool's page). */
+  fallbackHref?: string;
 }) {
   const create = useCreate();
   const { actions } = useWorkspace();
   const id = typeof request === 'string' ? request : request.id;
-  if (!actions.some((action) => action.id === id)) return null;
+  if (!actions.some((action) => action.id === id))
+    return fallbackHref ? (
+      <ButtonLink href={fallbackHref} variant={variant} size={size} className={className}>
+        {icon && <Icon name={icon} size={16} />}
+        {children}
+      </ButtonLink>
+    ) : null;
   return (
     <Button
       variant={variant}

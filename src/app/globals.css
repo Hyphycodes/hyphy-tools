@@ -294,10 +294,24 @@
   }
 }
 
+/* Something you just submitted, where it landed: a brief wash that settles. */
+[data-fresh] {
+  animation: arrive 2.4s var(--ease-out) both;
+}
+@keyframes arrive {
+  0%,
+  30% {
+    background: var(--color-signal-soft);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
 /* On desktop, the sidebar makes room for the Demo Mode dock while it's there. */
 @media (min-width: 1024px) {
   html:has([data-demo-dock]) aside[aria-label='Main'] {
-    padding-bottom: 68px;
+    padding-bottom: 60px;
   }
 }
 

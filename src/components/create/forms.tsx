@@ -15,7 +15,7 @@ import { formatMiles } from '@/lib/platform/format';
 import { roles } from '@/lib/platform/roles';
 import type { ProjectStatus, Role } from '@/lib/platform/types';
 import { useSubmit, type FormProps } from './create-sheets';
-import { FormFooter, Section, SubmitButton, Toggle, todayInput } from './parts';
+import { FormFooter, Section, SubmitButton, todayInput } from './parts';
 
 /* ---------- Mileage ---------- */
 
@@ -99,22 +99,122 @@ export function MileageForm({ request, onDone, formId }: FormProps) {
         );
       }}
     >
-      <div className="mt-1 flex items-end justify-between rounded-[16px] bg-tool-miles/35 px-4 py-4 shadow-[inset_0_0_0_1px_rgb(0_0_0/.05)]">
-        <div>
-          <p className="label !text-ink/60">Trip</p>
-          <p className="display mt-1 text-[40px] leading-none text-ink">
-            <span className="num">
-              {total ? (Math.round(total * 10) / 10).toLocaleString('en-US') : '0'}
-            </span>
-            <span className="ml-1 text-[18px] text-ink/50">mi</span>
+      {/* The number is the form: type miles straight into it, or tap a trip you've driven before. */}
+      <div className="mt-1 rounded-[18px] bg-tool-miles/35 px-4 pt-3.5 pb-3 shadow-[inset_0_0_0_1px_rgb(0_0_0/.05)] transition-colors focus-within:bg-tool-miles/45">
+        <div className="flex items-center justify-between gap-3">
+          <label
+            htmlFor={`${id}-${mode === 'miles' ? 'miles' : 'end'}`}
+            className="label !text-ink/60"
+          >
+            {mode === 'miles' ? 'Miles one way' : 'Odometer at the end'}
+          </label>
+          <button
+            type="button"
+            onClick={() => setMode(mode === 'miles' ? 'odometer' : 'miles')}
+            className="-mr-1 flex items-center gap-1 rounded-full px-2 py-1 text-[12.5px] text-ink/60 transition-colors hover:bg-white/50 hover:text-ink"
+          >
+            <Icon name={mode === 'miles' ? 'gauge' : 'route'} size={13} />
+            {mode === 'miles' ? 'Use odometer' : 'Enter miles'}
+          </button>
+        </div>
+        {mode === 'miles' ? (
+          // The whole row focuses the number, and “mi” rides right behind it as you type.
+          <div
+            className="mt-1 flex cursor-text items-baseline gap-1.5"
+            onClick={(event) => event.currentTarget.querySelector('input')?.focus()}
+          >
+            <input
+              id={`${id}-miles`}
+              value={miles}
+              onChange={(event) => setMiles(event.target.value.replace(/[^0-9.]/g, ''))}
+              inputMode="decimal"
+              autoComplete="off"
+              placeholder="0"
+              size={1}
+              style={{
+                // Digits are ~0.6em in the display face, the point far narrower.
+                width: `${[...(miles || '0')].reduce((sum, char) => sum + (char === '.' ? 0.28 : 0.62), 0.1)}em`,
+              }}
+              className="display num max-w-full min-w-0 bg-transparent text-[52px] leading-[1.05] text-ink caret-signal outline-none placeholder:text-ink/20"
+              data-autofocus
+            />
+            <span className="text-[20px] font-medium text-ink/45">mi</span>
+          </div>
+        ) : (
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <label className="rounded-[12px] bg-white/60 px-3 py-2">
+              <span className="block text-[11.5px] text-ink/55">Start</span>
+              <input
+                id={`${id}-start`}
+                value={start}
+                onChange={(event) => setStart(event.target.value.replace(/[^0-9]/g, ''))}
+                inputMode="numeric"
+                className="num w-full bg-transparent text-[20px] font-semibold text-ink outline-none"
+              />
+            </label>
+            <label className="rounded-[12px] bg-white px-3 py-2 shadow-[inset_0_0_0_1px_rgb(0_0_0/.06)]">
+              <span className="block text-[11.5px] text-ink/55">End</span>
+              <input
+                id={`${id}-end`}
+                value={end}
+                onChange={(event) => setEnd(event.target.value.replace(/[^0-9]/g, ''))}
+                inputMode="numeric"
+                placeholder={start}
+                className="num w-full bg-transparent text-[20px] font-semibold text-ink outline-none placeholder:text-ink/25"
+                data-autofocus
+              />
+            </label>
+          </div>
+        )}
+        <div className="mt-3 flex min-h-8 flex-wrap items-center justify-between gap-2">
+          {mode === 'miles' && (
+            <div
+              role="radiogroup"
+              aria-label="Trip type"
+              className="inline-flex rounded-full bg-white/55 p-0.5 shadow-[inset_0_0_0_1px_rgb(0_0_0/.05)]"
+            >
+              {[
+                { value: false, label: 'One way' },
+                { value: true, label: 'Round trip' },
+              ].map((option) => (
+                <button
+                  key={option.label}
+                  type="button"
+                  role="radio"
+                  aria-checked={roundTrip === option.value}
+                  onClick={() => setRoundTrip(option.value)}
+                  className={cn(
+                    'h-8 rounded-full px-3 text-[13px] font-medium transition-all lg:h-7 lg:text-[12.5px]',
+                    roundTrip === option.value
+                      ? 'bg-ink text-white shadow-[0_2px_8px_-4px_rgb(22_21_15/.6)]'
+                      : 'text-ink/60 hover:text-ink',
+                  )}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          )}
+          <p className="ml-auto text-[13px] text-ink/65" aria-live="polite">
+            {total ? (
+              <>
+                <span className="num font-semibold text-ink">
+                  {formatMiles(Math.round(total * 10) / 10)}
+                </span>{' '}
+                {mode === 'miles' && roundTrip ? 'there and back' : 'this trip'}
+              </>
+            ) : mode === 'odometer' && end && Number(end) <= Number(start) ? (
+              'End is below the start'
+            ) : (
+              'No miles yet'
+            )}
           </p>
         </div>
-        <Icon name="route" size={28} className="mb-1 text-ink/40" />
       </div>
 
       {recent.length > 0 && (
         <div className="mt-4">
-          <p className="mb-2 text-[13px] text-muted">Same trip again?</p>
+          <p className="mb-2 text-[13px] text-muted">Same trip again? One tap fills it in.</p>
           <div className="scrollbar-none -mx-5 flex gap-2 overflow-x-auto px-5 lg:mx-0 lg:flex-wrap lg:px-0">
             {recent.map((trip) => {
               const on = from === trip.from && to === trip.to;
@@ -125,18 +225,29 @@ export function MileageForm({ request, onDone, formId }: FormProps) {
                   onClick={() => repeat(trip)}
                   aria-pressed={on}
                   className={cn(
-                    'flex shrink-0 flex-col items-start rounded-[14px] px-3 py-2 text-left transition-all active:scale-[.97]',
+                    'flex shrink-0 items-center gap-2.5 rounded-[14px] py-2 pr-3.5 pl-2.5 text-left transition-all active:scale-[.97]',
                     on
                       ? 'bg-ink text-white'
                       : 'bg-surface shadow-[inset_0_0_0_1px_var(--color-line-strong)] hover:bg-subtle',
                   )}
                 >
-                  <span className="max-w-[220px] truncate text-[13.5px] font-medium">
-                    {trip.from.split(',')[0]} → {trip.to.split(',')[0]}
+                  <span
+                    className={cn(
+                      'grid size-7 shrink-0 place-items-center rounded-full',
+                      on ? 'bg-white/15' : 'bg-tool-miles/45',
+                    )}
+                    aria-hidden="true"
+                  >
+                    <Icon name={on ? 'check' : 'route'} size={14} strokeWidth={2} />
                   </span>
-                  <span className={cn('text-[12px]', on ? 'text-white/65' : 'text-muted')}>
-                    {formatMiles(trip.miles)}
-                    {trip.roundTrip ? ' round trip' : ''}
+                  <span className="min-w-0">
+                    <span className="block max-w-[220px] truncate text-[13.5px] font-medium">
+                      {trip.from.split(',')[0]} → {trip.to.split(',')[0]}
+                    </span>
+                    <span className={cn('block text-[12px]', on ? 'text-white/65' : 'text-muted')}>
+                      {formatMiles(trip.miles)}
+                      {trip.roundTrip ? ' round trip' : ''}
+                    </span>
                   </span>
                 </button>
               );
@@ -144,61 +255,6 @@ export function MileageForm({ request, onDone, formId }: FormProps) {
           </div>
         </div>
       )}
-
-      <Section>
-        <Segmented
-          name={`${id}-mode`}
-          value={mode}
-          onChange={setMode}
-          options={[
-            { value: 'miles', label: 'Enter miles' },
-            { value: 'odometer', label: 'Odometer' },
-          ]}
-        />
-        {mode === 'miles' ? (
-          <>
-            <Field label="Miles one way" htmlFor={`${id}-miles`}>
-              <Input
-                id={`${id}-miles`}
-                value={miles}
-                onChange={(event) => setMiles(event.target.value)}
-                inputMode="decimal"
-                placeholder="0.0"
-                className="num"
-                data-autofocus
-              />
-            </Field>
-            <Toggle
-              checked={roundTrip}
-              onChange={setRoundTrip}
-              label="Round trip"
-              description="Counts the miles twice"
-            />
-          </>
-        ) : (
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Start" htmlFor={`${id}-start`}>
-              <Input
-                id={`${id}-start`}
-                value={start}
-                onChange={(event) => setStart(event.target.value)}
-                inputMode="numeric"
-                className="num"
-              />
-            </Field>
-            <Field label="End" htmlFor={`${id}-end`}>
-              <Input
-                id={`${id}-end`}
-                value={end}
-                onChange={(event) => setEnd(event.target.value)}
-                inputMode="numeric"
-                className="num"
-                placeholder={start}
-              />
-            </Field>
-          </div>
-        )}
-      </Section>
 
       <Section title="Route">
         <Field label="From" htmlFor={`${id}-from`}>
@@ -243,6 +299,9 @@ export function MileageForm({ request, onDone, formId }: FormProps) {
             ))}
           </div>
         )}
+      </Section>
+
+      <Section title="Details">
         <Field label="Date" htmlFor={`${id}-date`}>
           <Input
             id={`${id}-date`}
@@ -252,9 +311,6 @@ export function MileageForm({ request, onDone, formId }: FormProps) {
             required
           />
         </Field>
-      </Section>
-
-      <Section title="Details">
         {workspace.options.vehicles.length > 0 && (
           <Field label="Vehicle" htmlFor={`${id}-vehicle`}>
             <Select

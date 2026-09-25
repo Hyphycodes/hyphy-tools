@@ -293,7 +293,7 @@ function CommandPalette({
                     <Visual visual={item.visual} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[15px] font-medium text-ink sm:text-[14px]">
-                        {item.title}
+                        <Highlight text={item.title} query={deferred} />
                       </span>
                       {item.subtitle && (
                         <span className="block truncate text-[13px] text-muted sm:text-[12.5px]">
@@ -326,6 +326,30 @@ function CommandPalette({
       </div>
     </dialog>
   );
+}
+
+/** The part of a title that matched what was typed, so it's clear why a result is here. */
+function Highlight({ text, query }: { text: string; query: string }) {
+  const terms = words(query);
+  if (!terms.length) return <>{text}</>;
+  const pattern = new RegExp(
+    `(^|[^\\p{L}\\p{N}])(${terms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`,
+    'giu',
+  );
+  const parts: ReactNode[] = [];
+  let last = 0;
+  for (const match of text.matchAll(pattern)) {
+    const start = (match.index ?? 0) + match[1].length;
+    if (start > last) parts.push(text.slice(last, start));
+    parts.push(
+      <mark key={start} className="rounded-[3px] bg-signal-soft text-signal-ink">
+        {text.slice(start, start + match[2].length)}
+      </mark>,
+    );
+    last = start + match[2].length;
+  }
+  parts.push(text.slice(last));
+  return <>{parts}</>;
 }
 
 function Visual({ visual }: { visual: SearchItem['visual'] }) {
@@ -361,6 +385,22 @@ function Visual({ visual }: { visual: SearchItem['visual'] }) {
         >
           {visual.spark ? <Icon name="spark" size={14} /> : visual.monogram}
         </span>
+      );
+    case 'tint':
+      return (
+        <span
+          className={cn(box, 'rounded-[9px] shadow-[inset_0_0_0_1px_rgb(0_0_0/.06)]')}
+          style={{ background: visual.bg, color: visual.fg }}
+        >
+          <Icon name={visual.icon} size={16} strokeWidth={1.9} />
+        </span>
+      );
+    case 'thumb':
+      return (
+        <span
+          className={cn(box, 'rounded-[9px] shadow-[inset_0_0_0_1px_rgb(0_0_0/.1)]')}
+          style={{ background: visual.preview }}
+        />
       );
     default:
       return (

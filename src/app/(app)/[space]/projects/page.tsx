@@ -131,13 +131,16 @@ export default async function ProjectsPage({
                       ))}
                     </div>
                   ) : (
+                    // No photos yet: a drafting grid in the project's color, not an empty box.
                     <span
-                      className="display absolute -right-2 -bottom-5 text-[88px] leading-none opacity-[.13]"
-                      style={{ color: project.color }}
+                      className="absolute inset-0"
+                      style={{
+                        backgroundImage: `linear-gradient(color-mix(in oklab, ${project.color} 24%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in oklab, ${project.color} 24%, transparent) 1px, transparent 1px)`,
+                        backgroundSize: '16px 16px',
+                        maskImage: 'linear-gradient(100deg, transparent 15%, black 80%)',
+                      }}
                       aria-hidden="true"
-                    >
-                      {project.name.replace(/[^A-Za-z0-9]/g, '').slice(0, 2)}
-                    </span>
+                    />
                   )}
                   <span className="absolute top-3 left-3">
                     <ProjectStatusBadge status={project.status} />

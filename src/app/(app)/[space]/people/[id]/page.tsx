@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ActivityList } from '@/components/records/activity-list';
+import { ReviewButtons } from '@/components/records/inbox-actions';
 import {
   FileRow,
   MileageRow,
@@ -17,7 +18,13 @@ import { Panel, PanelHeader } from '@/components/ui/panel';
 import { currentProjectFor } from '@/lib/insights';
 import { openPage } from '@/lib/page';
 import { formatField } from '@/lib/platform/custom-fields';
-import { formatDate, formatNumber } from '@/lib/platform/format';
+import {
+  formatCurrency,
+  formatDate,
+  formatMiles,
+  formatNumber,
+  startOfMonth,
+} from '@/lib/platform/format';
 import { roles } from '@/lib/platform/roles';
 
 export async function generateMetadata({ params }: PageProps<'/[space]/people/[id]'>) {
@@ -48,6 +55,16 @@ export default async function PersonPage({ params }: PageProps<'/[space]/people/
   const current = currentProjectFor(id, projects, activity) ?? working[0];
   const seeMoney = can('expenses.view_all') || self;
   const fields = workspace.space.customFields?.people ?? [];
+  // A manager's operational read on this person: what's waiting on them, and this month's totals.
+  const approver = can('expenses.approve') && !self;
+  const waiting = [...receipts, ...mileage].filter((item) => item.status === 'submitted').length;
+  const since = startOfMonth(tz);
+  const counted = (item: { status: string; date: string }) =>
+    (item.status === 'approved' || item.status === 'submitted') &&
+    new Date(item.date).getTime() >= since;
+  const monthSpend = receipts.filter(counted).reduce((sum, item) => sum + item.total, 0);
+  const monthMiles =
+    Math.round(mileage.filter(counted).reduce((sum, item) => sum + item.miles, 0) * 10) / 10;
   const role = roles[member.role];
 
   return (
@@ -154,11 +171,22 @@ export default async function PersonPage({ params }: PageProps<'/[space]/people/
           </Panel>
           {seeMoney && (receipts.length > 0 || mileage.length > 0) && (
             <Panel>
-              <PanelHeader title="Submissions" count={receipts.length + mileage.length} />
+              <PanelHeader title="Submissions" count={receipts.length + mileage.length}>
+                <span className="mr-auto -ml-1 truncate text-[12.5px] text-muted">
+                  {[
+                    waiting ? `${waiting} waiting${approver ? ' on you' : ''}` : undefined,
+                    monthSpend ? `${formatCurrency(monthSpend)} this month` : undefined,
+                    monthMiles ? `${formatMiles(monthMiles)}` : undefined,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </span>
+              </PanelHeader>
               <div className="row-divide pb-1.5">
                 {[
                   ...receipts.map((receipt) => ({
                     at: receipt.date,
+                    waiting: receipt.status === 'submitted',
                     node: (
                       <ReceiptRow
                         key={receipt.id}
@@ -167,11 +195,23 @@ export default async function PersonPage({ params }: PageProps<'/[space]/people/
                         timezone={tz}
                         kind="business"
                         showPerson={false}
+                        href={`${base}/tools/receipts?receipt=${receipt.id}`}
+                        actions={
+                          approver && receipt.status === 'submitted' ? (
+                            <ReviewButtons
+                              slug={workspace.space.slug}
+                              table="receipts"
+                              id={receipt.id}
+                              label={receipt.vendor}
+                            />
+                          ) : undefined
+                        }
                       />
                     ),
                   })),
                   ...mileage.map((entry) => ({
                     at: entry.date,
+                    waiting: entry.status === 'submitted',
                     node: (
                       <MileageRow
                         key={entry.id}
@@ -180,11 +220,26 @@ export default async function PersonPage({ params }: PageProps<'/[space]/people/
                         timezone={tz}
                         kind="business"
                         showPerson={false}
+                        actions={
+                          approver && entry.status === 'submitted' ? (
+                            <ReviewButtons
+                              slug={workspace.space.slug}
+                              table="mileage"
+                              id={entry.id}
+                              label={`${formatMiles(entry.miles)} · ${entry.to}`}
+                            />
+                          ) : undefined
+                        }
                       />
                     ),
                   })),
                 ]
-                  .sort((a, b) => b.at.localeCompare(a.at))
+                  // What's waiting on a decision comes first, then the newest.
+                  .sort(
+                    (a, b) =>
+                      Number(approver && b.waiting) - Number(approver && a.waiting) ||
+                      b.at.localeCompare(a.at),
+                  )
                   .slice(0, 8)
                   .map((item) => item.node)}
               </div>

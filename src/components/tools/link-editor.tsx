@@ -358,21 +358,20 @@ export function LinkEditor({ slug, page, base }: { slug: string; page?: LinkPage
             </p>
           )}
           <div className="mt-4 grid gap-2">
-            <Button
-              variant="primary"
-              onClick={save}
-              disabled={saving || !title || !cleanHandle || !dirty}
-            >
-              {saving ? (
-                'Saving…'
-              ) : dirty ? (
-                'Save link page'
-              ) : (
-                <>
-                  <Icon name="check" size={16} /> Saved
-                </>
-              )}
-            </Button>
+            {dirty || saving ? (
+              <Button variant="primary" onClick={save} disabled={saving || !title || !cleanHandle}>
+                {saving ? 'Saving…' : 'Save link page'}
+              </Button>
+            ) : (
+              // Nothing to save is a state, not a disabled button.
+              <p
+                role="status"
+                className="flex h-11 animate-fade items-center justify-center gap-2 rounded-[11px] bg-positive-soft text-[14px] font-medium text-positive lg:h-9 lg:text-[13.5px]"
+              >
+                <Icon name="check" size={16} strokeWidth={2.2} /> Saved in{' '}
+                {slug === 'personal' ? 'Personal' : 'this Space'}
+              </p>
+            )}
             {cleanHandle && (
               <Link
                 href={`${base}/tools/qr?content=${encodeURIComponent(`https://hyphy.example/@${cleanHandle}`)}`}

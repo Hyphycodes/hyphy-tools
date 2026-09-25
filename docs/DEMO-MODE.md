@@ -5,8 +5,9 @@ account, database or setup. It is a preview tool, not security.
 
 ## What it does
 
-- **Preview As.** A small dark card in the sidebar's footer (a thin line above the top bar on
-  phones) shows who you are. Click it, press <kbd>Shift</kbd>+<kbd>D</kbd> anywhere, or search
+- **Preview As.** A slim dark “Demo · Preview as…” control in the sidebar's footer, under the
+  profile it would otherwise repeat (on phones, a thin line above the top bar that shows who you
+  are). Click it, press <kbd>Shift</kbd>+<kbd>D</kbd> anywhere, or search
   "preview" in ⌘K, then pick a person and one of their Spaces. It stays out of the page on purpose,
   so the product can be judged as it will ship. The choice is stored in the
   `hyphy_preview_as` cookie so the server renders the right person on the first paint.

@@ -104,7 +104,14 @@ export function Widget({ id, data }: { id: WidgetId; data: DashboardData }) {
       return <SharedProjects data={data} />;
     case 'shared-files':
       return <SharedFiles data={data} />;
+    case 'guest-access':
+      return <GuestAccess data={data} />;
   }
+}
+
+/** Sent in the last couple of minutes: shown arriving, so a submission visibly lands. */
+function isFresh(at: string) {
+  return Date.now() - new Date(at).getTime() < 120_000;
 }
 
 /** Who did something in the last day, most recent first. */
@@ -135,7 +142,9 @@ function Pulse({ data }: { data: DashboardData }) {
   const word = workspace.space.labels?.projects?.plural ?? 'Projects';
   const events = Boolean(workspace.space.labels?.projects);
   const today = activeToday(data);
-  const team = members.filter((member) => member.status === 'active');
+  const others = members.filter(
+    (member) => member.status === 'active' && member.personId !== workspace.person.id,
+  );
 
   const tiles: {
     label: string;
@@ -200,8 +209,8 @@ function Pulse({ data }: { data: DashboardData }) {
       'Quiet'
     ),
     note: today.length
-      ? `of ${team.length} people have been busy`
-      : `${plural(team.length, 'person', 'people')} in the Space`,
+      ? `of ${others.length} active today`
+      : `${plural(others.length, 'person', 'people')}, no activity today`,
     href: `${base}/activity`,
   });
 
@@ -239,7 +248,9 @@ function Pulse({ data }: { data: DashboardData }) {
             >
               {tile.value}
             </span>
-            <span className="mt-auto truncate pt-2 text-[12px] text-muted">{tile.note}</span>
+            <span className="mt-auto line-clamp-2 pt-2 text-[12px] leading-snug text-muted sm:truncate">
+              {tile.note}
+            </span>
           </Link>
         ))}
       </div>
@@ -300,7 +311,7 @@ function Projects({ data }: { data: DashboardData }) {
   return (
     <Panel>
       <PanelHeader
-        title={events ? `Upcoming ${label.toLowerCase()}` : `${label} in motion`}
+        title={events ? `Upcoming ${label.toLowerCase()}` : `Open ${label.toLowerCase()}`}
         count={open.length}
         href={`${base}/projects`}
       />
@@ -431,6 +442,7 @@ function Money({ data }: { data: DashboardData }) {
     }))
     .filter((item) => item.project);
   const word = workspace.space.labels?.projects?.plural.toLowerCase() ?? 'projects';
+  const budgeted = top.some(({ project }) => project!.budget);
   return (
     <Panel>
       <PanelHeader title="Where the money went" href={`${base}/tools/receipts`} action="Receipts" />
@@ -467,7 +479,17 @@ function Money({ data }: { data: DashboardData }) {
         )}
         {top.length > 0 && (
           <div className="mt-4 border-t border-line pt-3">
-            <p className="mb-1.5 text-[12px] text-muted">Top {word} this month</p>
+            <p className="mb-1.5 flex items-baseline justify-between gap-2 text-[12px] text-muted">
+              <span>Top {word} this month</span>
+              {budgeted && (
+                <span
+                  className="text-[11px] text-faint"
+                  title="Everything spent so far, against its budget"
+                >
+                  Budget used
+                </span>
+              )}
+            </p>
             <ul className="grid gap-0.5">
               {top.map(({ project, total }) => (
                 <li key={project!.id}>
@@ -483,10 +505,12 @@ function Money({ data }: { data: DashboardData }) {
                     <span className="min-w-0 flex-1 truncate text-ink-2">{project!.name}</span>
                     <span className="num text-ink">{formatCurrency(total, { cents: false })}</span>
                     {project!.budget ? (
-                      <span className="w-9 text-right text-[11.5px] text-faint">
+                      <span className="mono-num w-10 shrink-0 text-right text-[11px] text-faint">
                         {Math.round(((projectSpend.get(project!.id) ?? 0) / project!.budget) * 100)}
                         %
                       </span>
+                    ) : budgeted ? (
+                      <span className="w-10 shrink-0" aria-hidden="true" />
                     ) : null}
                   </Link>
                 </li>
@@ -1083,6 +1107,7 @@ function MySubmissions({ data }: { data: DashboardData }) {
       ),
     })),
   ].sort((a, b) => Number(b.returned) - Number(a.returned) || b.at.localeCompare(a.at));
+
   return (
     <Panel>
       <PanelHeader title="Your submissions" href={`${base}/tools/receipts`} action="All">
@@ -1096,7 +1121,13 @@ function MySubmissions({ data }: { data: DashboardData }) {
         </span>
       </PanelHeader>
       {items.length ? (
-        <div className="row-divide pb-1.5">{items.slice(0, 6).map((item) => item.node)}</div>
+        <div className="row-divide pb-1.5">
+          {items.slice(0, 6).map((item) => (
+            <div key={item.node.key} data-fresh={isFresh(item.at) || undefined}>
+              {item.node}
+            </div>
+          ))}
+        </div>
       ) : (
         <EmptyState compact icon="receipt" title="Nothing submitted yet">
           Receipts and trips you submit show here with their status.
@@ -1140,30 +1171,81 @@ function Notices({ data }: { data: DashboardData }) {
 
 function SharedProjects({ data }: { data: DashboardData }) {
   const { projects, base, workspace, files } = data;
+  const tz = workspace.space.timezone;
   const label = workspace.space.labels?.projects?.plural ?? 'Projects';
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       {projects.map((project) => {
-        const count = files.filter((file) =>
+        const attached = files.filter((file) =>
           file.attachedTo.some((ref) => ref.id === project.id),
-        ).length;
+        );
+        const photos = attached
+          .filter((file) => file.kind === 'image')
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
         const team = project.teamIds.map((id) => data.people.get(id)).filter(Boolean) as Person[];
+        const lead = data.people.get(project.leadId);
+        const inspection = project.custom?.next_inspection as string | undefined;
         return (
-          <Panel key={project.id} className="flex flex-col overflow-hidden">
-            <div className="h-1.5" style={{ background: project.color }} />
+          <Panel key={project.id} className="flex animate-rise flex-col overflow-hidden">
+            <Link
+              href={`${base}/projects/${project.id}`}
+              className="relative flex h-20 gap-px overflow-hidden"
+              style={{ background: `color-mix(in oklab, ${project.color} 22%, white)` }}
+              aria-label={`Open ${project.name}`}
+            >
+              {photos.slice(0, 3).map((file) => (
+                <span key={file.id} className="flex-1" style={{ background: file.preview }} />
+              ))}
+              <span
+                className="absolute inset-x-0 bottom-0 h-1"
+                style={{ background: project.color }}
+                aria-hidden="true"
+              />
+            </Link>
             <div className="flex flex-1 flex-col p-4">
-              <p className="label">Shared with you</p>
               <Link href={`${base}/projects/${project.id}`}>
-                <h2 className="mt-1.5 text-[18px] font-semibold tracking-[-0.01em] hover:underline">
+                <h2 className="text-[18px] font-semibold tracking-[-0.01em] hover:underline">
                   {project.name}
                 </h2>
               </Link>
-              <p className="mt-1 text-[13px] text-muted">{project.location}</p>
-              <div className="mt-4 flex items-center justify-between">
+              <p className="mt-0.5 flex items-center gap-1.5 truncate text-[13px] text-muted">
+                <Icon name="map-pin" size={13} /> {project.location}
+              </p>
+              <dl className="mt-3.5 grid grid-cols-2 gap-3 text-[13px]">
+                {lead && (
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Avatar person={lead} size="sm" />
+                    <div className="min-w-0">
+                      <dt className="text-[11.5px] text-muted">Lead</dt>
+                      <dd className="truncate font-medium">{lead.name}</dd>
+                    </div>
+                  </div>
+                )}
+                {inspection ? (
+                  <div>
+                    <dt className="text-[11.5px] text-muted">Next inspection</dt>
+                    <dd className="font-medium">
+                      {formatDate(inspection, tz)} · {daysUntil(inspection)}d
+                    </dd>
+                  </div>
+                ) : (
+                  <div>
+                    <dt className="text-[11.5px] text-muted">Files</dt>
+                    <dd className="font-medium">{attached.length}</dd>
+                  </div>
+                )}
+              </dl>
+              <div className="mt-4 flex items-center gap-2 border-t border-line pt-3">
                 <AvatarStack people={team} size="sm" />
-                <span className="text-[12.5px] text-muted">{plural(count, 'file')}</span>
-              </div>
-              <div className="mt-4 flex gap-2">
+                <span className="mr-auto text-[12px] text-muted">
+                  {plural(attached.length, 'file')}
+                </span>
+                <Link
+                  href={`${base}/projects/${project.id}`}
+                  className={buttonClass({ size: 'sm', variant: 'ghost' })}
+                >
+                  Open
+                </Link>
                 <CreateButton
                   request={{ id: 'file', attachTo: { type: 'project', id: project.id } }}
                   variant="primary"
@@ -1172,12 +1254,6 @@ function SharedProjects({ data }: { data: DashboardData }) {
                 >
                   Upload
                 </CreateButton>
-                <Link
-                  href={`${base}/projects/${project.id}`}
-                  className={buttonClass({ size: 'sm' })}
-                >
-                  Open
-                </Link>
               </div>
             </div>
           </Panel>
@@ -1193,6 +1269,66 @@ function SharedProjects({ data }: { data: DashboardData }) {
         </Panel>
       )}
     </div>
+  );
+}
+
+/** A guest's plain answer to “who can access this?”: what's shared, what isn't, who to call. */
+function GuestAccess({ data }: { data: DashboardData }) {
+  const { projects, workspace } = data;
+  const word = workspace.space.labels?.projects?.plural.toLowerCase() ?? 'projects';
+  const leads = [...new Set(projects.map((project) => project.leadId))]
+    .map((id) => data.people.get(id))
+    .filter(Boolean) as Person[];
+  const lines: { yes: boolean; text: string }[] = [
+    { yes: true, text: `Files and photos on the ${word} shared with you` },
+    { yes: true, text: 'Adding your own — the team sees them right away' },
+    { yes: true, text: 'Who’s on each one' },
+    { yes: false, text: `Money, receipts and other ${word} stay private` },
+  ];
+  return (
+    <Panel>
+      <PanelHeader title="What you can see here" />
+      <ul className="grid gap-2 px-4 pb-3 text-[13px]">
+        {lines.map((line) => (
+          <li key={line.text} className="flex items-start gap-2.5">
+            <span
+              className={cn(
+                'mt-px grid size-[18px] shrink-0 place-items-center rounded-full',
+                line.yes ? 'bg-positive-soft text-positive' : 'bg-well text-muted',
+              )}
+              aria-label={line.yes ? 'Yes' : 'No'}
+            >
+              <Icon name={line.yes ? 'check' : 'lock'} size={11} strokeWidth={2.4} />
+            </span>
+            <span className={line.yes ? 'text-ink-2' : 'text-muted'}>{line.text}</span>
+          </li>
+        ))}
+      </ul>
+      {leads.length > 0 && (
+        <div className="border-t border-line px-4 py-3">
+          <p className="mb-2 text-[12px] text-muted">Questions? Your contact</p>
+          <ul className="grid gap-2">
+            {leads.map((lead) => (
+              <li key={lead.id} className="flex items-center gap-2.5">
+                <Avatar person={lead} size="md" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13.5px] font-medium">{lead.name}</span>
+                  <span className="block truncate text-[12px] text-muted">{lead.headline}</span>
+                </span>
+                {lead.phone && (
+                  <a
+                    href={`tel:${lead.phone.replace(/[^0-9+]/g, '')}`}
+                    className={buttonClass({ size: 'sm', variant: 'ghost' })}
+                  >
+                    {lead.phone}
+                  </a>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Panel>
   );
 }
 

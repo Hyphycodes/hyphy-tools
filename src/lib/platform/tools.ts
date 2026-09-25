@@ -57,7 +57,7 @@ export const tools: ToolDefinition[] = [
     id: 'receipts',
     module: 'receipts',
     name: 'Receipts',
-    tagline: 'Snap it. Sorted.',
+    tagline: 'Snap it, check it, file it.',
     description:
       'Photograph a receipt, check the details and file it to the right vehicle or project. Teams get an approval step before anything counts.',
     icon: 'receipt',
@@ -82,7 +82,7 @@ export const tools: ToolDefinition[] = [
     id: 'mileage',
     module: 'mileage',
     name: 'Mileage',
-    tagline: 'Every business mile, accounted for.',
+    tagline: 'Log a trip in a few taps.',
     description:
       'Log a trip in a few taps, tie it to a vehicle or project, and keep a dated record for reimbursement or taxes.',
     icon: 'route',
@@ -146,7 +146,7 @@ export const tools: ToolDefinition[] = [
     id: 'links',
     module: 'links',
     name: 'Link Pages',
-    tagline: 'One link. Everything you do.',
+    tagline: 'One page for all your links.',
     description:
       'A simple page for your bio link: booking, menus, socials and this week’s news, in one place you control.',
     icon: 'link',

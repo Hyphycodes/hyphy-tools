@@ -210,10 +210,10 @@ export default async function ProjectPage({
                   ...(can('expenses.view_all')
                     ? [
                         [
-                          'Spent',
+                          'Expenses',
                           formatCurrency(spent, { cents: false }),
                           project.budget
-                            ? `of ${formatCurrency(project.budget, { cents: false })} budget`
+                            ? `of ${formatCurrency(project.budget, { cents: false })} budgeted`
                             : plural(counted.length, 'receipt'),
                         ],
                       ]

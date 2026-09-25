@@ -81,6 +81,21 @@ export default async function ReceiptsPage({
   const history = selected
     ? await repo.activity({ about: { type: 'receipt', id: selected.id } })
     : [];
+  // Who is waiting on a decision, and for how much — an approver's real queue.
+  const waitingBy = [
+    ...pending
+      .reduce((map, receipt) => {
+        const entry = map.get(receipt.createdBy) ?? { count: 0, total: 0 };
+        map.set(receipt.createdBy, { count: entry.count + 1, total: entry.total + receipt.total });
+        return map;
+      }, new Map<string, { count: number; total: number }>())
+      .entries(),
+  ]
+    .map(([id, entry]) => ({ person: people.get(id), ...entry }))
+    .filter((entry): entry is { person: Person; count: number; total: number } =>
+      Boolean(entry.person),
+    )
+    .sort((a, b) => b.total - a.total);
   const gallons = receipts
     .filter((receipt) => receipt.gallons && receipt.status !== 'rejected')
     .reduce((sum, receipt) => sum + (receipt.gallons ?? 0), 0);
@@ -213,7 +228,44 @@ export default async function ReceiptsPage({
           </Panel>
         </div>
         <aside className="hidden content-start gap-4 xl:grid">
-          {business ? (
+          {approver && waitingBy.length > 0 && (
+            <Panel className="p-4">
+              <p className="flex items-baseline justify-between gap-2 text-[14px] font-semibold">
+                Waiting, by person
+                <span className="text-[12.5px] font-normal text-muted">
+                  {formatCurrency(pending.reduce((sum, receipt) => sum + receipt.total, 0))}
+                </span>
+              </p>
+              <ul className="mt-2.5 grid gap-0.5">
+                {waitingBy.map(({ person, count, total }) => (
+                  <li key={person.id}>
+                    <Link
+                      href={
+                        can('people.view')
+                          ? `${base}/people/${person.id}`
+                          : href({ view: 'submitted' })
+                      }
+                      className="-mx-2 flex items-center gap-2.5 rounded-[10px] px-2 py-1.5 transition-colors hover:bg-subtle"
+                    >
+                      <Avatar person={person} size="sm" />
+                      <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">
+                        {person.name}
+                      </span>
+                      <span className="text-[12px] text-muted">{count}</span>
+                      <span className="num w-[68px] text-right text-[13px] font-medium">
+                        {formatCurrency(total)}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-3 border-t border-line pt-3 text-[12.5px] leading-snug text-faint">
+                Approved receipts count toward their project and vehicle; returned ones go back with
+                your note.
+              </p>
+            </Panel>
+          )}
+          {business && !approver ? (
             <Panel className="p-4">
               <p className="flex items-center gap-2 text-[14px] font-semibold">
                 <Icon name="shield" size={15} className="text-muted" /> How approval works
@@ -241,7 +293,7 @@ export default async function ReceiptsPage({
                   : 'You see your own receipts here.'}
               </p>
             </Panel>
-          ) : (
+          ) : business ? null : (
             <Panel className="p-4">
               <p className="flex items-center gap-2 text-[14px] font-semibold">
                 <Icon name="lock" size={15} className="text-muted" /> Just for you

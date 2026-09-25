@@ -153,11 +153,10 @@ test.describe('navigation and dashboards compose from the same rules', () => {
       'notices',
       'my-submissions',
     ]);
-    expect(dashboardFor(space('abc-construction'), { role: 'guest' }).top).toEqual(['notices']);
-    expect(dashboardFor(space('abc-construction'), { role: 'guest' }).main).toEqual([
-      'shared-projects',
-      'shared-files',
-    ]);
+    const guest = dashboardFor(space('abc-construction'), { role: 'guest' });
+    expect(guest.top).toEqual([]);
+    expect(guest.main).toEqual(['shared-projects', 'shared-files']);
+    expect(guest.side).toEqual(['notices', 'guest-access']);
     expect(dashboardFor(personal, { role: 'owner' }).hero).toBe('personal');
     expect(dashboardFor(personal, { role: 'owner' }).top).toEqual(['launcher']);
   });

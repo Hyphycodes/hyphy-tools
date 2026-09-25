@@ -4,6 +4,7 @@ import type { Repository } from '@/lib/data';
 import type { Workspace } from '@/lib/identity/types';
 import type { CreateAction } from '@/lib/platform/actions';
 import type { NavModel } from '@/lib/platform/navigation';
+import type { InboxKind } from '@/lib/platform/types';
 import { roles } from '@/lib/platform/roles';
 import { availability, tools, toolName } from '@/lib/platform/tools';
 import type { DemoModel } from '@/lib/demo/model';
@@ -32,6 +33,10 @@ export type SearchItem = {
   boost?: number;
   visual:
     | { kind: 'icon'; icon: IconName }
+    /** A record's own color: a project's, a vehicle's, the tool that made a file. */
+    | { kind: 'tint'; icon: IconName; bg: string; fg: string }
+    /** A photo shows itself. */
+    | { kind: 'thumb'; preview: string }
     | { kind: 'tool'; icon: IconName; color: string; ink: 'dark' | 'light' }
     | { kind: 'person'; initials: string; hue: string }
     | {
@@ -42,6 +47,48 @@ export type SearchItem = {
         round: boolean;
         spark: boolean;
       };
+};
+
+/** Inbox items look the way they do in the Inbox: the tool or the kind of thing they're about. */
+const inboxVisual: Record<InboxKind, SearchItem['visual']> = {
+  'receipt-approval': {
+    kind: 'tint',
+    icon: 'receipt',
+    bg: 'var(--color-tool-receipt)',
+    fg: '#16150F',
+  },
+  'unassigned-receipt': {
+    kind: 'tint',
+    icon: 'receipt',
+    bg: 'var(--color-caution-soft)',
+    fg: 'var(--color-caution)',
+  },
+  'mileage-review': { kind: 'tint', icon: 'route', bg: 'var(--color-tool-miles)', fg: '#16150F' },
+  'receipt-returned': {
+    kind: 'tint',
+    icon: 'arrow-left',
+    bg: 'var(--color-critical-soft)',
+    fg: 'var(--color-critical)',
+  },
+  'document-uploaded': {
+    kind: 'tint',
+    icon: 'file-text',
+    bg: 'var(--color-tool-files)',
+    fg: '#16150F',
+  },
+  'document-expiring': {
+    kind: 'tint',
+    icon: 'clock',
+    bg: 'var(--color-caution-soft)',
+    fg: 'var(--color-caution)',
+  },
+  'access-request': {
+    kind: 'tint',
+    icon: 'user-plus',
+    bg: 'var(--color-signal-soft)',
+    fg: 'var(--color-signal-ink)',
+  },
+  mention: { kind: 'tint', icon: 'message', bg: 'var(--color-well)', fg: 'var(--color-ink-2)' },
 };
 
 /**
@@ -84,7 +131,7 @@ export async function buildSearchIndex(
       keywords: 'inbox approve attention',
       href: `${base}/inbox`,
       boost: item.priority === 'high' ? 0.4 : 0,
-      visual: { kind: 'icon', icon: item.priority === 'high' ? 'alert' : 'inbox' },
+      visual: inboxVisual[item.kind],
     })),
     ...actions.map<SearchItem>((action) => ({
       id: `action-${action.id}`,
@@ -127,7 +174,12 @@ export async function buildSearchIndex(
       keywords: project.summary,
       href: `${base}/projects/${project.id}`,
       boost: project.status === 'active' ? 0.3 : project.status === 'done' ? -0.3 : 0,
-      visual: { kind: 'icon', icon: 'projects' },
+      visual: {
+        kind: 'tint',
+        icon: 'projects',
+        bg: `color-mix(in oklab, ${project.color} 22%, white)`,
+        fg: `color-mix(in oklab, ${project.color}, black 35%)`,
+      },
     })),
     ...vehicles.map<SearchItem>((vehicle) => ({
       id: `vehicle-${vehicle.id}`,
@@ -136,7 +188,12 @@ export async function buildSearchIndex(
       subtitle: `${vehicle.year} ${vehicle.make} ${vehicle.model} · ${vehicle.plate}`,
       href: `${base}/vehicles/${vehicle.id}`,
       boost: 0.2,
-      visual: { kind: 'icon', icon: 'truck' },
+      visual: {
+        kind: 'tint',
+        icon: 'truck',
+        bg: `color-mix(in oklab, ${vehicle.color} 20%, white)`,
+        fg: `color-mix(in oklab, ${vehicle.color}, black 40%)`,
+      },
     })),
     ...members.map<SearchItem>((member) => ({
       id: `person-${member.personId}`,
@@ -161,7 +218,7 @@ export async function buildSearchIndex(
         .join(' · '),
       keywords: `receipt expense ${receipt.category} ${receipt.status === 'submitted' ? 'pending' : receipt.status}`,
       href: `${base}/tools/receipts?receipt=${receipt.id}`,
-      visual: { kind: 'icon', icon: 'receipt' },
+      visual: { kind: 'tint', icon: 'receipt', bg: 'var(--color-tool-receipt)', fg: '#16150F' },
     })),
     ...files.slice(0, 80).map<SearchItem>((file) => ({
       id: `file-${file.id}`,
@@ -182,17 +239,27 @@ export async function buildSearchIndex(
         .filter(Boolean)
         .join(' · '),
       href: `${base}/files?file=${file.id}`,
-      visual: {
-        kind: 'icon',
-        icon:
-          file.kind === 'image'
-            ? 'image'
-            : file.kind === 'archive'
-              ? 'archive'
-              : file.kind === 'pdf'
-                ? 'pdf'
-                : 'file-text',
-      },
+      visual:
+        file.kind === 'image' && file.preview
+          ? { kind: 'thumb', preview: file.preview }
+          : file.kind === 'pdf'
+            ? {
+                kind: 'tint',
+                icon: 'pdf',
+                bg: 'color-mix(in oklab, var(--color-tool-pdf) 22%, white)',
+                fg: '#B8401C',
+              }
+            : {
+                kind: 'tint',
+                icon:
+                  file.kind === 'archive'
+                    ? 'archive'
+                    : file.kind === 'image'
+                      ? 'image'
+                      : 'file-text',
+                bg: 'color-mix(in oklab, var(--color-tool-files) 40%, white)',
+                fg: '#4B3A8C',
+              },
     })),
     ...workspace.session.memberships
       .filter((item) => item.space.id !== space.id)

@@ -2,6 +2,7 @@
 import { useTransition, type MouseEvent } from 'react';
 import { resolveInboxItem, reviewItem } from '@/app/(app)/[space]/actions';
 import { Button } from '@/components/ui/button';
+import { Icon } from '@/components/ui/icon';
 import { useToast } from '@/components/ui/toast';
 import type { InboxKind, ObjectRef } from '@/lib/platform/types';
 
@@ -84,8 +85,11 @@ export function InboxActions({
       size={size}
       variant="ghost"
       disabled={pending}
+      title="Mark as done"
+      className="!h-7 !gap-1 !rounded-full !px-2.5 !text-[12.5px] text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line-strong)] hover:!bg-positive-soft hover:text-positive hover:shadow-[inset_0_0_0_1px_transparent]"
       onClick={(event) => act(event, 'done', () => resolveInboxItem(slug, id))}
     >
+      <Icon name="check" size={13} strokeWidth={2.2} />
       Done
     </Button>
   );

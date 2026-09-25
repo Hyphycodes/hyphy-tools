@@ -17,7 +17,7 @@ npm run dev          # http://localhost:3000
 ```
 
 No environment variables, database or accounts are needed. `/` opens the current person's main
-Space. The small **Demo** card at the bottom of the sidebar (a thin line above the top bar on
+Space. The slim **Demo · Preview as…** control at the bottom of the sidebar (a thin line above the top bar on
 phones, or <kbd>Shift</kbd>+<kbd>D</kbd> anywhere) previews as someone else; **Reset** undoes your
 changes.
 

@@ -77,6 +77,16 @@ export function InboxGlyph({ kind, size = 'md' }: { kind: InboxKind; size?: 'md'
   );
 }
 
+/** Receipts and trips waiting on a decision get Approve and Return; everything else is cleared. */
+export function isReviewable(item: Pick<InboxItem, 'kind' | 'subject'>) {
+  return (
+    (item.kind === 'receipt-approval' ||
+      item.kind === 'mileage-review' ||
+      item.kind === 'unassigned-receipt') &&
+    (item.subject.type === 'receipt' || item.subject.type === 'mileage')
+  );
+}
+
 export function InboxList({
   items,
   people,
@@ -104,6 +114,21 @@ export function InboxList({
       {shown.map((item) => {
         const from = item.fromId ? byId.get(item.fromId) : undefined;
         const done = item.status === 'done';
+        const decision = canApprove && isReviewable(item);
+        const when = (
+          <span className="text-[12px] whitespace-nowrap text-faint">
+            {formatRelative(item.at, timezone)}
+          </span>
+        );
+        const actions = (
+          <InboxActions
+            slug={slug}
+            id={item.id}
+            kind={item.kind}
+            subject={item.subject}
+            canApprove={canApprove}
+          />
+        );
         return (
           <li
             key={item.id}
@@ -115,9 +140,16 @@ export function InboxList({
             )}
           >
             <InboxGlyph kind={item.kind} />
-            <div className="min-w-0 flex-1 basis-[60%]">
-              <p className="flex items-center gap-2 text-[14px] font-medium text-ink">
-                <Link href={refHref(base, item.subject)} className="truncate hover:underline">
+            <div className="min-w-0 flex-1 basis-[55%]">
+              <p className="flex items-center gap-2 text-[14px] leading-snug font-medium text-ink">
+                <Link
+                  href={refHref(base, item.subject)}
+                  className={cn(
+                    'hover:underline',
+                    // Narrow rows keep the whole title: two lines rather than an ellipsis.
+                    stacked ? 'line-clamp-2' : 'line-clamp-2 sm:line-clamp-none sm:truncate',
+                  )}
+                >
                   {item.title}
                 </Link>
                 {item.priority === 'high' && !done && (
@@ -135,23 +167,35 @@ export function InboxList({
                 </span>
               </p>
             </div>
-            <span
-              className={cn(
-                'shrink-0 self-start pt-0.5 text-[12px] text-faint',
-                stacked ? 'block' : 'hidden sm:block sm:self-center sm:pt-0',
-              )}
-            >
-              {formatRelative(item.at, timezone)}
-            </span>
-            {!done && (
-              <div className={cn('flex basis-full pl-[38px]', !stacked && 'sm:basis-auto sm:pl-0')}>
-                <InboxActions
-                  slug={slug}
-                  id={item.id}
-                  kind={item.kind}
-                  subject={item.subject}
-                  canApprove={canApprove}
-                />
+            {decision && !done ? (
+              <>
+                {/* Two buttons need the width: on phones and in narrow panels they sit under the text. */}
+                <span
+                  className={cn(
+                    'shrink-0 self-start pt-0.5',
+                    stacked ? 'block' : 'hidden sm:block sm:self-center sm:pt-0',
+                  )}
+                >
+                  {when}
+                </span>
+                <div
+                  className={cn('flex basis-full pl-[48px]', !stacked && 'sm:basis-auto sm:pl-0')}
+                >
+                  {actions}
+                </div>
+              </>
+            ) : (
+              // One quiet control stays on the row, beside its time, at any width.
+              <div
+                className={cn(
+                  'flex shrink-0 items-center gap-2',
+                  stacked
+                    ? 'flex-col items-end gap-1'
+                    : 'max-sm:flex-col max-sm:items-end max-sm:gap-1',
+                )}
+              >
+                {when}
+                {!done && actions}
               </div>
             )}
           </li>

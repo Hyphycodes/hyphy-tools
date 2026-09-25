@@ -313,6 +313,85 @@ test('PDFs show their pages, merge, and extract by tapping pages', async ({ page
   await expect(page.getByText('three-pages-2_4.pdf')).toBeVisible();
 });
 
+test('PDF samples can be merged or split without a file of your own', async ({ page }) => {
+  await visit(page, '/personal/tools/pdf');
+  await page.getByRole('button', { name: /Try three samples/ }).click();
+  await expect(page.getByText('6 pages in total')).toBeVisible();
+  await page.getByRole('button', { name: 'Merge 3 PDFs' }).click();
+  await expect(page.getByRole('link', { name: 'Download PDF' })).toBeVisible();
+
+  await page.getByText('Extract pages', { exact: true }).click();
+  await page.getByRole('button', { name: /Try a 7-page sample/ }).click();
+  await page.getByRole('button', { name: 'Page 7', exact: true }).click();
+  await expect(page.getByLabel(/Pages to keep/)).toHaveValue('7');
+});
+
+test('an image sample shrinks right away and shows before and after', async ({ page }) => {
+  await visit(page, '/personal/tools/images');
+  await page.getByRole('button', { name: /Try a sample photo/ }).click();
+  const figure = page.getByRole('figure');
+  await expect(figure.getByText(/Before 4032×3024/)).toBeVisible({ timeout: 15_000 });
+  await expect(figure.getByText(/After 1920×1440/)).toBeVisible();
+});
+
+test('the mileage number is the input, and a round trip counts it twice', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  await previewAs(context, 'mike', baseURL!);
+  await visit(page, '/abc-construction');
+  await shortcut(page, 'c', page.getByRole('menu', { name: 'Create' }));
+  await page.getByRole('menuitem', { name: /Log mileage/ }).click();
+  const sheet = page.getByRole('dialog', { name: 'Log mileage' });
+  await sheet.getByLabel('Miles one way').fill('12.5');
+  await expect(sheet.getByText('12.5 mi this trip')).toBeVisible();
+  await sheet.getByRole('radio', { name: 'Round trip' }).click();
+  await expect(sheet.getByText('25 mi there and back')).toBeVisible();
+  // A trip driven before fills everything in one tap.
+  await sheet.getByRole('button', { name: /Shop → Oak Brook Remodel/ }).click();
+  await expect(sheet.getByLabel('To', { exact: true })).toHaveValue('Oak Brook Remodel');
+  await expect(sheet.getByText('14.2 mi this trip')).toBeVisible();
+});
+
+test('a guest sees what is shared, what is private, and who to call', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  await previewAs(context, 'chris', baseURL!);
+  await visit(page, '/abc-construction');
+  await expect(page.getByRole('heading', { level: 2, name: 'Oak Brook Remodel' })).toBeVisible();
+  await expect(page.getByText('Money, receipts and other projects stay private')).toBeVisible();
+  await expect(page.getByText('Questions? Your contact')).toBeVisible();
+  await expect(page.getByText('Ray Kowalski').first()).toBeVisible();
+});
+
+test('People shows what each person is on and what waits on the approver', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  await previewAs(context, 'dana', baseURL!);
+  await visit(page, '/abc-construction/people');
+  const mike = page.getByRole('link', { name: /Mike Rodriguez/ });
+  await expect(mike).toContainText('Oak Brook Remodel');
+  await expect(mike).toContainText('4 waiting on you');
+  await mike.click();
+  await expect(page.getByText(/4 waiting on you/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Approve' })).toHaveCount(4);
+});
+
+test('every tool in the library has a way in', async ({ page, context, baseURL }) => {
+  await previewAs(context, 'dana', baseURL!);
+  await visit(page, '/abc-construction/tools');
+  // Image Resize has no Create action in a business Space; its card still leads somewhere.
+  await expect(page.getByRole('link', { name: 'Resize images' })).toHaveAttribute(
+    'href',
+    '/abc-construction/tools/images',
+  );
+});
+
 test.describe('phones', () => {
   test.use({ viewport: { width: 390, height: 844 } });
   for (const [person, path] of [

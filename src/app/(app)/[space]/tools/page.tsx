@@ -188,16 +188,19 @@ export default async function ToolsPage({ params }: PageProps<'/[space]/tools'>)
       )}
 
       {utilities.length > 0 && (
-        <section aria-label="Your tools" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-12">
+        <section aria-label="Your tools" className="grid grid-cols-2 gap-3 lg:grid-cols-12">
           {utilities.map((tool, index) => {
             const big = index < 2;
             const action = primary[tool.id];
+            // Phones: the two features run full width, the rest pair up; an odd one out spans.
+            const alone = !big && small % 2 === 1 && index === utilities.length - 1;
             return (
               <article
                 key={tool.id}
                 className={cn(
                   'group relative flex animate-rise flex-col overflow-hidden rounded-[24px] transition-[transform,box-shadow] duration-300 hover:-translate-y-0.5 hover:shadow-lift',
                   big ? spans[Math.min(utilities.length, 2)] : spans[Math.min(small, 4)],
+                  (big || alone) && 'max-sm:col-span-2',
                 )}
                 style={{
                   background: `color-mix(in oklab, ${tool.color} ${big ? 30 : 24}%, white)`,
@@ -212,20 +215,26 @@ export default async function ToolsPage({ params }: PageProps<'/[space]/tools'>)
                 <div
                   className={cn(
                     'pointer-events-none relative overflow-hidden',
-                    big ? 'h-[200px] lg:h-[230px]' : 'h-[150px]',
+                    big ? 'h-[200px] lg:h-[230px]' : 'h-[108px] sm:h-[150px]',
                   )}
                   aria-hidden="true"
                 >
-                  <div className="absolute inset-0 origin-center scale-[.9] transition-transform duration-500 ease-out group-hover:scale-100">
+                  <div
+                    className={cn(
+                      'absolute inset-0 origin-center transition-transform duration-500 ease-out group-hover:scale-100',
+                      big || alone ? 'scale-[.9]' : 'scale-[.7] sm:scale-[.9]',
+                    )}
+                  >
                     <ToolPreview id={tool.id} />
                   </div>
                 </div>
                 <div
                   className={cn(
-                    'pointer-events-none relative flex flex-1 flex-col px-4 pb-4 sm:px-5 sm:pb-5',
+                    'pointer-events-none relative flex flex-1 flex-col px-3.5 pb-3.5 sm:px-5 sm:pb-5',
+                    big && 'px-4 pb-4',
                   )}
                 >
-                  <div className="flex items-center gap-2.5">
+                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
                     <ToolGlyph tool={tool} size={big ? 'md' : 'sm'} />
                     <h3
                       className={cn(
@@ -249,7 +258,14 @@ export default async function ToolsPage({ params }: PageProps<'/[space]/tools'>)
                   >
                     {big ? tool.description : tool.tagline}
                   </p>
-                  <div className="mt-auto flex items-end justify-between gap-3 pt-4">
+                  <div
+                    className={cn(
+                      'mt-auto flex items-end justify-between gap-3 pt-4',
+                      !big &&
+                        !alone &&
+                        'max-sm:flex-col max-sm:items-stretch max-sm:gap-2 max-sm:pt-3',
+                    )}
+                  >
                     <p className="min-w-0 text-[12.5px] text-ink/55">
                       {usage[tool.id] ?? (tool.privacy && big ? tool.privacy : 'Nothing made yet')}
                     </p>
@@ -259,7 +275,8 @@ export default async function ToolsPage({ params }: PageProps<'/[space]/tools'>)
                           request={action.id}
                           size="sm"
                           variant={big ? 'primary' : 'secondary'}
-                          className={big ? undefined : '!bg-white/85 hover:!bg-white'}
+                          className={big ? undefined : '!bg-white/85 hover:!bg-white max-sm:w-full'}
+                          fallbackHref={`${base}${tool.path}`}
                         >
                           {action.label}
                         </CreateButton>

@@ -54,6 +54,10 @@ Hyphy's own tool pictograms from Studio).
   specifics ("6 submissions are waiting for your approval"), then the page follows that order.
 - **Records open in place.** A receipt opens as a sheet (bottom on phones, drawer on desktop) whose
   state lives in the URL, so it can be linked to and closed with Back.
+- **Try it without a file.** Tools that need input offer a sample made on the device (a receipt,
+  three PDFs or a 7-page packet, a phone-sized photo), so the first use is the real thing.
+- **The number is the form.** Where one value matters most (a trip's miles), it is the big input
+  itself, with the rest of the form filling in from a trip driven before.
 - **Relationships are always visible.** Files, receipts and trips show what they belong to — a
   project, a vehicle, a person, the tool that made them — with that record's icon.
 

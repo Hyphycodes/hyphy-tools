@@ -29,7 +29,8 @@ export type WidgetId =
   | 'my-submissions'
   | 'notices'
   | 'shared-projects'
-  | 'shared-files';
+  | 'shared-files'
+  | 'guest-access';
 
 type Rule = {
   id: WidgetId;
@@ -100,14 +101,15 @@ const rules: Rule[] = [
 
   { id: 'activity', area: 'side', when: (space, m) => business(space) && m.role === 'member' },
 
-  // Guests: only what's shared, with anything meant for them first
-  { id: 'notices', area: 'top', when: (space, m) => business(space) && m.role === 'guest' },
+  // Guests: what's shared, then beside it what's asked of them and what they can see
   {
     id: 'shared-projects',
     area: 'main',
     when: (space, m) => business(space) && m.role === 'guest',
   },
   { id: 'shared-files', area: 'main', when: (space, m) => business(space) && m.role === 'guest' },
+  { id: 'notices', area: 'side', when: (space, m) => business(space) && m.role === 'guest' },
+  { id: 'guest-access', area: 'side', when: (space, m) => business(space) && m.role === 'guest' },
 ];
 
 export type DashboardLayout = {

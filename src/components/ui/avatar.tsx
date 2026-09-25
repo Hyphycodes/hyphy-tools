@@ -14,11 +14,14 @@ export function Avatar({
   size = 'md',
   className,
   ring,
+  single,
 }: {
   person: Pick<Person, 'initials' | 'hue' | 'name'>;
   size?: keyof typeof sizes;
   className?: string;
   ring?: boolean;
+  /** One letter instead of two: overlapping avatars would otherwise cut the second one off. */
+  single?: boolean;
 }) {
   return (
     <span
@@ -32,7 +35,7 @@ export function Avatar({
       )}
       style={{ background: person.hue }}
     >
-      <span aria-hidden="true">{person.initials}</span>
+      <span aria-hidden="true">{single ? person.initials.slice(0, 1) : person.initials}</span>
       <span className="sr-only">{person.name}</span>
     </span>
   );
@@ -52,7 +55,13 @@ export function AvatarStack({
   return (
     <span className="flex items-center -space-x-1.5">
       {shown.map((person) => (
-        <Avatar key={person.id} person={person} size={size} ring />
+        <Avatar
+          key={person.id}
+          person={person}
+          size={size}
+          ring
+          single={size === 'xs' || size === 'sm'}
+        />
       ))}
       {rest > 0 && (
         <span

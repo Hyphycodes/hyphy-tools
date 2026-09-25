@@ -135,7 +135,7 @@ export function PdfTool({ slug, canSave }: { slug: string; canSave: boolean }) {
     }
   }
 
-  function add(list: FileList | null) {
+  function add(list: FileList | File[] | null) {
     if (!list) return;
     const incoming = Array.from(list);
     if (incoming.some((file) => !file.name.toLowerCase().endsWith('.pdf'))) {
@@ -201,6 +201,19 @@ export function PdfTool({ slug, canSave }: { slug: string; canSave: boolean }) {
     const pages = files[0]?.pages;
     const parsed = pages ? parseRange(text, pages) : null;
     setKeep(parsed ?? []);
+  }
+
+  /** No PDF handy: make a few on this device so the tool can be felt right away. */
+  async function trySamples() {
+    setBusy(true);
+    try {
+      const { samplePdfs } = await import('@/lib/tools/pdf-samples');
+      add(await samplePdfs(mode));
+    } catch {
+      setMessage('We couldn’t make the samples here. Choose your own PDFs instead.');
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function run() {
@@ -316,7 +329,18 @@ export function PdfTool({ slug, canSave }: { slug: string; canSave: boolean }) {
 
         <div className="mt-4">
           {files.length === 0 && (
-            <DropZone htmlFor={`${id}-files`} mode={mode} busy={busy} onFiles={add} />
+            <>
+              <DropZone htmlFor={`${id}-files`} mode={mode} busy={busy} onFiles={add} />
+              <button
+                type="button"
+                onClick={trySamples}
+                disabled={busy}
+                className="mx-auto mt-3 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[13.5px] font-medium text-signal-ink transition-colors hover:bg-signal-soft disabled:opacity-50"
+              >
+                <Icon name="sparkles" size={15} />
+                {mode === 'merge' ? 'No PDFs handy? Try three samples' : 'Try a 7-page sample'}
+              </button>
+            </>
           )}
 
           {mode === 'merge' && files.length > 0 && (
@@ -651,8 +675,8 @@ export function PdfTool({ slug, canSave }: { slug: string; canSave: boolean }) {
           )}
         </div>
         <p className="px-1 text-[12.5px] leading-relaxed text-muted">
-          Runs on this device — nothing is uploaded. Pages are combined as they are: form fields,
-          bookmarks and signatures may not carry over, so keep your originals.
+          Pages are copied as they are. Form fields, bookmarks and signatures may not carry over, so
+          keep your originals.
         </p>
       </div>
     </div>

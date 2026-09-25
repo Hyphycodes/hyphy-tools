@@ -7,6 +7,7 @@ import { Icon } from '@/components/ui/icon';
 import { Page, PageHeader } from '@/components/ui/page';
 import { Panel, PanelHeader } from '@/components/ui/panel';
 import { Chips } from '@/components/ui/tabs';
+import { currentProjectFor } from '@/lib/insights';
 import { openPage } from '@/lib/page';
 import { can as roleCan, ROLE_ORDER, roles, type Permission } from '@/lib/platform/roles';
 import type { Role } from '@/lib/platform/types';
@@ -27,11 +28,20 @@ const matrix: { label: string; permission: Permission }[] = [
 export default async function PeoplePage({ params, searchParams }: PageProps<'/[space]/people'>) {
   const { workspace, repo, base, can } = await openPage(params, 'people');
   const view = String((await searchParams).role ?? 'all');
-  const [members, projects, vehicles] = await Promise.all([
+  const [members, projects, vehicles, activity, receipts, mileage] = await Promise.all([
     repo.members(),
     repo.projects(),
     repo.vehicles(),
+    repo.activity({ limit: 80 }),
+    repo.receipts(),
+    repo.mileage(),
   ]);
+  // What each person has waiting on an approver: the operational fact a manager scans People for.
+  const waiting = new Map<string, number>();
+  if (can('expenses.approve'))
+    for (const item of [...receipts, ...mileage])
+      if (item.status === 'submitted')
+        waiting.set(item.createdBy, (waiting.get(item.createdBy) ?? 0) + 1);
   const shown = members
     .filter((member) => view === 'all' || member.role === view)
     .sort(
@@ -70,7 +80,7 @@ export default async function PeoplePage({ params, searchParams }: PageProps<'/[
       </div>
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
         <Panel className="self-start overflow-hidden">
-          <div className="hidden grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_110px_110px] gap-4 border-b border-line bg-subtle px-4 py-2.5 lg:grid">
+          <div className="hidden grid-cols-[minmax(0,1.45fr)_minmax(0,1.15fr)_90px_96px] gap-4 border-b border-line bg-subtle px-4 py-2.5 lg:grid">
             {['Person', 'Working on', 'Vehicle', 'Role'].map((heading) => (
               <span key={heading} className="label">
                 {heading}
@@ -85,12 +95,16 @@ export default async function PeoplePage({ params, searchParams }: PageProps<'/[
                   (project.teamIds.includes(member.personId) ||
                     member.projectIds?.includes(project.id)),
               );
+              // Lead with the project they're on now (the same rule as their Home), then “+N”.
+              const current = currentProjectFor(member.personId, projects, activity) ?? working[0];
+              const more = working.filter((project) => project.id !== current?.id).length;
+              const pending = waiting.get(member.personId) ?? 0;
               const vehicle = vehicles.find((item) => item.assignedTo === member.personId);
               return (
                 <li key={member.id}>
                   <Link
                     href={`${base}/people/${member.personId}`}
-                    className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-3 transition-colors hover:bg-subtle lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_110px_110px]"
+                    className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-3 transition-colors hover:bg-subtle lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1.15fr)_90px_96px]"
                   >
                     <span className="flex min-w-0 items-center gap-3">
                       <Avatar person={member.person} size="md" />
@@ -104,12 +118,25 @@ export default async function PeoplePage({ params, searchParams }: PageProps<'/[
                         <span className="block truncate text-[12.5px] text-muted">
                           {member.title}
                           {member.status === 'invited' && ' · Invited'}
+                          {pending > 0 && (
+                            <span className="text-signal-ink"> · {pending} waiting on you</span>
+                          )}
                         </span>
                       </span>
                     </span>
-                    <span className="hidden truncate text-[13px] text-ink-2 lg:block">
-                      {working.length ? (
-                        working.map((project) => project.name).join(', ')
+                    <span className="hidden min-w-0 items-center gap-2 text-[13px] text-ink-2 lg:flex">
+                      {current ? (
+                        <>
+                          <span
+                            className="size-2 shrink-0 rounded-full"
+                            style={{ background: current.color }}
+                            aria-hidden="true"
+                          />
+                          <span className="truncate">{current.name}</span>
+                          {more > 0 && (
+                            <span className="shrink-0 text-[12px] text-faint">+{more}</span>
+                          )}
+                        </>
                       ) : (
                         <span className="text-faint">—</span>
                       )}

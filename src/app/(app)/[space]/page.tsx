@@ -1,5 +1,6 @@
 import { QuickActions } from '@/components/create/create-button';
 import { Widget, type DashboardData } from '@/components/dashboard/widgets';
+import { cn } from '@/components/ui/cn';
 import { Page } from '@/components/ui/page';
 import { getRepository } from '@/lib/data';
 import { requireWorkspace } from '@/lib/identity';
@@ -176,7 +177,13 @@ export default async function Home({ params }: PageProps<'/[space]'>) {
             <Widget key={id} id={id} data={data} />
           ))}
         </div>
-        <div className="grid min-w-0 content-start gap-4 lg:gap-5">
+        {/* A guest's side is what's asked of them and who to call: on phones it leads. */}
+        <div
+          className={cn(
+            'grid min-w-0 content-start gap-4 lg:gap-5',
+            layout.hero === 'guest' && 'max-xl:order-first',
+          )}
+        >
           {layout.side.map((id) => (
             <Widget key={id} id={id} data={data} />
           ))}

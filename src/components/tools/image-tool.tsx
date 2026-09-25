@@ -105,6 +105,61 @@ async function convert(file: File, maxWidth: number | null, type: string, qualit
   return { source, width, height, blob };
 }
 
+/** A phone-camera-sized photo drawn on this device, so the tool can be tried without one. */
+async function samplePhoto(): Promise<File> {
+  const canvas = document.createElement('canvas');
+  canvas.width = 4032;
+  canvas.height = 3024;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('No canvas');
+  const { width, height } = canvas;
+  const sky = context.createLinearGradient(0, 0, 0, height * 0.7);
+  sky.addColorStop(0, '#f6b77a');
+  sky.addColorStop(0.55, '#f7d9a8');
+  sky.addColorStop(1, '#e8e2cf');
+  context.fillStyle = sky;
+  context.fillRect(0, 0, width, height);
+  context.fillStyle = '#fff4d6';
+  context.beginPath();
+  context.arc(width * 0.68, height * 0.36, 260, 0, Math.PI * 2);
+  context.fill();
+  const hills: [string, number, number][] = [
+    ['#b98f6a', 0.52, 180],
+    ['#8a6a4f', 0.62, 140],
+    ['#5b4a3a', 0.74, 110],
+    ['#3a3129', 0.86, 90],
+  ];
+  // A seeded wobble, so the sample is the same every time.
+  let seed = 7;
+  const random = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+  for (const [color, base, amplitude] of hills) {
+    context.fillStyle = color;
+    context.beginPath();
+    context.moveTo(0, height);
+    for (let x = 0; x <= width; x += 96)
+      context.lineTo(x, height * base + Math.sin(x / 380 + base * 9) * amplitude + random() * 40);
+    context.lineTo(width, height);
+    context.fill();
+  }
+  // Texture, so it compresses like a real photo rather than a flat drawing.
+  for (let index = 0; index < 60000; index += 1) {
+    context.fillStyle = `rgba(${random() > 0.5 ? '255,255,255' : '0,0,0'},${0.03 + random() * 0.06})`;
+    context.fillRect(
+      random() * width,
+      height * 0.45 + random() * height * 0.55,
+      6 + random() * 18,
+      3,
+    );
+  }
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob(resolve, 'image/jpeg', 0.95),
+  );
+  canvas.width = 0;
+  canvas.height = 0;
+  if (!blob) throw new Error('No sample');
+  return new File([blob], 'Sample photo.jpg', { type: 'image/jpeg' });
+}
+
 export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean }) {
   const toast = useToast();
   const [saving, startSaving] = useTransition();
@@ -226,7 +281,16 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
     setMessage(notes.join(' '));
   }
 
-  function add(files: FileList | null) {
+  async function trySample() {
+    setMessage('Drawing a sample photo…');
+    try {
+      add([await samplePhoto()]);
+    } catch {
+      setMessage('We couldn’t draw a sample here. Choose one of your own images.');
+    }
+  }
+
+  function add(files: FileList | File[] | null) {
     if (!files?.length || busy) return;
     const accepted: File[] = [];
     const notImages: string[] = [];
@@ -299,6 +363,7 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
     );
   const working = items.findIndex((item) => item.state === 'working');
   const finished = items.filter((item) => item.result);
+  const latest = finished[finished.length - 1];
   const totalBefore = finished.reduce((sum, item) => sum + item.file.size, 0);
   const totalAfter = finished.reduce((sum, item) => sum + (item.result?.size ?? 0), 0);
 
@@ -505,98 +570,151 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
           )}
         </div>
         {items.length === 0 ? (
-          <ol className="grid gap-3 px-4 pt-2 pb-6 text-[14px] text-muted">
-            {[
-              'Add photos or screenshots — they shrink right away.',
-              'Change the width or format if you like.',
-              'Download lighter files, or save them to Files.',
-            ].map((line, index) => (
-              <li key={line} className="flex items-center gap-3 rounded-[12px] bg-subtle px-3 py-3">
-                <span className="mono-num grid size-7 place-items-center rounded-full bg-tool-image/60 text-[11px] text-ink">
-                  {index + 1}
-                </span>
-                {line}
-              </li>
-            ))}
-          </ol>
+          // Before and after, drawn: what this tool does, at a glance.
+          <div className="px-4 pt-3 pb-6">
+            <div className="flex items-end justify-center gap-5 rounded-[16px] bg-tool-image/20 px-4 pt-8 pb-6">
+              <figure className="w-[46%] max-w-[210px]">
+                <span
+                  className="block aspect-[4/3] rounded-[10px] bg-[linear-gradient(180deg,#f6b77a,#f7d9a8_45%,#8a6a4f_46%,#3a3129)] shadow-lift"
+                  aria-hidden="true"
+                />
+                <figcaption className="mt-2 text-center text-[12px] text-muted">
+                  <span className="mono-num text-ink">4032×3024</span> · 4.8 MB
+                </figcaption>
+              </figure>
+              <Icon name="arrow-right" size={18} className="mb-12 text-ink/35" />
+              <figure className="w-[28%] max-w-[120px]">
+                <span
+                  className="block aspect-[4/3] rounded-[8px] bg-[linear-gradient(180deg,#f6b77a,#f7d9a8_45%,#8a6a4f_46%,#3a3129)] shadow-lift"
+                  aria-hidden="true"
+                />
+                <figcaption className="mt-2 text-center text-[12px] text-muted">
+                  <span className="mono-num text-ink">1920×1440</span> · 380 KB
+                </figcaption>
+              </figure>
+            </div>
+            <p className="mt-4 text-center text-[14px] text-ink-2">
+              Add photos and they shrink right away — same picture, a fraction of the weight.
+            </p>
+            <button
+              type="button"
+              onClick={trySample}
+              disabled={busy}
+              className="mx-auto mt-2 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[13.5px] font-medium text-signal-ink transition-colors hover:bg-signal-soft disabled:opacity-50"
+            >
+              <Icon name="sparkles" size={15} /> Try a sample photo
+            </button>
+          </div>
         ) : (
-          <ol className="row-divide pb-2">
-            {items.map((item) => {
-              const { result, source } = item;
-              const larger = result && result.size > item.file.size;
-              return (
-                <li
-                  key={item.id}
-                  className="flex items-center gap-3 px-4 py-2.5"
-                  data-state={item.state}
-                >
-                  <span className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-[10px] bg-well text-[10px] font-medium text-muted uppercase">
-                    {result || item.preview ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={result?.url ?? item.preview}
-                        alt=""
-                        decoding="async"
-                        className={cn(
-                          'size-full object-cover transition-opacity',
-                          !result && 'opacity-60',
-                        )}
-                      />
-                    ) : (
-                      (/\.([a-z0-9]{1,4})$/i.exec(item.file.name)?.[1] ?? 'img')
-                    )}
+          <>
+            {/* The latest result, large: the picture is the same, the weight isn't. */}
+            {latest?.result && latest.source && (
+              <figure className="relative mx-4 mt-1 mb-3 animate-rise overflow-hidden rounded-[14px] bg-well shadow-[inset_0_0_0_1px_var(--color-line)]">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={latest.result.url}
+                  alt={latest.result.name}
+                  className="block max-h-[260px] w-full object-cover"
+                />
+                <figcaption className="absolute inset-x-3 bottom-3 flex flex-wrap items-center gap-1.5 text-[12px]">
+                  <span className="rounded-full bg-white/90 px-2.5 py-1 text-muted backdrop-blur">
+                    Before{' '}
+                    <span className="mono-num text-ink">
+                      {latest.source.width}×{latest.source.height}
+                    </span>{' '}
+                    · {formatBytes(latest.file.size)}
                   </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[14px] font-medium">{item.file.name}</span>
-                    <span className="block truncate text-[12.5px] text-muted">
-                      {item.state === 'error' ? (
-                        <span className="text-critical">{item.error}</span>
-                      ) : result?.kept && source ? (
-                        `${source.width}×${source.height} · ${formatBytes(item.file.size)} · already as small as it gets`
-                      ) : result && source ? (
-                        `${source.width}×${source.height} → ${result.width}×${result.height} · ${formatBytes(item.file.size)} → ${formatBytes(result.size)}`
-                      ) : (
-                        `${formatBytes(item.file.size)} · ${item.state === 'working' ? 'Working…' : busy ? 'Queued' : 'Ready'}`
-                      )}
-                    </span>
+                  <Icon name="arrow-right" size={14} className="text-white drop-shadow" />
+                  <span className="rounded-full bg-ink px-2.5 py-1 text-white/70">
+                    After{' '}
+                    <span className="mono-num text-white">
+                      {latest.result.width}×{latest.result.height}
+                    </span>{' '}
+                    · <span className="text-white">{formatBytes(latest.result.size)}</span>
                   </span>
-                  {result && !result.kept && (
-                    <span
-                      className={cn(
-                        'mono-num text-[12px] font-medium',
-                        larger ? 'text-caution' : 'text-positive',
-                      )}
-                    >
-                      {change(item.file.size, result.size)}
-                    </span>
-                  )}
-                  {result && (
-                    <a
-                      href={result.url}
-                      download={result.name}
-                      aria-label={`Download ${result.name}`}
-                      className="grid size-9 place-items-center rounded-[9px] text-ink-2 hover:bg-ink/5"
-                    >
-                      <Icon name="download" size={17} />
-                    </a>
-                  )}
-                  <button
-                    type="button"
-                    disabled={busy}
-                    aria-label={`Remove ${item.file.name}`}
-                    onClick={() => {
-                      release(result?.url);
-                      release(item.preview);
-                      setItems((current) => current.filter((entry) => entry.id !== item.id));
-                    }}
-                    className="grid size-9 place-items-center rounded-[9px] text-muted hover:bg-ink/5"
+                </figcaption>
+              </figure>
+            )}
+            <ol className="row-divide pb-2">
+              {items.map((item) => {
+                const { result, source } = item;
+                const larger = result && result.size > item.file.size;
+                return (
+                  <li
+                    key={item.id}
+                    className="flex items-center gap-3 px-4 py-2.5"
+                    data-state={item.state}
                   >
-                    <Icon name="x" size={16} />
-                  </button>
-                </li>
-              );
-            })}
-          </ol>
+                    <span className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-[10px] bg-well text-[10px] font-medium text-muted uppercase">
+                      {result || item.preview ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={result?.url ?? item.preview}
+                          alt=""
+                          decoding="async"
+                          className={cn(
+                            'size-full object-cover transition-opacity',
+                            !result && 'opacity-60',
+                          )}
+                        />
+                      ) : (
+                        (/\.([a-z0-9]{1,4})$/i.exec(item.file.name)?.[1] ?? 'img')
+                      )}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[14px] font-medium">
+                        {item.file.name}
+                      </span>
+                      <span className="block truncate text-[12.5px] text-muted">
+                        {item.state === 'error' ? (
+                          <span className="text-critical">{item.error}</span>
+                        ) : result?.kept && source ? (
+                          `${source.width}×${source.height} · ${formatBytes(item.file.size)} · already as small as it gets`
+                        ) : result && source ? (
+                          `${source.width}×${source.height} → ${result.width}×${result.height} · ${formatBytes(item.file.size)} → ${formatBytes(result.size)}`
+                        ) : (
+                          `${formatBytes(item.file.size)} · ${item.state === 'working' ? 'Working…' : busy ? 'Queued' : 'Ready'}`
+                        )}
+                      </span>
+                    </span>
+                    {result && !result.kept && (
+                      <span
+                        className={cn(
+                          'mono-num text-[12px] font-medium',
+                          larger ? 'text-caution' : 'text-positive',
+                        )}
+                      >
+                        {change(item.file.size, result.size)}
+                      </span>
+                    )}
+                    {result && (
+                      <a
+                        href={result.url}
+                        download={result.name}
+                        aria-label={`Download ${result.name}`}
+                        className="grid size-9 place-items-center rounded-[9px] text-ink-2 hover:bg-ink/5"
+                      >
+                        <Icon name="download" size={17} />
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      disabled={busy}
+                      aria-label={`Remove ${item.file.name}`}
+                      onClick={() => {
+                        release(result?.url);
+                        release(item.preview);
+                        setItems((current) => current.filter((entry) => entry.id !== item.id));
+                      }}
+                      className="grid size-9 place-items-center rounded-[9px] text-muted hover:bg-ink/5"
+                    >
+                      <Icon name="x" size={16} />
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          </>
         )}
         {canSave && finished.length > 0 && !busy && (
           <div className="border-t border-line px-4 py-3">
