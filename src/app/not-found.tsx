@@ -8,8 +8,8 @@ export default function NotFound() {
         <p className="label mb-3">Not here</p>
         <h1 className="display text-[34px]">This isn’t in your Spaces.</h1>
         <p className="mt-3 text-[15px] leading-relaxed text-muted">
-          The page doesn’t exist, or the person you’re previewing as can’t see it. Switch who you’re
-          previewing as, or head home.
+          The page doesn’t exist, or it isn’t shared with you — or, in Demo Mode, with the person
+          you’re previewing as. Head home to your Spaces.
         </p>
         <Link href="/" className={buttonClass({ variant: 'primary', className: 'mt-6' })}>
           Go home

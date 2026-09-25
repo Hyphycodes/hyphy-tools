@@ -27,6 +27,19 @@ import { can, permissionsFor } from '@/lib/platform/roles';
 import { availability, getTool } from '@/lib/platform/tools';
 import type { Space } from '@/lib/platform/types';
 import { formatRange, parseRange } from '@/lib/tools/pdf';
+import { authProblem, checkEmail, checkName, checkNewPassword } from '@/lib/auth/errors';
+import {
+  isPublicPath,
+  isSignedOutOnlyPath,
+  reservedSlugs,
+  safeNext,
+  signInPath,
+  spaceSegment,
+} from '@/lib/auth/routes';
+import { homeFor } from '@/lib/identity/active-space';
+import { identityMode } from '@/lib/identity/mode';
+import type { Session } from '@/lib/identity/types';
+import { assertPublishable } from '@/lib/supabase/config';
 import { kindOf, parseWifi, wifiPayload } from '@/lib/tools/qr';
 
 /* Pure rules, no browser. Run with `npm test`. */
@@ -537,5 +550,180 @@ test.describe('work styles', () => {
     for (const project of data.projects)
       if (project.costAllowance && project.value)
         expect(project.costAllowance).toBeLessThan(project.value);
+  });
+});
+
+/* ---------- real accounts (Phase 2A) ---------- */
+
+test.describe('identity mode', () => {
+  test('Demo Mode unless real accounts are asked for by name', () => {
+    expect(identityMode({})).toBe('demo');
+    expect(identityMode({ HYPHY_IDENTITY: '' })).toBe('demo');
+    expect(identityMode({ HYPHY_IDENTITY: 'demo' })).toBe('demo');
+    expect(identityMode({ HYPHY_IDENTITY: 'supabse' })).toBe('demo');
+    expect(identityMode({ HYPHY_IDENTITY: 'true' })).toBe('demo');
+    expect(identityMode({ HYPHY_IDENTITY: 'supabase' })).toBe('supabase');
+    expect(identityMode({ HYPHY_IDENTITY: ' Supabase ' })).toBe('supabase');
+  });
+  test('only a publishable key may be public', () => {
+    expect(() => assertPublishable('sb_publishable_abc123')).not.toThrow();
+    expect(() => assertPublishable('sb_secret_abc123')).toThrow(/secret/);
+    const jwt = (role: string) =>
+      `eyJhbGciOiJIUzI1NiJ9.${Buffer.from(JSON.stringify({ role })).toString('base64url')}.sig`;
+    expect(() => assertPublishable(jwt('anon'))).not.toThrow();
+    expect(() => assertPublishable(jwt('service_role'))).toThrow(/privileged/);
+  });
+});
+
+test.describe('safe destinations after sign-in', () => {
+  test('keeps paths inside Hyphy, with their query', () => {
+    expect(safeNext('/abc/projects')).toBe('/abc/projects');
+    expect(safeNext('/personal/tools/qr?x=1#top')).toBe('/personal/tools/qr?x=1#top');
+    expect(safeNext('/platform/abc')).toBe('/abc');
+    expect(safeNext('/platform')).toBe('/');
+  });
+  test('refuses other origins and tricks', () => {
+    for (const bad of [
+      '//evil.example',
+      '///evil.example',
+      'https://evil.example',
+      'http:evil.example',
+      'javascript:alert(1)',
+      '/\\evil.example',
+      '\\evil.example',
+      '/..//evil.example',
+      '/\t/evil.example',
+      'evil.example',
+      '',
+      undefined,
+      null,
+      42,
+      '/' + 'a'.repeat(2000),
+    ])
+      expect(safeNext(bad, '/fallback'), String(bad)).toBe('/fallback');
+    // Encoded characters stay encoded: a harmless path on this site, not a header.
+    expect(safeNext('/%0d%0aSet-Cookie:x')).toBe('/%0d%0aSet-Cookie:x');
+  });
+  test('never back into the sign-in pages', () => {
+    for (const path of [
+      '/sign-in',
+      '/sign-up?x',
+      '/forgot-password',
+      '/reset-password',
+      '/auth/confirm',
+    ])
+      expect(safeNext(path)).toBe('/');
+    expect(signInPath('/abc/projects')).toBe('/sign-in?next=%2Fabc%2Fprojects');
+    expect(signInPath('/')).toBe('/sign-in');
+    expect(signInPath('//evil.example')).toBe('/sign-in');
+  });
+  test('which pages are open, and which only while signed out', () => {
+    expect(isPublicPath('/sign-in')).toBe(true);
+    expect(isPublicPath('/auth/confirm')).toBe(true);
+    expect(isPublicPath('/reset-password')).toBe(true);
+    expect(isPublicPath('/welcome')).toBe(false);
+    expect(isPublicPath('/personal')).toBe(false);
+    expect(isPublicPath('/sign-inside')).toBe(false);
+    expect(isSignedOutOnlyPath('/sign-up')).toBe(true);
+    expect(isSignedOutOnlyPath('/reset-password')).toBe(false);
+  });
+  test('a Space address is remembered only if it could be one', () => {
+    expect(spaceSegment('/abc/projects')).toBe('abc');
+    expect(spaceSegment('/personal')).toBe('personal');
+    expect(spaceSegment('/sign-in')).toBeNull();
+    expect(spaceSegment('/welcome')).toBeNull();
+    expect(spaceSegment('/')).toBeNull();
+    expect(spaceSegment('/ABC')).toBeNull();
+    // The seed's Spaces never use a reserved address.
+    for (const space of data.spaces.filter((item) => item.kind === 'business'))
+      expect(reservedSlugs).not.toContain(space.slug);
+  });
+});
+
+test.describe('the active Space', () => {
+  const session = (personId: string): Session => ({
+    source: 'supabase',
+    person: data.people.find((person) => person.id === personId)!,
+    memberships: data.memberships
+      .filter((m) => m.personId === personId && m.status === 'active')
+      .map((m) => ({ ...m, space: data.spaces.find((space) => space.id === m.spaceId)! })),
+  });
+  test('a remembered Space counts only while it is theirs', () => {
+    expect(homeFor(session('jerry'), 'salt-and-ember')).toBe('/salt-and-ember');
+    expect(homeFor(session('jerry'), 'personal')).toBe('/personal');
+    // Mike isn't in Salt & Ember: the cookie is ignored.
+    expect(homeFor(session('mike'), 'salt-and-ember')).toBe('/abc-construction');
+    expect(homeFor(session('mike'), 'does-not-exist')).toBe('/abc-construction');
+    expect(homeFor(session('mike'), null)).toBe('/abc-construction');
+  });
+  test('a new account lands in its Personal Space; nobody lands nowhere', () => {
+    const person = data.people.find((item) => item.id === 'jerry')!;
+    const personal = data.spaces.find((s) => s.kind === 'personal' && s.ownerId === 'jerry')!;
+    const fresh: Session = {
+      source: 'supabase',
+      person,
+      memberships: [
+        {
+          id: 'm1',
+          spaceId: personal.id,
+          personId: person.id,
+          role: 'owner',
+          title: 'Owner',
+          status: 'active',
+          joinedAt: personal.createdAt,
+          space: personal,
+        } as Session['memberships'][number],
+      ],
+    };
+    expect(homeFor(fresh, 'abc-construction')).toBe('/personal');
+    expect(homeFor({ ...fresh, memberships: [] }, 'abc-construction')).toBeNull();
+  });
+});
+
+test.describe('account problems, in plain words', () => {
+  const said = (code: string, intent: Parameters<typeof authProblem>[1] = 'sign-in') =>
+    authProblem({ code, status: 400, message: 'raw supabase text' }, intent, 'production');
+  test('known Supabase Auth codes', () => {
+    expect(said('invalid_credentials').message).toMatch(/email and password don’t match/);
+    expect(said('email_not_confirmed')).toMatchObject({ field: 'email' });
+    expect(said('user_already_exists', 'sign-up').message).toMatch(/already an account/);
+    expect(said('weak_password', 'sign-up')).toMatchObject({ field: 'password' });
+    expect(
+      authProblem({ code: 'weak_password', reasons: ['pwned'] }, 'sign-up', 'production').message,
+    ).toMatch(/data breach/);
+    expect(said('otp_expired', 'confirm').message).toMatch(/expired/);
+    expect(said('otp_expired', 'reset-password').message).toMatch(/reset link has expired/);
+    expect(said('over_email_send_rate_limit').message).toMatch(/Wait a minute/);
+    expect(said('over_request_rate_limit').message).toMatch(/Wait a minute/);
+    expect(said('same_password', 'change-password').message).toMatch(/current password/);
+    expect(said('session_not_found', 'reset-password').message).toMatch(/expired/);
+  });
+  test('the network and rate limits without a code', () => {
+    expect(
+      authProblem({ name: 'AuthRetryableFetchError', status: 0 }, 'sign-in', 'production').message,
+    ).toMatch(/couldn’t reach Hyphy/);
+    expect(authProblem(new Error('fetch failed'), 'sign-in', 'production').message).toMatch(
+      /couldn’t reach/,
+    );
+    expect(authProblem({ status: 429 }, 'sign-in', 'production').message).toMatch(/Wait a minute/);
+  });
+  test('unknown problems stay calm for people and diagnosable in development', () => {
+    const odd = { code: 'something_new', message: 'Database error saving new user' };
+    expect(authProblem(odd, 'sign-up', 'production').message).not.toMatch(/Database/);
+    expect(authProblem(odd, 'sign-up', 'development').message).toMatch(
+      /something_new: Database error saving new user/,
+    );
+  });
+  test('the checks forms make first', () => {
+    expect(checkEmail('')).toMatchObject({ field: 'email' });
+    expect(checkEmail('not-an-email')).toMatchObject({ field: 'email' });
+    expect(checkEmail(' ada@hyphy-tools.example ')).toBeNull();
+    expect(checkNewPassword('short1')).toMatchObject({ field: 'password' });
+    expect(checkNewPassword('onlyletters')).toMatchObject({ field: 'password' });
+    expect(checkNewPassword('letters-and-1')).toBeNull();
+    expect(checkNewPassword('a1'.repeat(40))).toMatchObject({ field: 'password' });
+    expect(checkName('  ')).toMatchObject({ field: 'name' });
+    expect(checkName('x'.repeat(81))).toMatchObject({ field: 'name' });
+    expect(checkName('Ada')).toBeNull();
   });
 });

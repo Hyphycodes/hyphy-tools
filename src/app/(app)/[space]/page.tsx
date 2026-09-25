@@ -2,6 +2,8 @@ import { QuickActions } from '@/components/create/create-button';
 import { Widget, type DashboardData } from '@/components/dashboard/widgets';
 import { cn } from '@/components/ui/cn';
 import { Page } from '@/components/ui/page';
+import { Panel } from '@/components/ui/panel';
+import { Starters } from '@/components/auth/starters';
 import { getRepository } from '@/lib/data';
 import { requireWorkspace } from '@/lib/identity';
 import {
@@ -102,12 +104,20 @@ export default async function Home({ params }: PageProps<'/[space]'>) {
     week: weekSummary({ receipts, mileage, projects, activity }, rate),
   };
   const layout = dashboardFor(space, membership);
+  // A Personal Space nobody has used yet — a brand-new account. Home offers first things to do
+  // instead of empty lists; it fills itself as they work.
+  const fresh =
+    space.kind === 'personal' &&
+    [activity, receipts, mileage, files, qrCodes, linkPages, projects].every(
+      (rows) => !rows.length,
+    );
   const can = (permission: (typeof workspace.permissions)[number]) =>
     workspace.permissions.includes(permission);
   const urgent = inbox.find((item) => item.priority === 'high');
 
   // A few plain sentences about today, written for this person. Specific beats clever.
   const briefing = (() => {
+    if (fresh) return 'What would you like to do first? Everything you make here is kept for you.';
     if (layout.hero === 'personal') {
       const month =
         receipts.length || mileage.length
@@ -176,8 +186,12 @@ export default async function Home({ params }: PageProps<'/[space]'>) {
             <span className="truncate">{space.kind === 'personal' ? 'Personal' : space.name}</span>
           </p>
           <h1 className="display text-[34px] text-ink sm:text-[42px] lg:text-[48px]">
-            {layout.hero === 'personal' ? 'Welcome back' : greeting(space.timezone)},{' '}
-            {person.firstName}.
+            {fresh
+              ? 'Welcome to Hyphy'
+              : layout.hero === 'personal'
+                ? 'Welcome back'
+                : greeting(space.timezone)}
+            , {person.firstName}.
           </h1>
           <p className="mt-2.5 max-w-[64ch] text-[15.5px] leading-relaxed text-ink-2/80 lg:text-[15px]">
             {briefing}
@@ -199,7 +213,22 @@ export default async function Home({ params }: PageProps<'/[space]'>) {
         </section>
       )}
 
-      {layout.top.length > 0 && (
+      {fresh && (
+        <div className="grid gap-4 lg:gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+          <section aria-label="Start here" className="min-w-0">
+            <Starters workspace={workspace} />
+          </section>
+          <Panel as="aside" className="p-5">
+            <h2 className="text-[15px] font-semibold">This page fills in as you go</h2>
+            <p className="mt-1.5 text-[14px] leading-relaxed text-muted">
+              What you make — PDFs, codes, receipts, trips — shows up here as recent work, with your
+              files and the tools you pin. It’s all private to your Personal Space.
+            </p>
+          </Panel>
+        </div>
+      )}
+
+      {!fresh && layout.top.length > 0 && (
         <div className="mb-5 grid gap-4 lg:mb-6 lg:gap-5">
           {layout.top.map((id) => (
             <Widget key={id} id={id} data={data} />
@@ -207,24 +236,26 @@ export default async function Home({ params }: PageProps<'/[space]'>) {
         </div>
       )}
 
-      <div className="grid gap-4 lg:gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="grid min-w-0 content-start gap-4 lg:gap-5">
-          {layout.main.map((id) => (
-            <Widget key={id} id={id} data={data} />
-          ))}
+      {!fresh && (
+        <div className="grid gap-4 lg:gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+          <div className="grid min-w-0 content-start gap-4 lg:gap-5">
+            {layout.main.map((id) => (
+              <Widget key={id} id={id} data={data} />
+            ))}
+          </div>
+          {/* A guest's side is what's asked of them and who to call: on phones it leads. */}
+          <div
+            className={cn(
+              'grid min-w-0 content-start gap-4 lg:gap-5',
+              layout.hero === 'guest' && 'max-xl:order-first',
+            )}
+          >
+            {layout.side.map((id) => (
+              <Widget key={id} id={id} data={data} />
+            ))}
+          </div>
         </div>
-        {/* A guest's side is what's asked of them and who to call: on phones it leads. */}
-        <div
-          className={cn(
-            'grid min-w-0 content-start gap-4 lg:gap-5',
-            layout.hero === 'guest' && 'max-xl:order-first',
-          )}
-        >
-          {layout.side.map((id) => (
-            <Widget key={id} id={id} data={data} />
-          ))}
-        </div>
-      </div>
+      )}
     </Page>
   );
 }

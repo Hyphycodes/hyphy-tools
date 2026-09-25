@@ -6,6 +6,8 @@ import type { Person, Role, Space } from '@/lib/platform/types';
 /** What the client shell knows about the current Workspace. Serializable, built on the server. */
 export type ShellModel = {
   person: Person;
+  /** The sign-in account, for real accounts (sign out, login email). Null in Demo Mode. */
+  account: { email: string } | null;
   space: Space;
   role: Role;
   roleLabel: string;

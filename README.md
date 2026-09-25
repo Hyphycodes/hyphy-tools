@@ -4,8 +4,11 @@ The software platform of Hyphy LLC: a universal toolbox that grows into a person
 business's operating system. Hyphy Studio (`hyphy-studio`) is the marketing site; this repository
 is the product.
 
-**Phase 1 is an explorable preview.** There is no sign-in. Open it and you're in, as one of the
-Demo Mode people, in one of their Spaces.
+**Demo Mode is the default.** There is no sign-in: open it and you're in, as one of the Demo Mode
+people, in one of their Spaces. Real accounts (Supabase Auth: sign-up, sign-in, recovery, a
+Personal Space for every new account) are built and tested but switched off until the hosted
+setup is verified — see [docs/AUTH.md](docs/AUTH.md). The account pages (`/sign-in`, `/sign-up`, …)
+can be opened in Demo Mode as a preview.
 
 ## Run it
 
@@ -52,7 +55,8 @@ src/
   app/(app)/[space]/actions.ts   every change: validate → check permission → repository
   lib/platform/            the product's rules: types, roles, plans, tool registry, Create registry,
                            navigation, dashboard composition, custom fields, formatting
-  lib/identity/            who is here (Session, Workspace) — demo source now, Supabase later
+  lib/identity/            who is here (Session, Workspace) — Demo Mode or real accounts (mode.ts)
+  lib/supabase/, lib/auth/ Supabase Auth clients, session proxy, account actions and rules
   lib/data/                what they can see (Repository) — demo repository now, Supabase later
   lib/data/demo/           seeded world + the per-browser change journal
   lib/demo/                Demo Mode controls (Preview As, Reset) — removed with real sign-in
@@ -71,7 +75,7 @@ tests/                     unit (rules) and end-to-end (personas, access, flows,
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — Spaces, roles vs plans vs modules, the registries, data flow.
 - [docs/DEMO-MODE.md](docs/DEMO-MODE.md) — how the preview works and how to remove it.
-- [docs/AUTH.md](docs/AUTH.md) — replacing Demo Mode with Supabase Auth, step by step.
+- [docs/AUTH.md](docs/AUTH.md) — real accounts: how they work, what's tested, how to switch them on.
 - [docs/DESIGN.md](docs/DESIGN.md) — the visual system.
 - [docs/STUDIO-INVENTORY.md](docs/STUDIO-INVENTORY.md) — what came from Hyphy Studio and what stays there.
 

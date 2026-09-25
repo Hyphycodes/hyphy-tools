@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { expect, test } from '@playwright/test';
 import postgres from 'postgres';
 import { createRepository } from '@/lib/data/core';
@@ -6,6 +9,7 @@ import { visibleTo } from '@/lib/data/demo/visibility';
 import { RuleError } from '@/lib/data/repository';
 import type { Visible } from '@/lib/data/source';
 import { asPerson, db } from '@/lib/data/supabase/db';
+import { renameSelf } from '@/lib/data/supabase/profile';
 import { resetWorld } from '@/lib/data/supabase/dev';
 import { demoUuid } from '@/lib/data/supabase/rows';
 import { loadSession } from '@/lib/data/supabase/session';
@@ -538,5 +542,81 @@ test.describe('the app’s own database role', () => {
       (tx: postgres.TransactionSql) => tx`truncate table receipts cascade`,
     ])
       await expect(as('mike', call)).rejects.toThrow(/permission denied/);
+  });
+});
+
+test.describe('real accounts', () => {
+  const admin = () => postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} });
+  test.beforeEach(() => {
+    test.skip(!process.env.DATABASE_ADMIN_URL, 'Needs DATABASE_ADMIN_URL to act as Supabase Auth.');
+  });
+
+  test('the account suite passes (supabase/tests/accounts.sql)', async () => {
+    const sql = admin();
+    const file = readFileSync(path.join(__dirname, '../supabase/tests/accounts.sql'), 'utf8');
+    // It always rolls back; its report is the error.
+    await expect(sql.unsafe(file)).rejects.toThrow(/ACCOUNTS PASSED/);
+    await sql.end();
+  });
+
+  test('a new account is itself, in its own Personal Space, and sees nothing else', async () => {
+    const sql = admin();
+    const id = randomUUID();
+    const email = `data-${id.slice(0, 8)}.auth-test@hyphy-tools.example`;
+    try {
+      // What Supabase Auth does when someone signs up.
+      await sql`insert into auth.users (id, email, raw_user_meta_data)
+                values (${id}, ${email}, ${sql.json({ name: 'Nova Test' })})`;
+      const session = await loadSession(id, 'supabase');
+      expect(session?.person).toMatchObject({ id, name: 'Nova Test', firstName: 'Nova', email });
+      expect(
+        session?.memberships.map((m) => [m.space.kind, m.space.slug, m.role, m.status]),
+      ).toEqual([['personal', 'personal', 'owner', 'active']]);
+
+      const { space, ...membership } = session!.memberships[0];
+      const ws: Workspace = {
+        session: session!,
+        person: session!.person,
+        space,
+        membership,
+        permissions: permissionsFor(membership),
+      };
+      const mine = createRepository(ws, createSupabaseSource(ws));
+      const rows = await Promise.all([
+        mine.projects(),
+        mine.vehicles(),
+        mine.receipts(),
+        mine.mileage(),
+        mine.files(),
+        mine.activity(),
+        mine.inbox(),
+      ]);
+      expect(rows.map((list) => list.length)).toEqual([0, 0, 0, 0, 0, 0, 0]);
+      expect((await mine.directory()).map((person) => person.id)).toEqual([id]);
+
+      // Renaming is theirs alone; the id is the verified session's.
+      await renameSelf(id, 'Nova Renamed');
+      expect((await loadSession(id, 'supabase'))?.person.name).toBe('Nova Renamed');
+      const renamed = await asPerson(
+        id,
+        (tx) => tx`update profiles set name = 'Not Dana' where id = ${u('dana')} returning id`,
+      );
+      expect(renamed).toHaveLength(0);
+    } finally {
+      await sql`delete from auth.users where id = ${id}`;
+      await sql.end();
+    }
+  });
+
+  test('Personal Spaces take no one else, through the app’s own paths either', async () => {
+    const jerry = await repo('jerry', 'personal');
+    await expect(
+      jerry.invite({
+        name: 'Sam',
+        email: 'sam.torres@abcconstruction.example',
+        role: 'member',
+        title: '',
+      }),
+    ).rejects.toThrow(RuleError);
   });
 });

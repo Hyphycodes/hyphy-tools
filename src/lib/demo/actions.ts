@@ -8,6 +8,7 @@ import { clearPins } from '@/lib/data/demo/prefs';
 import { seed } from '@/lib/data/demo/seed';
 import { resetWorld } from '@/lib/data/supabase/dev';
 import { PREVIEW_COOKIE } from '@/lib/identity/demo-source';
+import { identityMode } from '@/lib/identity/mode';
 
 /**
  * Demo Mode controls. They exist only while the identity source is the demo one, and they are
@@ -15,7 +16,7 @@ import { PREVIEW_COOKIE } from '@/lib/identity/demo-source';
  * components/demo) when real sign-in ships.
  */
 function assertDemo() {
-  if (process.env.HYPHY_IDENTITY === 'supabase') throw new Error('Demo Mode is off.');
+  if (identityMode() !== 'demo') throw new Error('Demo Mode is off.');
 }
 
 export async function previewAs(formData: FormData) {

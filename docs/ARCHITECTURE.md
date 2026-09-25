@@ -36,7 +36,8 @@ app/(app)/[space]/…      pages (server components) and actions.ts (server acti
         │  getRepository(workspace) → Repository (scoped to that Space and person)
         ▼
 lib/identity             IdentitySource: demo-source.ts | dev-source.ts (personas on the dev
-                         database) | supabase-source.ts (real sign-in, later)
+                         database) | supabase-source.ts (real accounts); mode.ts is the switch
+lib/supabase, lib/auth   Supabase Auth clients, the session-refreshing proxy, account actions
 lib/data                 Repository = core.ts (shared rules) over a DataSource:
                            demo/source.ts      seed + journal, visibility in code (demo/visibility.ts)
                            supabase/source.ts  the database, queried as the person; RLS decides
@@ -44,7 +45,10 @@ lib/platform             pure rules shared by server and client: roles, plans, r
 components/*             UI; client components read the Workspace through useWorkspace()
 ```
 
-- **Identity.** `getSession()` returns the person and all their memberships. `getWorkspace(slug)`
+- **Identity.** `HYPHY_IDENTITY` (`lib/identity/mode.ts`) picks the source: Demo Mode (default)
+  or real accounts, where `src/proxy.ts` refreshes and verifies the Supabase Auth session and the
+  person is the verified token's `sub` (docs/AUTH.md). `getSession()` returns the person and all
+  their memberships. `getWorkspace(slug)`
   picks the membership for the Space in the URL (`/personal` resolves to the viewer's own personal
   Space). Pages 404 when the viewer isn't a member. The client shell receives a serializable
   `ShellModel` built from the Workspace, exposed as `useWorkspace()` — the `currentUser`,
@@ -163,7 +167,7 @@ with the same result shape (`SearchItem` in `lib/search.ts`).
 
 | Works for real                                                                                                                                  | Simulated in the preview                             |
 | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| PDF merge and page extract with page thumbnails (pdf-lib + PDF.js), QR PNG/SVG for links, Wi-Fi and email, image resize/convert (all on-device) | Identity (Demo Mode instead of sign-in)              |
+| PDF merge and page extract with page thumbnails (pdf-lib + PDF.js), QR PNG/SVG for links, Wi-Fi and email, image resize/convert (all on-device) | Real accounts are built but off (Demo Mode is live)  |
 | Every create flow, approvals, inbox actions, turning tools on/off — persisted in Postgres with `HYPHY_DATA=supabase`                            | Storage: files record metadata only                  |
 | Role-scoped reads everywhere, server-side permission checks on every change                                                                     | Receipt auto-reading (sample receipt shows the flow) |
 | Mileage CSV export, link page editing, saving QR codes                                                                                          | Link page publishing, email invitations, billing     |

@@ -60,8 +60,8 @@ from the same demo model and disappear with it.
 
 ## Removing it
 
-1. Implement the Supabase identity source (see AUTH.md) and set `HYPHY_IDENTITY=supabase`,
-   `HYPHY_DATA=supabase`.
+1. Set `HYPHY_IDENTITY=supabase` and `HYPHY_DATA=supabase` (the Supabase identity source is built;
+   see AUTH.md, "Before switching it on"). Demo Mode's actions already refuse to run then.
 2. Delete `src/lib/demo/`, `src/components/demo/`, `src/lib/identity/demo-source.ts`,
    `src/lib/identity/dev-source.ts`, `src/lib/data/supabase/dev.ts` and `src/lib/data/demo/`
    (keep the seed and `world.ts` as fixtures for tests and the development database).

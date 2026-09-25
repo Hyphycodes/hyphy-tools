@@ -59,6 +59,7 @@ export async function buildShellModel(workspace: Workspace, repo: Repository): P
         : ['Home'];
   return {
     person,
+    account: session.account ?? null,
     space,
     role: membership.role,
     roleLabel: roleLabel(workspace),

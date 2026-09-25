@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { useState, type ReactNode } from 'react';
 import { CreateProvider, useCreate } from '@/components/create/create-context';
 import { DemoBar } from '@/components/demo/demo-bar';
+import { signOut } from '@/lib/auth/actions';
 import type { DemoModel } from '@/lib/demo/model';
 import type { SearchItem } from '@/lib/search';
 import { Avatar } from '@/components/ui/avatar';
@@ -203,18 +204,28 @@ function ProfileMenu({ compact }: { compact?: boolean }) {
             <Avatar person={person} size="lg" />
             <div className="min-w-0">
               <p className="truncate text-[15px] font-semibold lg:text-[14px]">{person.name}</p>
-              <p className="truncate text-[12.5px] text-muted">{person.email}</p>
+              <p className="truncate text-[12.5px] text-muted">
+                {workspace.account?.email ?? person.email}
+              </p>
             </div>
           </div>
           <div className="border-t border-line pt-1.5">
             <Link href={workspace.href('/profile')} className={menuItemClass}>
               <Icon name="user" size={17} className="text-muted" /> Profile & Spaces
             </Link>
-            <MenuItem disabled className="opacity-50">
-              <Icon name="logout" size={17} className="text-muted" />
-              <span className="flex-1">Sign out</span>
-              <span className="text-[11.5px] text-faint">No sign-in yet</span>
-            </MenuItem>
+            {workspace.account ? (
+              <form action={signOut}>
+                <button type="submit" className={menuItemClass}>
+                  <Icon name="logout" size={17} className="text-muted" /> Sign out
+                </button>
+              </form>
+            ) : (
+              <MenuItem disabled className="opacity-50">
+                <Icon name="logout" size={17} className="text-muted" />
+                <span className="flex-1">Sign out</span>
+                <span className="text-[11.5px] text-faint">Demo Mode</span>
+              </MenuItem>
+            )}
           </div>
         </div>
       )}

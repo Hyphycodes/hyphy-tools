@@ -12,6 +12,12 @@ export type Session = {
   source: 'demo' | 'supabase';
   person: Person;
   memberships: SpaceMembership[];
+  /**
+   * The sign-in account behind this person, when there is one (real accounts only). Its email is
+   * Supabase Auth's — the login email — and account screens (password, sign out) appear only when
+   * it's present. Demo identities have none.
+   */
+  account?: { email: string };
 };
 
 /**

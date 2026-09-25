@@ -2,7 +2,7 @@
   "name": "hyphy-tools",
   "version": "0.1.0",
   "private": true,
-  "description": "Hyphy Tools \u2014 a universal toolbox that grows into a personal or business operating system.",
+  "description": "Hyphy Tools — a universal toolbox that grows into a personal or business operating system.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -12,6 +12,7 @@
     "format": "prettier --write .",
     "test": "playwright test",
     "verify": "npm run lint && npm run typecheck && npm run build",
+    "test:auth": "playwright test -c playwright.auth.config.ts",
     "test:data": "NODE_OPTIONS=--conditions=react-server playwright test -c playwright.data.config.ts",
     "db:local": "node scripts/db.mjs local",
     "db:seed": "node scripts/db.mjs seed"
@@ -20,6 +21,8 @@
     "node": ">=22"
   },
   "dependencies": {
+    "@supabase/ssr": "0.12.7",
+    "@supabase/supabase-js": "2.117.2",
     "lucide-react": "^1.48.0",
     "next": "16.3.5",
     "pdf-lib": "^1.17.1",
