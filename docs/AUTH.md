@@ -28,13 +28,16 @@ where `personId` comes from:
   database marked as the development world.
 - **Production:** a verified Supabase Auth session. Nothing else changes.
 
-The browser never supplies an id or a role, and the service-role key is never used by the app.
+The browser never supplies an id or a role, and the service-role key is never used by the app. The
+app logs in as `hyphy_app`, a role that can do nothing but become `authenticated` for one
+transaction, so even its own credentials can't get around the policies.
 
 ## Steps to real sign-in
 
 1. **Production project.** A separate Supabase project for production (the dev project keeps its
    `dev` schema; production never gets `supabase/dev/`). Apply the migrations with
-   `supabase db push`. Set `DATABASE_URL` (pooler), `NEXT_PUBLIC_SUPABASE_URL` and
+   `supabase db push` and set the `hyphy_app` password there. Set `DATABASE_URL` (transaction
+   pooler, as `hyphy_app`), `NEXT_PUBLIC_SUPABASE_URL` and
    `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` on the Hyphy Tools Vercel project only.
 2. **Clients.** `npm i @supabase/supabase-js @supabase/ssr`; add `src/lib/supabase/server.ts`
    (request-scoped client with cookies) and `src/proxy.ts` refreshing sessions — as in Studio.

@@ -57,9 +57,11 @@ components/*             UI; client components read the Workspace through useWor
   transaction as the person, so `supabase/migrations`' Row Level Security applies them.
   `tests/data.spec.ts` checks both give every persona identical rows.
 - **Performance.** One repository per Workspace per request (React `cache`). The Supabase source
-  reads each kind of row once per request, scoped to the Space, and batches everything a render
-  asks for in the same tick into one transaction with pipelined queries: a page is 3–4
-  transactions, no per-row queries. Set `HYPHY_DB_DEBUG=1` to log statements.
+  reads each kind of row once per request, scoped to the Space, and everything a render asks for
+  in the same tick goes to the database as one statement — one round trip, with the person's
+  claims in the same message. A page is 3–5 round trips in total (session, then data and the
+  Demo Mode count in parallel); at a 40 ms round trip pages render in ~0.15–0.25 s. Set
+  `HYPHY_DB_DEBUG=1` to log statements with timestamps.
 - **Changes.** Every server action in `actions.ts` resolves the Workspace from the URL, calls
   `requirePermission`, validates input, checks that referenced projects and vehicles are visible,
   and writes through the repository. The UI hides what a role can't do; the server refuses it.

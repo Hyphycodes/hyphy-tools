@@ -232,9 +232,12 @@ test.describe('approvals persist', () => {
     expect(after.filter((item) => item.status === 'submitted')).toEqual([]);
     // Approving the same list again changes nothing.
     expect(await (await repo('dana', 'abc-construction')).approveMany(refs)).toBe(0);
-    const [{ count }] = await db()`
-      select count(*)::int from approval_events
-      where action = 'approved' and actor_id = ${u('dana')} and at > now() - interval '1 minute'`;
+    const [{ count }] = await as(
+      'dana',
+      (tx) => tx`
+        select count(*)::int from approval_events
+        where action = 'approved' and actor_id = ${u('dana')} and at > now() - interval '1 minute'`,
+    );
     expect(count).toBe(waiting.length);
   });
 
@@ -454,13 +457,41 @@ test.describe('reset', () => {
     expect(again.filter((item) => item.status === 'submitted').length).toBe(waiting.length);
   });
 
+  test('survives resets and page reads at the same moment, and ends exactly seeded', async () => {
+    const dana = await repo('dana', 'abc-construction');
+    await dana.approveMany(
+      (await dana.submissions())
+        .filter((item) => item.status === 'submitted')
+        .map((item) => ({ kind: item.kind, id: item.id })),
+    );
+    process.env.HYPHY_DEMO_RESET = 'on';
+    try {
+      const reads = Array.from({ length: 6 }, async (_, index) => {
+        const reader = await repo(index % 2 ? 'mike' : 'dana', 'abc-construction');
+        return (await reader.submissions()).length;
+      });
+      const results = await Promise.allSettled([resetWorld(), resetWorld(), ...reads]);
+      const failed = results.filter((result) => result.status === 'rejected');
+      expect(failed, JSON.stringify(failed)).toEqual([]);
+    } finally {
+      delete process.env.HYPHY_DEMO_RESET;
+    }
+    const [counts] = await db()`
+      select (select count(*) from dev.personas)::int as personas,
+             dev.changes_since_seed()::int as changes`;
+    expect(counts).toEqual({ personas: data.people.length, changes: 0 });
+    const again = await (await repo('dana', 'abc-construction')).submissions();
+    expect(again.filter((item) => item.status === 'submitted').length).toBeGreaterThan(3);
+  });
+
   test('refuses unless the server allows it', async () => {
     delete process.env.HYPHY_DEMO_RESET;
     await expect(resetWorld()).rejects.toThrow(/development world/);
   });
 
   test('refuses on a database that is not the development world', async () => {
-    const sql = postgres(process.env.DATABASE_URL!, { max: 1, onnotice: () => {} });
+    test.skip(!process.env.DATABASE_ADMIN_URL, 'Needs DATABASE_ADMIN_URL to remove the marker.');
+    const sql = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} });
     await expect(
       sql.begin(async (tx) => {
         await tx`delete from dev.environment`;
@@ -471,5 +502,41 @@ test.describe('reset', () => {
     // The refusal rolled everything back: the marker and the data are still there.
     const [{ count }] = await db()`select count(*)::int from dev.environment`;
     expect(count).toBe(1);
+  });
+});
+
+test.describe('the app’s own database role', () => {
+  test('can change nothing without becoming a person', async () => {
+    for (const statement of [
+      `delete from dev.environment`,
+      `truncate table public.receipts`,
+      `select id from public.receipts limit 1`,
+      `update public.spaces set plan = 'free'`,
+      `insert into public.approval_events (space_id, submission_type, submission_id, action, actor_id)
+       values (gen_random_uuid(), 'receipt', gen_random_uuid(), 'approved', gen_random_uuid())`,
+    ])
+      await expect(db().unsafe(statement), statement).rejects.toThrow(/permission denied/);
+  });
+
+  test('a person can’t switch on seeding mode to get past the review guard', async () => {
+    await expect(
+      as('mike', async (tx) => {
+        await tx`select set_config('hyphy.seeding', 'on', true)`;
+        return tx`update mileage_entries set status = 'approved' where id = ${u('mi_abc_08')}`;
+      }),
+    ).rejects.toThrow(/row-level security|approves your own/);
+  });
+
+  test('a person can’t call the internal helpers, the reset, or truncate', async () => {
+    for (const call of [
+      (tx: postgres.TransactionSql) => tx`select ref_label('project', ${u('prj_hy_tools')})`,
+      (tx: postgres.TransactionSql) =>
+        tx`select write_activity(${spaceId('hyphy')}, ${u('mike')}, 'x', 'project', ${u('prj_hy_tools')}, 'x')`,
+      (tx: postgres.TransactionSql) => tx`select dev.reset_world('{}'::jsonb)`,
+      (tx: postgres.TransactionSql) => tx`select dev.changes_since_seed()`,
+      (tx: postgres.TransactionSql) => tx`select * from dev.personas`,
+      (tx: postgres.TransactionSql) => tx`truncate table receipts cascade`,
+    ])
+      await expect(as('mike', call)).rejects.toThrow(/permission denied/);
   });
 });

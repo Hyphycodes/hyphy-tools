@@ -51,12 +51,7 @@ export async function personaIds(): Promise<Map<string, string>> {
 
 /** How many things were done since the last reset — the count on the Reset control. */
 export async function changesSinceSeed(): Promise<number> {
-  const { seededAt } = await marker();
-  if (!seededAt) return 0;
-  const [row] = await db()`
-    select (select count(*) from public.activity where at > ${seededAt})
-         + (select count(*) from public.approval_events where at > ${seededAt}
-              and action in ('returned', 'approved')) as changes`;
+  const [row] = await db()`select dev.changes_since_seed() as changes`;
   return Number(row?.changes ?? 0);
 }
 
@@ -68,6 +63,6 @@ export function resetAllowed() {
 export async function resetWorld() {
   if (!resetAllowed()) throw new NotDevelopmentError();
   await marker();
-  // The seed SQL checks the marker again inside its own transaction before touching anything.
+  // `dev.reset_world` checks the marker again inside its own transaction before touching anything.
   await applyWorld(db());
 }

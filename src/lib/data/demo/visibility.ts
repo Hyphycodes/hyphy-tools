@@ -80,7 +80,16 @@ export function visibleTo(workspace: Workspace, data: Dataset): Visible {
       (item) => item.recipientId === me || (item.audience && has(item.audience)),
     ),
     members,
-    directory: data.people.filter((item) => everyone.has(item.id)),
+    // Guests get the names their shared projects can show, never the company list.
+    directory: data.people.filter(
+      (item) =>
+        everyone.has(item.id) &&
+        (!isGuest ||
+          item.id === me ||
+          projects.some(
+            (project) => project.leadId === item.id || project.teamIds.includes(item.id),
+          )),
+    ),
     approvalEvents: inSpace(data.approvalEvents).filter((event) =>
       submissions.has(event.submissionId),
     ),

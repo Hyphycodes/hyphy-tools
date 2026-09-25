@@ -466,6 +466,171 @@ test('returning with a reason reaches the person, who fixes and resubmits it', a
   await reset(page);
 });
 
+test('a trip goes all the way round the approval loop, and every page agrees', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  // Mike logs a trip for Oak Brook Remodel in his own car and submits it.
+  await previewAs(context, 'mike', baseURL!);
+  await visit(page, '/abc-construction/tools/mileage');
+  await page.getByRole('button', { name: 'Log a trip' }).first().click();
+  const sheet = page.getByRole('dialog', { name: 'Log mileage' });
+  await sheet.getByLabel('From').fill('Hinge Supply, Lombard');
+  await sheet.getByLabel('To', { exact: true }).fill('Oak Brook Remodel');
+  await sheet.getByLabel('Miles one way').fill('9.8');
+  await sheet.getByLabel('Vehicle').selectOption({ label: 'Personal vehicle' });
+  await sheet.getByLabel(/^(Project|Job)/).selectOption({ label: 'Oak Brook Remodel' });
+  await sheet.getByLabel('Purpose').fill('Cabinet hinges for the island');
+  await sheet.getByRole('button', { name: 'Submit trip' }).click();
+  await expect(sheet).toBeHidden();
+
+  // Dana returns it from her Inbox, with a reason.
+  await previewAs(context, 'dana', baseURL!);
+  await visit(page, '/abc-construction/inbox?view=approvals');
+  await page
+    .getByRole('listitem')
+    .filter({ hasText: 'Hinge Supply' })
+    .getByRole('button', { name: 'Return' })
+    .click();
+  const back = page.getByRole('dialog', { name: /^Return this/ });
+  await back.getByLabel('What should change?').fill('Log it on Truck 24, please.');
+  await back.getByRole('button', { name: 'Return to Mike' }).click();
+  await expect(page.getByRole('listitem').filter({ hasText: 'Hinge Supply' })).toHaveCount(0);
+
+  // Mike sees it came back and why, fixes the vehicle and sends it again.
+  await previewAs(context, 'mike', baseURL!);
+  await visit(page, '/abc-construction');
+  await expect(page.getByText('“Log it on Truck 24, please.”').first()).toBeVisible();
+  await visit(page, '/abc-construction/tools/mileage');
+  await page
+    .getByRole('link', { name: /Hinge Supply/ })
+    .first()
+    .click();
+  const trip = page.getByRole('dialog', { name: /Hinge Supply/ });
+  await trip.getByRole('button', { name: 'Edit & resubmit' }).click();
+  const fix = page.getByRole('dialog', { name: 'Fix and resubmit' });
+  await fix.getByLabel('Vehicle').selectOption({ label: 'Truck 24' });
+  await fix.getByRole('button', { name: 'Resubmit trip' }).click();
+  await expect(fix).toBeHidden();
+
+  // Dana approves it.
+  await previewAs(context, 'dana', baseURL!);
+  await visit(page, '/abc-construction/inbox?view=approvals');
+  const resent = page.getByRole('listitem').filter({ hasText: 'Hinge Supply' });
+  await expect(resent).toContainText('Fixed after: “Log it on Truck 24, please.”');
+  await resent.getByRole('button', { name: 'Approve' }).click();
+  await expect(page.getByRole('listitem').filter({ hasText: 'Hinge Supply' })).toHaveCount(0);
+
+  // Fresh page loads everywhere: the stored record is the only story.
+  await visit(page, '/abc-construction/tools/mileage');
+  const row = page.getByRole('link', { name: /Hinge Supply/ }).first();
+  await expect(row).toContainText('Truck 24');
+  await expect(row).toContainText('Approved');
+  await row.click();
+  const timeline = page.getByRole('dialog', { name: /Hinge Supply/ });
+  for (const step of [
+    'Submitted by Mike',
+    'Returned by Dana',
+    '“Log it on Truck 24, please.”',
+    'Fixed and sent again by Mike',
+    'Approved by Dana',
+  ])
+    await expect(timeline.getByText(step).first()).toBeVisible();
+  await visit(page, `/abc-construction/projects/${id('prj_oakbrook')}`);
+  await expect(page.getByText(/Hinge Supply/).first()).toBeVisible();
+  await visit(page, `/abc-construction/vehicles/${id('veh_t24')}`);
+  await expect(page.getByText(/Hinge Supply/).first()).toBeVisible();
+  await visit(page, `/abc-construction/people/${id('mike')}`);
+  await expect(page.getByText(/Hinge Supply/).first()).toBeVisible();
+  await visit(page, '/abc-construction/activity');
+  await expect(page.getByText(/Hinge Supply/).first()).toBeVisible();
+
+  await previewAs(context, 'mike', baseURL!);
+  await visit(page, '/abc-construction');
+  await expect(page.getByText('“Log it on Truck 24, please.”')).toHaveCount(0);
+  await reset(page);
+});
+
+test('a receipt is returned, fixed, batch approved, and shows up where it belongs', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  // Mike submits a receipt for Oak Brook Remodel on Truck 24.
+  await previewAs(context, 'mike', baseURL!);
+  await visit(page, '/abc-construction/tools/receipts');
+  await page.getByRole('button', { name: 'Submit receipt' }).first().click();
+  const sheet = page.getByRole('dialog').filter({ has: page.getByLabel('Where') });
+  await sheet.getByLabel('Where').fill('Ace Hardware');
+  await sheet.getByLabel('Total').fill('23.40');
+  await sheet.getByLabel('Vehicle').selectOption({ label: 'Truck 24 (yours)' });
+  await sheet.getByLabel(/^(Project|Job)/).selectOption({ label: 'Oak Brook Remodel' });
+  await sheet.getByRole('button', { name: 'Submit for approval' }).click();
+  await expect(sheet).toBeHidden();
+
+  // Dana returns it with a reason; Mike fixes it and sends it again.
+  await previewAs(context, 'dana', baseURL!);
+  await visit(page, '/abc-construction/inbox?view=approvals');
+  await page
+    .getByRole('listitem')
+    .filter({ hasText: 'Ace Hardware' })
+    .getByRole('button', { name: 'Return' })
+    .click();
+  const back = page.getByRole('dialog', { name: /^Return this/ });
+  await back.getByLabel('What should change?').fill('Add a note on what it was for.');
+  await back.getByRole('button', { name: 'Return to Mike' }).click();
+  await expect(page.getByRole('listitem').filter({ hasText: 'Ace Hardware' })).toHaveCount(0);
+
+  await previewAs(context, 'mike', baseURL!);
+  await visit(page, '/abc-construction/tools/receipts?view=returned');
+  await page
+    .getByRole('link', { name: /Ace Hardware/ })
+    .first()
+    .click();
+  const detail = page.getByRole('dialog', { name: 'Ace Hardware' });
+  await expect(detail.getByText('“Add a note on what it was for.”').first()).toBeVisible();
+  await detail.getByRole('button', { name: 'Edit & resubmit' }).click();
+  const fix = page.getByRole('dialog', { name: 'Fix and resubmit' });
+  await fix.getByLabel('Note').fill('Cabinet pulls for the island.');
+  await fix.getByRole('button', { name: 'Resubmit receipt' }).click();
+  await expect(page.getByText('Sent back for approval')).toBeVisible();
+
+  // Dana approves everything Mike has waiting in one go.
+  await previewAs(context, 'dana', baseURL!);
+  await visit(page, '/abc-construction/inbox?view=approvals');
+  const mike = page.getByRole('region', { name: 'From Mike Rodriguez' });
+  await expect(mike.getByText('Receipt resubmitted')).toBeVisible();
+  await mike.getByRole('button', { name: /^Approve all \d+/ }).click();
+  await mike.getByRole('button', { name: /^Yes, approve \d+/ }).click();
+  await expect(page.getByRole('region', { name: 'From Mike Rodriguez' })).toHaveCount(0);
+
+  // Reloaded, the receipt is approved, with its whole history, on its project, truck and person.
+  await visit(page, '/abc-construction/tools/receipts');
+  await page
+    .getByRole('link', { name: /Ace Hardware/ })
+    .first()
+    .click();
+  const done = page.getByRole('dialog', { name: 'Ace Hardware' });
+  for (const step of [
+    'Submitted by Mike',
+    'Returned by Dana',
+    'Fixed and sent again by Mike',
+    'Approved by Dana',
+  ])
+    await expect(done.getByText(step).first()).toBeVisible();
+  for (const path of [
+    `/abc-construction/projects/${id('prj_oakbrook')}`,
+    `/abc-construction/vehicles/${id('veh_t24')}`,
+    `/abc-construction/people/${id('mike')}`,
+    '/abc-construction/activity',
+  ]) {
+    await visit(page, path);
+    await expect(page.getByText(/Ace Hardware/).first()).toBeVisible();
+  }
+  await reset(page);
+});
+
 test('a project gathers its money, trucks and records, each linked to the others', async ({
   page,
   context,
@@ -493,8 +658,11 @@ test('pins are remembered, and Reset puts the defaults back', async ({ page }) =
   await visit(page, '/personal');
   const tools = page.getByRole('region', { name: 'Your tools' });
   await expect(tools.getByRole('button', { name: 'Unpin PDF' })).toBeVisible();
+  // The button flips at once; wait for the save itself before reloading.
+  const saved = page.waitForResponse((response) => response.request().method() === 'POST');
   await tools.getByRole('button', { name: 'Pin Image Resize' }).click();
   await expect(tools.getByRole('button', { name: 'Unpin Image Resize' })).toBeVisible();
+  await saved;
   await visit(page, '/personal');
   await expect(
     page
