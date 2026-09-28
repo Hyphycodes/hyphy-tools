@@ -41,7 +41,6 @@ export function WorldHeader() {
   const nav = [
     { label: 'Work', href: studio.work, external: true },
     { label: 'Tools', href: '/tools', current: pathname.startsWith('/tools') },
-    { label: 'Drops', href: '/tools#drops' },
   ];
 
   return (

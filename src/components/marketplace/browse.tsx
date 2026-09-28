@@ -8,42 +8,46 @@ import {
   drops,
   getCategory,
   inCategory,
-  listedTools,
+  isReady,
   type CategoryId,
   type Tool,
 } from '@/lib/catalog';
-import { ToolTile } from './cards';
+import { ToolCard } from './cards';
 
 type Filter = 'all' | 'drops' | CategoryId;
 
-const FILTERS: { id: Filter; name: string }[] = [
-  { id: 'all', name: 'Everything' },
-  ...categories.map((category) => ({ id: category.id as Filter, name: category.name })),
-  { id: 'drops', name: 'Drops' },
+/** The chips: everything, then each thing people come to do that has a tool open today. */
+const CHIPS: { id: Filter; name: string }[] = [
+  { id: 'all', name: 'All' },
+  ...categories
+    .filter((category) => inCategory(category.id).some(isReady))
+    .map((category) => ({ id: category.id as Filter, name: category.name })),
 ];
 
+/** Addresses that still open filtered, though they have no chip (older shared links). */
+const KNOWN: Filter[] = [...categories.map((category) => category.id as Filter), 'drops'];
+
 function parse(value: string | null): Filter {
-  return FILTERS.some((filter) => filter.id === value) ? (value as Filter) : 'all';
+  return value && KNOWN.includes(value as Filter) ? (value as Filter) : 'all';
 }
 
-function toolsFor(filter: Filter): Tool[] {
-  if (filter === 'all') return listedTools;
-  if (filter === 'drops') return drops;
-  return inCategory(filter);
+function toolsFor(filter: Exclude<Filter, 'all'>): Tool[] {
+  const tools = filter === 'drops' ? drops : inCategory(filter);
+  // Open ones first.
+  return [...tools].sort((a, b) => Number(isReady(b)) - Number(isReady(a)));
 }
 
 /** The row of filters. Static on first paint, live once the page knows its address. */
 export function FilterBar({ value, onPick }: { value: Filter; onPick?: (filter: Filter) => void }) {
   return (
-    <div className="sticky top-16 z-30 border-y border-line bg-[rgb(11_11_10/.78)] backdrop-blur-xl">
+    <div className="sticky top-16 z-30 border-y border-line bg-[rgb(11_11_10/.94)]">
       <div
         role="toolbar"
         aria-label="Filter tools by what they help with"
-        className="scrollbar-none mx-auto flex max-w-[1320px] gap-1.5 overflow-x-auto px-4 py-2.5 sm:px-6 lg:px-8"
+        className="scrollbar-none mx-auto flex max-w-[1320px] gap-1.5 overflow-x-auto px-4 py-2 sm:px-6 lg:px-8"
       >
-        {FILTERS.map((filter) => {
+        {CHIPS.map((filter) => {
           const on = filter.id === value;
-          const count = filter.id === 'all' ? null : toolsFor(filter.id).length;
           return (
             <button
               key={filter.id}
@@ -51,18 +55,13 @@ export function FilterBar({ value, onPick }: { value: Filter; onPick?: (filter: 
               aria-pressed={on}
               onClick={() => onPick?.(filter.id)}
               className={cn(
-                'inline-flex h-9 shrink-0 items-center gap-2 rounded-full px-3.5 text-[13.5px] font-medium transition-colors',
+                'inline-flex h-10 shrink-0 items-center rounded-full px-4 text-[14px] font-medium transition-colors',
                 on
                   ? 'bg-ink text-on-ink'
                   : 'bg-white/[.05] text-ink-2 shadow-[inset_0_0_0_1px_rgb(255_255_255/.07)] hover:bg-white/[.09] hover:text-ink',
               )}
             >
               {filter.name}
-              {count !== null && (
-                <span className={cn('mono-num text-[11px]', on ? 'text-on-ink/60' : 'text-faint')}>
-                  {count}
-                </span>
-              )}
             </button>
           );
         })}
@@ -83,8 +82,7 @@ function pick(next: Filter) {
   window.history.replaceState(null, '', `${window.location.pathname}${search}`);
   const grid = document.getElementById('browse');
   const top = grid?.getBoundingClientRect().top ?? 0;
-  if (next !== 'all' && (top < 0 || top > window.innerHeight * 0.7))
-    grid?.scrollIntoView({ block: 'start' });
+  if (top < 0 || top > window.innerHeight * 0.7) grid?.scrollIntoView({ block: 'start' });
 }
 
 /** The filter bar, pinned under the header while you browse. */
@@ -93,8 +91,8 @@ export function LiveFilterBar() {
 }
 
 /**
- * Filter the marketplace by what a tool helps with. "Everything" is the editorial page; any other
- * filter swaps it for just those tools.
+ * Filter the marketplace by what a tool helps with. "All" is the editorial page; any other filter
+ * swaps it for just those tools.
  */
 export function FilteredTools() {
   const value = useFilter();
@@ -117,31 +115,31 @@ export function FilteredTools() {
       id="browse"
       aria-live="polite"
       aria-label={category?.name ?? 'Drops'}
-      className="mx-auto max-w-[1320px] scroll-mt-32 px-4 pt-12 pb-8 sm:px-6 lg:px-8"
+      className="mx-auto min-h-[70vh] max-w-[1320px] scroll-mt-32 px-4 pt-8 pb-8 sm:px-6 sm:pt-12 lg:px-8"
     >
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h2 className="t-h2">{category?.name ?? 'Drops'}</h2>
-          <p className="t-lead mt-3">
-            {category?.line ?? 'Small, seasonal releases. Useful now, fun always.'}
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <h2 className="t-h3 !text-[26px] sm:!text-[32px]">{category?.name ?? 'Drops'}</h2>
+          <p className="mt-1 text-[14.5px] text-muted">
+            {category?.line ?? 'Small, seasonal releases.'}
           </p>
         </div>
         <button
           type="button"
           onClick={() => pick('all')}
-          className="inline-flex h-10 items-center gap-2 rounded-full bg-white/[.06] px-4 text-[14px] text-ink-2 hover:bg-white/10 hover:text-ink"
+          aria-label="Show everything"
+          className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full bg-white/[.06] px-3.5 text-[14px] text-ink-2 hover:bg-white/10 hover:text-ink"
         >
-          <Icon name="x" size={15} /> Show everything
+          <Icon name="x" size={15} /> All
         </button>
       </div>
-      <div className="mt-10 grid gap-x-6 gap-y-10 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="mt-6 grid grid-cols-2 gap-x-3 gap-y-6 sm:mt-8 sm:grid-cols-3 sm:gap-x-5 sm:gap-y-9 lg:grid-cols-4">
         {shown.map((tool, index) => (
-          <div key={tool.id} style={{ animation: `rise .5s var(--ease-out) ${index * 45}ms both` }}>
-            <ToolTile
-              tool={tool}
-              context={value === 'drops' ? 'category' : 'family'}
-              reveal={false}
-            />
+          <div
+            key={tool.id}
+            style={{ animation: `rise .4s var(--ease-out) ${Math.min(index, 6) * 35}ms both` }}
+          >
+            <ToolCard tool={tool} />
           </div>
         ))}
       </div>

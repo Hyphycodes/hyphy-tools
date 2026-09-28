@@ -107,6 +107,8 @@ export function accountLabel(tool: Pick<Tool, 'account'>) {
 export type PrivacyFacts = {
   /** A short chip: "Runs on your device". */
   label: string;
+  /** The quiet line under a tool's name: "Processed on your device". */
+  short: string;
   /** Fully local: nothing reaches Hyphy. */
   local: boolean;
   /** The plain explanation, one fact per line. */
@@ -128,6 +130,7 @@ export function privacyFacts(tool: Pick<Tool, 'privacy'>): PrivacyFacts {
       : storage.includes('browser')
         ? 'On your device · saved in this browser'
         : 'Runs on your device';
+  const short = !local ? 'Kept with your account' : 'Processed on your device';
   const lines: string[] = [];
   if (note) lines.push(note);
   if (processing === 'device')
@@ -147,7 +150,7 @@ export function privacyFacts(tool: Pick<Tool, 'privacy'>): PrivacyFacts {
     );
   if (storage.includes('account'))
     lines.push('It’s kept with your Hyphy account so it works across your devices.');
-  return { label, local, lines };
+  return { label, short, local, lines };
 }
 
 /* ---------------- marketplace numbers ---------------- */

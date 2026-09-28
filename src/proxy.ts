@@ -15,6 +15,6 @@ export async function proxy(request: NextRequest) {
 export const config = {
   // Everything but static files: build output, images and the app's icons and manifest.
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|icon.svg|apple-icon.png|manifest.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|txt|woff2?)$).*)',
+    '/((?!_next/static|_next/image|vendor/|favicon.ico|icon.svg|apple-icon.png|manifest.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|txt|woff2?)$).*)',
   ],
 };

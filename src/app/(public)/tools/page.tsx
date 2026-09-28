@@ -3,20 +3,17 @@ import { Suspense } from 'react';
 import { FilterBar, FilteredTools, LiveFilterBar } from '@/components/marketplace/browse';
 import {
   AllTools,
-  Drops,
-  FamilyStage,
+  Everyday,
   Featured,
   Hero,
-  Money,
+  OnTheWay,
   PrivateByDesign,
 } from '@/components/marketplace/sections';
-import { catalogFacts } from '@/lib/catalog';
-
-const facts = catalogFacts();
 
 export const metadata: Metadata = {
-  title: { absolute: 'Hyphy Tools — useful little things, serious systems' },
-  description: `${facts.open} free tools from Hyphy: split a check, find a time, make a QR code, merge PDFs, frame photos for every feed. ${facts.local} run entirely on your device. No sign-up.`,
+  title: { absolute: 'Hyphy Tools — small tools that just work' },
+  description:
+    'Free tools from Hyphy: split a check from a photo of the receipt, find a time, make a QR code, merge PDFs, frame photos for every feed. No sign-up.',
   alternates: { canonical: 'tools' },
 };
 
@@ -38,14 +35,10 @@ export default function Marketplace() {
         </Suspense>
         <div data-editorial>
           <Featured />
-          <FamilyStage id="gather" />
-          <Money />
-          <FamilyStage id="signal" />
-          <FamilyStage id="image-lab" />
-          <FamilyStage id="file-lab" />
-          <Drops />
-          <PrivateByDesign />
+          <Everyday />
           <AllTools />
+          <PrivateByDesign />
+          <OnTheWay />
         </div>
       </div>
     </>

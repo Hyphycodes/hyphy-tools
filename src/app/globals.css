@@ -298,6 +298,16 @@
   }
 }
 
+/* A line sweeping over a photo while it's read (Split). */
+@keyframes scan {
+  from {
+    top: -12%;
+  }
+  to {
+    top: 88%;
+  }
+}
+
 /* Something you just submitted, where it landed: a brief wash that settles. */
 [data-fresh] {
   animation: arrive 2.4s var(--ease-out) both;
@@ -314,12 +324,12 @@
 
 /* On desktop, the sidebar makes room for the Demo Mode dock while it's there. */
 @media (min-width: 1024px) {
-  html:has([data-demo-dock]) aside[aria-label='Main'] {
+  html[data-demo-dock] aside[aria-label='Main'] {
     padding-bottom: 60px;
   }
 }
 
-/* An open sheet or palette freezes the page behind it. */
-html:has(dialog[open]) {
+/* An open sheet or palette freezes the page behind it (flagged by useModalLock). */
+html[data-modal] {
   overflow: hidden;
 }

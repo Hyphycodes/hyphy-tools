@@ -1,4 +1,5 @@
-import type { ZodType } from 'zod';
+import { safeParse } from 'zod/mini';
+import type { $ZodType } from 'zod/v4/core';
 
 /*
  * Link-as-state: a plan, a list or a bill travels inside its own link, after the `#`. Browsers
@@ -43,7 +44,7 @@ export async function encodeState(data: unknown): Promise<string> {
 }
 
 /** The text after `#` → validated state, or null when it isn't a valid link for this tool. */
-export async function decodeState<T>(fragment: string, schema: ZodType<T>): Promise<T | null> {
+export async function decodeState<T>(fragment: string, schema: $ZodType<T>): Promise<T | null> {
   const text = fragment.replace(/^#/, '').trim();
   if (!text || text.length > MAX_FRAGMENT) return null;
   try {
@@ -53,7 +54,7 @@ export async function decodeState<T>(fragment: string, schema: ZodType<T>): Prom
       bytes = await pipe(bytes, new DecompressionStream('deflate-raw'));
     } else if (text[0] !== 'j') return null;
     if (bytes.length > 400_000) return null;
-    const parsed = schema.safeParse(JSON.parse(new TextDecoder().decode(bytes)));
+    const parsed = safeParse(schema, JSON.parse(new TextDecoder().decode(bytes)));
     return parsed.success ? parsed.data : null;
   } catch {
     return null;

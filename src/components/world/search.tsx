@@ -4,6 +4,7 @@ import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useSt
 import { ToolMark } from '@/components/marketplace/tool-mark';
 import { cn } from '@/components/ui/cn';
 import { Icon } from '@/components/ui/icon';
+import { useModalLock } from '@/components/ui/modal-lock';
 import { listedTools, privacyFacts, statusLabel, toolHref, type Tool } from '@/lib/catalog';
 import { searchTools, type SearchResult } from '@/lib/catalog/search';
 
@@ -146,6 +147,7 @@ export function SearchPalette() {
   const router = useRouter();
   const dialog = useRef<HTMLDialogElement>(null);
   const input = useRef<HTMLInputElement>(null);
+  useModalLock(dialog);
   const listId = useId();
   const [query, setQuery] = useState('');
   const results = useToolSearch(query);

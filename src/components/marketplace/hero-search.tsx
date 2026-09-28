@@ -1,10 +1,10 @@
 'use client';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { cn } from '@/components/ui/cn';
 import { Icon } from '@/components/ui/icon';
 import { toolHref, type Tool } from '@/lib/catalog';
+import { IntentLink } from './intent-link';
 import { EXAMPLES, ResultList, useResultKeys, useToolSearch } from '@/components/world/search';
 
 /** Jumps for the most common jobs, straight to the tool. */
@@ -17,46 +17,19 @@ const INTENTS: { label: string; slug: string }[] = [
   { label: 'Crop for Instagram', slug: 'social-crop' },
 ];
 
-/** The examples type themselves into an empty box, one after another, until you start. */
-function useTypedExample(active: boolean) {
-  const [text, setText] = useState(EXAMPLES[0]);
+/**
+ * An example of what to type, changing every few seconds while the box is empty and idle. One
+ * render per example (a CSS fade does the rest): it used to type itself letter by letter, which
+ * re-rendered the search box every 26–60ms for as long as the page was open.
+ */
+function useExample(active: boolean) {
+  const [index, setIndex] = useState(0);
   useEffect(() => {
     if (!active || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    let index = Math.max(0, EXAMPLES.indexOf(text));
-    let length = EXAMPLES[index].length;
-    let phase: 'hold' | 'delete' | 'type' = 'hold';
-    let timer: ReturnType<typeof setTimeout>;
-    const step = () => {
-      if (phase === 'hold') phase = 'delete';
-      if (phase === 'delete') {
-        length -= 1;
-        setText(EXAMPLES[index].slice(0, Math.max(0, length)));
-        if (length > 0) timer = setTimeout(step, 26);
-        else {
-          phase = 'type';
-          index = (index + 1) % EXAMPLES.length;
-          timer = setTimeout(step, 320);
-        }
-        return;
-      }
-      length += 1;
-      setText(EXAMPLES[index].slice(0, length));
-      if (length < EXAMPLES[index].length) timer = setTimeout(step, 60);
-      else {
-        phase = 'hold';
-        timer = setTimeout(step, 2200);
-      }
-    };
-    timer = setTimeout(step, 2400);
-    return () => {
-      clearTimeout(timer);
-      // Paused (you're typing): leave a whole example behind, not half a word.
-      setText(EXAMPLES[index]);
-    };
-    // Restarts only when it starts or stops; `text` is read once to resume where it was.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const timer = setInterval(() => setIndex((current) => (current + 1) % EXAMPLES.length), 3200);
+    return () => clearInterval(timer);
   }, [active]);
-  return text;
+  return EXAMPLES[index];
 }
 
 /**
@@ -73,12 +46,12 @@ export function HeroSearch() {
   const open = useCallback((tool: Tool) => router.push(toolHref(tool)), [router]);
   const keys = useResultKeys(results, open);
   const typing = query.trim().length > 0;
-  const example = useTypedExample(!typing && !focused);
+  const example = useExample(!typing && !focused);
 
   return (
     <div className="w-full max-w-[760px]">
       <label htmlFor={`${listId}-input`} className="label mb-3 block !text-ink-2">
-        What are you trying to do?
+        What do you need to do?
       </label>
       <div
         className={cn(
@@ -120,13 +93,11 @@ export function HeroSearch() {
           />
           {!typing && (
             <span
+              key={example}
               aria-hidden="true"
-              className="pointer-events-none absolute inset-y-0 left-0 flex items-center text-[18px] text-faint sm:text-[21px]"
+              className="pointer-events-none absolute inset-y-0 left-0 flex animate-fade items-center truncate text-[18px] text-faint sm:text-[21px]"
             >
               {example}
-              {!focused && (
-                <span className="ml-0.5 inline-block h-[1.1em] w-[2px] animate-pulse bg-faint/80" />
-              )}
             </span>
           )}
         </div>
@@ -170,15 +141,18 @@ export function HeroSearch() {
           )}
         </div>
       ) : (
-        <ul className="mt-4 flex flex-wrap gap-2" aria-label="Popular jobs">
+        <ul
+          className="scrollbar-none -mx-4 mt-3.5 flex gap-2 overflow-x-auto px-4 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0"
+          aria-label="Common jobs"
+        >
           {INTENTS.map((intent) => (
             <li key={intent.slug}>
-              <Link
+              <IntentLink
                 href={`/tools/${intent.slug}`}
-                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-white/[.055] px-3.5 text-[13.5px] text-ink-2 shadow-[inset_0_0_0_1px_rgb(255_255_255/.07)] transition-colors hover:bg-white/[.1] hover:text-ink"
+                className="inline-flex h-10 shrink-0 items-center whitespace-nowrap gap-1.5 rounded-full bg-white/[.055] px-3.5 text-[13.5px] text-ink-2 shadow-[inset_0_0_0_1px_rgb(255_255_255/.07)] transition-colors hover:bg-white/[.1] hover:text-ink"
               >
                 {intent.label}
-              </Link>
+              </IntentLink>
             </li>
           ))}
         </ul>

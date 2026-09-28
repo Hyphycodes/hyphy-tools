@@ -24,6 +24,11 @@ function isTyping(target: EventTarget | null) {
  * disappears when the identity source isn't the demo one — the product never knows it's there.
  */
 export function DemoBar({ demo }: { demo: DemoModel }) {
+  // The desktop sidebar makes room while the dock is here (globals.css).
+  useEffect(() => {
+    document.documentElement.setAttribute('data-demo-dock', '');
+    return () => document.documentElement.removeAttribute('data-demo-dock');
+  }, []);
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const current = demo.people.find((entry) => entry.person.id === demo.personId);

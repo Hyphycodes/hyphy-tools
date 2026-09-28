@@ -1,13 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { ToolRuntime } from '@/components/marketplace/tool-runtime';
-import {
-  ComingSoon,
-  FamilyContext,
-  Related,
-  ToolDetails,
-  ToolHeader,
-} from '@/components/marketplace/tool-page';
+import { ComingSoon, Related, ToolDetails, ToolHeader } from '@/components/marketplace/tool-page';
 import { isReady, routableTools, toolBySlug } from '@/lib/catalog';
 
 /**
@@ -44,12 +38,11 @@ export default async function ToolPage({ params }: PageProps<'/tools/[slug]'>) {
       <section
         id="tool"
         aria-label={isReady(tool) ? `${tool.name}, the tool` : `${tool.name} is coming soon`}
-        className="mx-auto w-full max-w-[1320px] scroll-mt-20 px-4 sm:px-6 lg:px-8"
+        className="mx-auto w-full max-w-[1320px] scroll-mt-20 px-3 sm:px-6 lg:px-8"
       >
         {isReady(tool) ? <ToolRuntime id={tool.id} /> : <ComingSoon tool={tool} />}
       </section>
       <ToolDetails tool={tool} />
-      <FamilyContext tool={tool} />
       <Related tool={tool} />
     </article>
   );

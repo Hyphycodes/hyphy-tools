@@ -2,6 +2,7 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { cn } from './cn';
 import { Icon } from './icon';
+import { useModalLock } from './modal-lock';
 
 /**
  * The product's one overlay: a bottom sheet on phones, a floating drawer on larger screens.
@@ -30,6 +31,7 @@ export function Sheet({
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
+  useModalLock(ref);
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;

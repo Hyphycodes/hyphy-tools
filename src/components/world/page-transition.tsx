@@ -1,17 +1,33 @@
 'use client';
 import { usePathname } from 'next/navigation';
-import { ViewTransition, type ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 
 /**
- * Opening a tool (or going back to the marketplace) cross-fades the old page out and lets the new
- * one rise in, where the browser supports view transitions. Keyed by the path, so only real
- * navigations animate — typing, filtering and loading inside a page never do.
+ * Opening a tool (or going back to the marketplace) lets the new page fade in. A plain CSS fade
+ * on the new page only: a view transition had to snapshot the whole old page first, which
+ * measured as the slowest part of opening a tool on a phone. Keyed by the path, so typing,
+ * filtering and loading inside a page never animate.
  */
 export function PageTransition({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   return (
-    <ViewTransition key={pathname} enter="page-enter" exit="page-exit" default="none">
+    <div key={pathname} className="animate-page">
       {children}
-    </ViewTransition>
+    </div>
   );
+}
+
+/**
+ * Marks <html> as the night world while it's on screen (the layout's boot script marks it before
+ * first paint), so the page behind it — overscroll, the iOS bounce — is night too.
+ */
+export function WorldDocument() {
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.world = 'night';
+    return () => {
+      delete root.dataset.world;
+    };
+  }, []);
+  return null;
 }

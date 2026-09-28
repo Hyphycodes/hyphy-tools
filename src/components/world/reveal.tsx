@@ -38,5 +38,5 @@ export function RevealRuntime() {
   return null;
 }
 
-/** Runs before first paint: hide what will be revealed (never with reduced motion). */
-export const revealBootScript = `try{if(!matchMedia('(prefers-reduced-motion: reduce)').matches)document.documentElement.classList.add('reveal-ready')}catch(e){}`;
+/** Runs before first paint: the night world, and hide what will be revealed (never with reduced motion). */
+export const revealBootScript = `try{document.documentElement.dataset.world='night';if(!matchMedia('(prefers-reduced-motion: reduce)').matches)document.documentElement.classList.add('reveal-ready')}catch(e){}`;

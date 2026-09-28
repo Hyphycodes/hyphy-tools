@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ZodType } from 'zod';
+import { safeParse } from 'zod/mini';
+import type { $ZodType } from 'zod/v4/core';
 
 /*
  * "Saved in this browser": a tool's work kept in localStorage so it's there next time, on this
@@ -8,11 +9,11 @@ import type { ZodType } from 'zod';
  * and every access is wrapped: private windows and strict settings can refuse storage entirely.
  */
 
-export function readLocal<T>(key: string, schema: ZodType<T>): T | null {
+export function readLocal<T>(key: string, schema: $ZodType<T>): T | null {
   try {
     const raw = window.localStorage.getItem(key);
     if (!raw) return null;
-    const parsed = schema.safeParse(JSON.parse(raw));
+    const parsed = safeParse(schema, JSON.parse(raw));
     return parsed.success ? parsed.data : null;
   } catch {
     return null;
@@ -34,7 +35,7 @@ export function writeLocal(key: string, value: unknown) {
  * render agree), loads what was saved right after mount, then saves every change.
  * `loaded` says whether saved work has been read yet.
  */
-export function useLocalState<T>(key: string, schema: ZodType<T>, initial: T) {
+export function useLocalState<T>(key: string, schema: $ZodType<T>, initial: T) {
   const [value, setValue] = useState<T>(initial);
   const [loaded, setLoaded] = useState(false);
   const skip = useRef(true);

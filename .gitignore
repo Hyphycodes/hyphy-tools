@@ -51,3 +51,6 @@ next-env.d.ts
 
 # The local Supabase stack's per-run secrets (supabase/local/stack.mjs)
 /.hyphy-local/
+
+# on-device OCR, copied from node_modules by scripts/vendor-ocr.mjs
+/public/vendor/ocr

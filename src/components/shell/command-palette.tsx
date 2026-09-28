@@ -17,6 +17,7 @@ import type { SearchItem } from '@/lib/search';
 import { cn } from '@/components/ui/cn';
 import { Icon } from '@/components/ui/icon';
 import { Kbd } from '@/components/ui/kbd';
+import { useModalLock } from '@/components/ui/modal-lock';
 
 type CommandValue = { open: () => void };
 const CommandContext = createContext<CommandValue>({ open: () => {} });
@@ -112,6 +113,7 @@ function CommandPalette({
   onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  useModalLock(dialog);
   const list = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState('');
   const deferred = useDeferredValue(query);

@@ -1,180 +1,143 @@
-import Link from 'next/link';
 import { cn } from '@/components/ui/cn';
 import { Icon } from '@/components/ui/icon';
-import { getCategory, getFamily, toolHref, type Tool } from '@/lib/catalog';
+import { isReady, statusLabel, toolHref, type Tool } from '@/lib/catalog';
 import { ToolArt } from './art';
-import { PrivacyPill, StatusPill } from './badges';
+import { IntentLink } from './intent-link';
 import { ToolMark } from './tool-mark';
 
 /*
- * Three ways a tool appears, so the marketplace never becomes a wall of identical boxes:
- * a tile (artwork first, words beneath, no box), a feature (the artwork is the stage and the
- * words sit inside it) and a row (a mark and a line, for the index).
+ * Three sizes, so the marketplace scans fast without becoming a wall of identical boxes:
+ * a feature (the artwork is the stage, for one or two editorial moments), a card (artwork and a
+ * line, two across on a phone) and a row (the tool's mark and a line, like an app listing).
+ * Every one of them opens the tool with a single tap.
  */
 
-/** Artwork with the words underneath: galleries, families, filtered views. */
-export function ToolTile({
+/** The small word on a tool that isn't fully open yet: "Beta", "Soon". */
+function StatusTag({ tool, className }: { tool: Tool; className?: string }) {
+  if (tool.status === 'available') return null;
+  return (
+    <span
+      className={cn(
+        'inline-flex h-5 shrink-0 items-center rounded-full px-2 text-[10.5px] font-semibold tracking-wide uppercase',
+        tool.status === 'beta' ? 'bg-signal-soft text-signal-ink' : 'bg-white/[.07] text-muted',
+        className,
+      )}
+    >
+      {tool.status === 'soon' ? 'Soon' : statusLabel[tool.status]}
+    </span>
+  );
+}
+
+/** Artwork is the stage and the words sit inside it: the featured moments. */
+export function FeatureCard({
   tool,
+  kicker,
+  action,
   className,
-  context,
-  order = 0,
-  reveal = true,
-  wide = false,
 }: {
   tool: Tool;
+  kicker?: string;
+  /** What the button says: the job, not the product ("Split a check"). */
+  action?: string;
   className?: string;
-  /** A small line above the name: the family or category it's shown in. */
-  context?: 'family' | 'category';
-  order?: number;
-  /** Rise into view on scroll (server-rendered sections); off where it's drawn on demand. */
-  reveal?: boolean;
-  /** Spans two columns: a wider, shorter picture. */
-  wide?: boolean;
 }) {
-  const eyebrow =
-    context === 'family' && tool.family
-      ? getFamily(tool.family).name
-      : context === 'category'
-        ? getCategory(tool.category).name
-        : null;
   return (
-    <Link
+    <IntentLink
       href={toolHref(tool)}
-      data-reveal={reveal || undefined}
-      style={{ '--reveal-order': order } as React.CSSProperties}
-      className={cn('group block min-w-0 rounded-[22px] outline-offset-4', className)}
+      className={cn(
+        'group relative isolate flex min-w-0 flex-col justify-end overflow-hidden rounded-[26px] shadow-[inset_0_0_0_1px_rgb(255_255_255/.08)] outline-offset-4',
+        className,
+      )}
+    >
+      <div className="absolute inset-0 bg-[#121211]">
+        <ToolArt tool={tool} className="h-[64%] w-full sm:h-[70%]" />
+      </div>
+      <div className="absolute inset-x-0 bottom-0 h-[52%] bg-gradient-to-t from-[#0b0b0a] via-[#0b0b0a]/80 to-transparent" />
+      <div className="relative p-5 sm:p-7">
+        {kicker && <p className="label mb-2 !text-ink-2">{kicker}</p>}
+        <h3
+          className="font-display text-[32px] font-bold tracking-[-0.03em] text-ink sm:text-[40px]"
+          style={{ fontVariationSettings: "'wdth' 110", lineHeight: 1 }}
+        >
+          {tool.name}
+        </h3>
+        <p className="mt-2 max-w-[34ch] text-[15px] leading-snug text-ink-2 sm:text-[16px]">
+          {tool.tagline}
+        </p>
+        <span
+          className="mt-4 inline-flex h-11 items-center gap-2 rounded-full px-5 text-[15px] font-semibold text-[#12110d] transition-transform duration-300 group-hover:translate-x-0.5"
+          style={{ background: tool.accent }}
+        >
+          {action ?? `Open ${tool.name}`} <Icon name="arrow-right" size={16} />
+        </span>
+      </div>
+    </IntentLink>
+  );
+}
+
+/** Artwork with a name and a line beneath: two across on a phone. */
+export function ToolCard({ tool, className }: { tool: Tool; className?: string }) {
+  return (
+    <IntentLink
+      href={toolHref(tool)}
+      className={cn('group block min-w-0 rounded-[20px] outline-offset-4', className)}
     >
       <div
-        className="relative overflow-hidden rounded-[20px] shadow-[inset_0_0_0_1px_rgb(255_255_255/.07)] transition-[transform,box-shadow] duration-500 ease-[cubic-bezier(.16,1,.3,1)] group-hover:-translate-y-1 group-hover:shadow-[0_0_0_1px_var(--tile-accent),0_24px_60px_-28px_var(--tile-accent)]"
+        className="relative overflow-hidden rounded-[18px] shadow-[inset_0_0_0_1px_rgb(255_255_255/.07)] transition-[transform,box-shadow] duration-500 ease-[cubic-bezier(.16,1,.3,1)] group-hover:-translate-y-1 group-hover:shadow-[0_0_0_1px_var(--tile-accent),0_24px_60px_-28px_var(--tile-accent)]"
         style={
           {
             '--tile-accent': `color-mix(in oklab, ${tool.accent} 55%, transparent)`,
           } as React.CSSProperties
         }
       >
-        <ToolArt
-          tool={tool}
-          className={cn('w-full', wide ? 'aspect-[16/11] sm:aspect-[2.2/1]' : 'aspect-[16/11]')}
-        />
-        {tool.status !== 'available' && (
-          <StatusPill tool={tool} className="absolute top-3 left-3 !bg-black/50 backdrop-blur" />
-        )}
-        {tool.fresh && tool.status === 'available' && (
-          <span className="absolute top-3 left-3 rounded-full bg-black/45 px-2.5 py-1 text-[11px] font-semibold text-ink backdrop-blur">
-            New
-          </span>
-        )}
+        <ToolArt tool={tool} className="aspect-[4/3] w-full" />
+        <StatusTag tool={tool} className="absolute top-2.5 left-2.5 !bg-black/55" />
       </div>
-      <div className="px-1 pt-3.5">
-        {eyebrow && <p className="label mb-1.5 !text-[10px]">{eyebrow}</p>}
-        <div className="flex items-center gap-2">
-          <h3 className="truncate text-[17px] font-semibold tracking-[-0.01em] text-ink">
-            {tool.name}
-          </h3>
-          <Icon
-            name="arrow-right"
-            size={16}
-            className="-translate-x-1 text-muted opacity-0 transition-all duration-300 group-hover:translate-x-0 group-hover:opacity-100"
-          />
-        </div>
-        <p className="mt-0.5 text-[14px] leading-snug text-ink-2/85">{tool.tagline}</p>
-      </div>
-    </Link>
-  );
-}
-
-/** The artwork is the stage and the words sit inside it: editorial moments. */
-export function FeatureCard({
-  tool,
-  kicker,
-  size = 'lg',
-  className,
-  order = 0,
-}: {
-  tool: Tool;
-  kicker?: string;
-  size?: 'lg' | 'md';
-  className?: string;
-  order?: number;
-}) {
-  return (
-    <Link
-      href={toolHref(tool)}
-      data-reveal
-      style={{ '--reveal-order': order } as React.CSSProperties}
-      className={cn(
-        'group relative isolate flex min-w-0 flex-col justify-end overflow-hidden rounded-[28px] shadow-[inset_0_0_0_1px_rgb(255_255_255/.08)] outline-offset-4',
-        className,
-      )}
-    >
-      <ToolArt tool={tool} fill align={size === 'lg' ? 'top' : 'side'} />
-      <div
-        className={cn(
-          'absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#0b0b0a] via-[#0b0b0a]/70 to-transparent',
-          size === 'lg'
-            ? 'h-[52%]'
-            : 'h-[55%] sm:inset-y-0 sm:right-auto sm:h-auto sm:w-[60%] sm:bg-gradient-to-r',
-        )}
-      />
-      <div className={cn('relative', size === 'lg' ? 'p-6 sm:p-8' : 'p-5 sm:max-w-[54%] sm:p-6')}>
-        <div className="flex flex-wrap items-center gap-2">
-          {kicker && <span className="label !text-ink-2">{kicker}</span>}
-          <StatusPill tool={tool} />
-        </div>
-        <h3
-          className={cn(
-            'mt-2 font-display font-bold tracking-[-0.03em] text-ink',
-            size === 'lg' ? 'text-[34px] sm:text-[44px]' : 'text-[26px] sm:text-[30px]',
-          )}
-          style={{ fontVariationSettings: "'wdth' 110", lineHeight: 1 }}
-        >
+      <div className="px-0.5 pt-2.5">
+        <h3 className="truncate text-[15.5px] font-semibold tracking-[-0.01em] text-ink sm:text-[17px]">
           {tool.name}
         </h3>
-        <p
-          className={cn(
-            'mt-2 max-w-[34ch] text-ink-2',
-            size === 'lg' ? 'text-[16px] sm:text-[17px]' : 'text-[14.5px]',
-          )}
-        >
+        <p className="mt-0.5 line-clamp-2 text-[13px] leading-snug text-muted sm:text-[14px]">
           {tool.tagline}
         </p>
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <span
-            className="inline-flex h-10 items-center gap-2 rounded-full px-4 text-[14px] font-semibold text-[#12110d] transition-transform duration-300 group-hover:translate-x-0.5"
-            style={{ background: tool.accent }}
-          >
-            Open {tool.name} <Icon name="arrow-right" size={16} />
-          </span>
-          <PrivacyPill tool={tool} short className="!h-10 !px-3.5 !text-[12.5px]" />
-        </div>
       </div>
-    </Link>
+    </IntentLink>
   );
 }
 
-/** A mark and a line: the index of everything. */
+/** A mark and a line, like an app listing: the fastest way to scan many tools. */
 export function ToolRow({ tool, className }: { tool: Tool; className?: string }) {
+  const ready = isReady(tool);
   return (
-    <Link
+    <IntentLink
       href={toolHref(tool)}
       className={cn(
-        'group flex min-w-0 items-center gap-3.5 rounded-[16px] px-3 py-3 transition-colors hover:bg-white/[.045]',
+        'group flex min-h-[68px] min-w-0 items-center gap-3.5 rounded-[16px] px-2.5 py-2.5 transition-colors hover:bg-white/[.045] active:bg-white/[.06]',
         className,
       )}
     >
-      <ToolMark tool={tool} size="md" />
+      <ToolMark tool={tool} size="lg" className={cn(!ready && 'opacity-60 saturate-50')} />
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
-          <span className="truncate text-[15px] font-semibold text-ink">{tool.name}</span>
-          <StatusPill tool={tool} className="!h-5 !px-2 !text-[10.5px]" />
+          <span
+            className={cn(
+              'truncate text-[15.5px] font-semibold',
+              ready ? 'text-ink' : 'text-ink-2',
+            )}
+          >
+            {tool.name}
+          </span>
+          <StatusTag tool={tool} />
         </span>
         <span className="block truncate text-[13.5px] text-muted">{tool.tagline}</span>
       </span>
-      <Icon
-        name="arrow-right"
-        size={16}
-        className="shrink-0 text-faint transition-all group-hover:translate-x-0.5 group-hover:text-ink"
-      />
-    </Link>
+      {ready ? (
+        <span className="hidden h-8 shrink-0 items-center rounded-full bg-white/[.07] px-3.5 text-[13px] font-semibold text-ink transition-colors group-hover:bg-white/[.12] min-[380px]:inline-flex">
+          Open
+        </span>
+      ) : (
+        <Icon name="chevron-right" size={16} className="shrink-0 text-faint" />
+      )}
+    </IntentLink>
   );
 }

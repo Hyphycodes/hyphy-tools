@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { ToastProvider } from '@/components/ui/toast';
 import { WorldFooter } from '@/components/world/footer';
 import { WorldHeader } from '@/components/world/header';
-import { PageTransition } from '@/components/world/page-transition';
+import { PageTransition, WorldDocument } from '@/components/world/page-transition';
 import { RevealRuntime, revealBootScript } from '@/components/world/reveal';
 import { SearchPalette } from '@/components/world/search';
 import { BASE_PATH } from '@/lib/base-path';
@@ -45,6 +45,7 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
         <SearchPalette />
       </ToastProvider>
       <RevealRuntime />
+      <WorldDocument />
     </div>
   );
 }

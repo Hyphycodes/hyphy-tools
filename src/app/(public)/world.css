@@ -46,13 +46,17 @@
   isolation: isolate;
 }
 
-/* The page behind the world (overscroll, iOS bounce) is night too. */
-html:has(.world-night),
-html:has(.world-night) body {
+/*
+  The page behind the world (overscroll, iOS bounce) is night too. Flagged on <html> by the
+  layout (never `html:has(.world-night)`: a :has() on <html> restyles the whole page after every
+  DOM change).
+*/
+html[data-world='night'],
+html[data-world='night'] body {
   background: #0b0b0a;
   color-scheme: dark;
 }
-html:has(.world-night) dialog::backdrop {
+html[data-world='night'] dialog::backdrop {
   background: rgb(0 0 0 / 0.62);
   backdrop-filter: blur(3px);
 }
@@ -212,27 +216,21 @@ html.reveal-ready:not(.reveal-live) [data-reveal]:not([data-shown]) {
   transition-duration: 0.12s;
 }
 
-/* Opening a tool: the old page fades out, the new one rises in (PageTransition). */
-::view-transition-old(.page-exit) {
-  animation: world-page-out 0.18s ease-out both;
-}
-::view-transition-new(.page-enter) {
-  animation: world-page-in 0.42s var(--ease-out) both;
-}
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation-duration: 0.22s;
-}
-@keyframes world-page-out {
-  to {
-    opacity: 0;
-  }
+/* Opening a tool: the new page fades in (PageTransition). Opacity only: a transform here would
+   trap the tools' fixed bars inside the page while it runs. */
+.world-night .animate-page {
+  animation: world-page-in 0.26s ease-out both;
 }
 @keyframes world-page-in {
   from {
     opacity: 0;
-    transform: translate3d(0, 14px, 0);
   }
+}
+
+/* Long sections below the fold skip rendering until they're near the screen. */
+.world-night .cv-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 1400px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -247,10 +245,8 @@ html.reveal-ready:not(.reveal-live) [data-reveal]:not([data-shown]) {
   .world-night .tilt {
     transform: none;
   }
-  ::view-transition-group(*),
-  ::view-transition-old(*),
-  ::view-transition-new(*) {
-    animation: none !important;
+  .world-night .animate-page {
+    animation: none;
   }
 }
 

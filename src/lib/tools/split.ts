@@ -1,58 +1,81 @@
-import { z } from 'zod';
+import * as z from 'zod/mini';
 
 /*
  * Split: the math of a shared bill, in whole cents, so every person's total adds up to exactly
- * what the table paid — never a cent more or less. Pure and tested (tests/tools-lib.spec.ts).
+ * what the table paid — never a cent more or less. Pure and tested (tests/lib-split.spec.ts).
  *
  * - An item is split evenly between the people who shared it (nobody picked = everyone).
  * - Tax and tip are shared in proportion to what each person ordered.
  * - Tip is on the subtotal before tax (the usual custom), unless the bill says otherwise.
  * - Rounding goes to whoever's share was cut the most (largest remainder), so the sum is exact.
+ *
+ * The schema is zod/mini: it ships in the tool's page, and the full zod was a 390 KB download.
  */
 
-const id = z.string().min(1).max(24);
-const cents = z.number().int().min(0).max(100_000_000);
+const id = z.string().check(z.minLength(1), z.maxLength(24));
+const cents = z.int().check(z.minimum(0), z.maximum(100_000_000));
+const rate = z.number().check(z.minimum(0), z.maximum(1_000_000));
 
 export const splitBillSchema = z.object({
   v: z.literal(1),
-  title: z.string().max(80),
-  currency: z.string().regex(/^[A-Z]{3}$/),
+  title: z.string().check(z.maxLength(80)),
+  currency: z.string().check(z.regex(/^[A-Z]{3}$/)),
   mode: z.enum(['items', 'even']),
-  people: z.array(z.object({ id, name: z.string().max(40) })).max(30),
+  people: z.array(z.object({ id, name: z.string().check(z.maxLength(40)) })).check(z.maxLength(30)),
   items: z
     .array(
       z.object({
         id,
-        name: z.string().max(80),
+        name: z.string().check(z.maxLength(80)),
+        /** The line's price (all of the quantity). */
         price: cents,
         /** Who shared it; empty means everyone at the table. */
-        people: z.array(id).max(30),
+        people: z.array(id).check(z.maxLength(30)),
+        /** How many, when the receipt says ("2 Tacos"). */
+        qty: z.optional(z.int().check(z.minimum(1), z.maximum(99))),
       }),
     )
-    .max(200),
+    .check(z.maxLength(200)),
   /** Even mode: the amount to divide. */
   total: cents,
-  tax: z.object({ mode: z.enum(['amount', 'percent']), value: z.number().min(0).max(1_000_000) }),
+  tax: z.object({ mode: z.enum(['amount', 'percent']), value: rate }),
   tip: z.object({
     mode: z.enum(['percent', 'amount']),
-    value: z.number().min(0).max(1_000_000),
+    value: rate,
     afterTax: z.boolean(),
   }),
+  /** What the receipt itself printed, to check the items against. */
+  receipt: z.optional(z.object({ subtotal: z.nullable(cents), total: z.nullable(cents) })),
 });
 export type SplitBill = z.infer<typeof splitBillSchema>;
 
 export const CURRENCIES = ['USD', 'CAD', 'EUR', 'GBP', 'AUD', 'MXN', 'JPY'] as const;
 
-export function newBill(): SplitBill {
+const EURO = /^(AT|BE|CY|DE|EE|ES|FI|FR|GR|HR|IE|IT|LT|LU|LV|MT|NL|PT|SI|SK)$/;
+
+/** The currency people most likely pay in, from the browser's language ("en-GB" → GBP). */
+export function localCurrency(locale?: string): string {
+  const region = (locale ?? '').split(/[-_]/)[1]?.toUpperCase() ?? '';
+  const known: Record<string, string> = {
+    US: 'USD',
+    CA: 'CAD',
+    GB: 'GBP',
+    AU: 'AUD',
+    MX: 'MXN',
+    JP: 'JPY',
+  };
+  if (known[region]) return known[region];
+  if (EURO.test(region)) return 'EUR';
+  return 'USD';
+}
+
+export function newBill(currency = 'USD'): SplitBill {
   return {
     v: 1,
     title: '',
-    currency: 'USD',
+    currency,
     mode: 'items',
-    people: [
-      { id: 'p1', name: 'You' },
-      { id: 'p2', name: '' },
-    ],
+    people: [{ id: 'p1', name: 'You' }],
     items: [],
     total: 0,
     tax: { mode: 'amount', value: 0 },
