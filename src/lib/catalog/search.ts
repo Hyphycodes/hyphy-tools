@@ -1,4 +1,4 @@
-import type { Tool } from './schema';
+import type { ModeId, Tool, ToolId } from './schema';
 import { categories, families } from './taxonomy';
 
 /**
@@ -179,6 +179,63 @@ function distance(a: string, b: string, limit: number) {
   return d[a.length][b.length];
 }
 
+/* ---------------- intents ---------------- */
+
+/**
+ * Searching by what's going on, not by a tool's name. When the whole query is one of these
+ * phrases, its tools come first in this order: "dinner" is Split, Where?, When? and Plan;
+ * "instagram" is Social Crop, Resize and Palette. Deterministic on purpose: the same words always
+ * give the same answer. Phrases go through the same words as queries (stems, synonyms), so
+ * "insta" and "receipts" land too.
+ */
+const INTENTS: { phrases: string[]; tools: ToolId[] }[] = [
+  {
+    phrases: ['dinner', 'dinner with friends', 'going out', 'night out', 'drinks'],
+    tools: ['split', 'where', 'when', 'plan'],
+  },
+  {
+    phrases: ['instagram', 'social media', 'posting', 'post a photo', 'tiktok', 'reels', 'story'],
+    tools: ['social-crop', 'resize', 'palette'],
+  },
+  { phrases: ['receipt', 'receipts'], tools: ['receipts', 'split'] },
+  {
+    phrases: ['work mileage', 'business miles', 'miles for work', 'drive for work'],
+    tools: ['mileage', 'receipts'],
+  },
+  { phrases: ['merge', 'combine', 'join'], tools: ['pdf', 'convert'] },
+  {
+    phrases: ['make smaller', 'smaller', 'too big', 'shrink', 'compress', 'file too large'],
+    tools: ['resize', 'pdf'],
+  },
+  {
+    phrases: ['birthday', 'birthday party', 'get together'],
+    tools: ['plan', 'when', 'where', 'bring'],
+  },
+  {
+    phrases: ['christmas', 'holidays', 'gift exchange'],
+    tools: ['secret-santa', 'wishlist'],
+  },
+  { phrases: ['trip', 'vacation', 'road trip', 'weekend away'], tools: ['plan', 'when', 'split'] },
+  { phrases: ['menu', 'restaurant menu'], tools: ['qr', 'signal-pages'] },
+  {
+    phrases: ['expenses', 'taxes', 'tax time', 'bookkeeping'],
+    tools: ['receipts', 'mileage', 'subscriptions'],
+  },
+];
+
+const intentKey = (text: string) => words(text).map(concept).join(' ');
+const intentIndex = new Map<string, { label: string; tools: ToolId[] }>();
+for (const intent of INTENTS)
+  for (const phrase of intent.phrases)
+    if (!intentIndex.has(intentKey(phrase)))
+      intentIndex.set(intentKey(phrase), { label: phrase, tools: intent.tools });
+
+/** The intent a whole query names, if any. */
+export function intentOf(query: string) {
+  const key = intentKey(query);
+  return key ? (intentIndex.get(key) ?? null) : null;
+}
+
 /* ---------------- documents ---------------- */
 
 const docs = new WeakMap<readonly Tool[], Doc[]>();
@@ -237,11 +294,21 @@ function hit(word: string, raw: string, field: Field, last: boolean) {
   return best;
 }
 
+export type SearchOptions = {
+  /** The mode someone is in: its tools win ties, nothing else is hidden. */
+  mode?: ModeId | null;
+};
+
 /**
  * Tools that answer the query, best first. An empty query returns nothing: the marketplace
  * shows its own order then.
  */
-export function searchTools(query: string, list: readonly Tool[], limit = 8): SearchResult[] {
+export function searchTools(
+  query: string,
+  list: readonly Tool[],
+  limit = 8,
+  options: SearchOptions = {},
+): SearchResult[] {
   const typed = normalize(query);
   if (!typed) return [];
   const raws = words(query);
@@ -300,7 +367,28 @@ export function searchTools(query: string, list: readonly Tool[], limit = 8): Se
     // Say why only when the name itself didn't answer: "Signal Pages · for “linktree”".
     results.push({ tool: doc.tool, score, because: named ? undefined : because });
   }
+
+  // A query that names a situation ("dinner", "instagram") puts its tools first, in its order.
+  const intent = intentOf(query);
+  if (intent)
+    for (const id of intent.tools)
+      if (!results.some((result) => result.tool.id === id)) {
+        const tool = list.find((item) => item.id === id);
+        if (tool) results.push({ tool, score: 0, because: intent.label });
+      }
+
+  // The mode someone is in breaks near-ties toward its own tools, gently.
+  const mode = options.mode;
+  if (mode) for (const result of results) if (result.tool.modes[mode]) result.score *= 1.12;
+
+  const rank = (id: ToolId) => {
+    const order = intent ? intent.tools.indexOf(id) : -1;
+    return order < 0 ? Infinity : order;
+  };
   return results
-    .sort((a, b) => b.score - a.score || a.tool.priority - b.tool.priority)
+    .sort(
+      (a, b) =>
+        rank(a.tool.id) - rank(b.tool.id) || b.score - a.score || a.tool.priority - b.tool.priority,
+    )
     .slice(0, limit);
 }

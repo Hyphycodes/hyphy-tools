@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { cn } from '@/components/ui/cn';
 import { Icon } from '@/components/ui/icon';
 import { toolHref, type Tool } from '@/lib/catalog';
+import type { ModeId } from '@/lib/catalog/schema';
 import { EXAMPLES, ResultList, useResultKeys, useToolSearch } from '@/components/world/search';
 
 /**
@@ -11,45 +12,59 @@ import { EXAMPLES, ResultList, useResultKeys, useToolSearch } from '@/components
  * render per example (a CSS fade does the rest): it used to type itself letter by letter, which
  * re-rendered the search box every 26–60ms for as long as the page was open.
  */
-function useExample(active: boolean) {
+function useExample(active: boolean, examples: string[]) {
   const [index, setIndex] = useState(0);
   useEffect(() => {
     if (!active || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    const timer = setInterval(() => setIndex((current) => (current + 1) % EXAMPLES.length), 3200);
+    const timer = setInterval(() => setIndex((current) => current + 1), 3200);
     return () => clearInterval(timer);
   }, [active]);
-  return EXAMPLES[index];
+  return examples[index % examples.length];
 }
 
 /**
  * The marketplace's centerpiece: say what you're trying to do, in your words. Results appear as
- * you type; Enter opens the best one.
+ * you type; Enter opens the best one. On a mode's home it leans toward that mode's tools and
+ * rotates that mode's examples; it still searches every tool.
  */
-export function HeroSearch() {
+export function HeroSearch({
+  label = 'Or search every tool',
+  mode = null,
+  examples = EXAMPLES,
+  compact = false,
+}: {
+  label?: string;
+  mode?: ModeId | null;
+  examples?: string[];
+  compact?: boolean;
+} = {}) {
   const router = useRouter();
   const listId = useId();
   const input = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(false);
-  const results = useToolSearch(query);
+  const results = useToolSearch(query, mode);
   const open = useCallback((tool: Tool) => router.push(toolHref(tool)), [router]);
   const keys = useResultKeys(results, open);
   const typing = query.trim().length > 0;
-  const example = useExample(!typing && !focused);
+  const example = useExample(!typing && !focused, examples);
+  const size = compact ? 'text-[17px] sm:text-[18px]' : 'text-[18px] sm:text-[21px]';
 
   return (
     <div className="w-full max-w-[760px]">
-      <label htmlFor={`${listId}-input`} className="label mb-3 block !text-ink-2">
-        Or search every tool
+      <label
+        htmlFor={`${listId}-input`}
+        className={cn('label mb-3 block !text-ink-2', compact && 'sr-only')}
+      >
+        {label}
       </label>
       <div
         className={cn(
-          'relative flex items-center gap-3 rounded-[22px] bg-[rgb(26_26_23/.78)] px-4 shadow-[inset_0_0_0_1px_rgb(255_255_255/.1),0_30px_80px_-40px_rgb(0_0_0/.9)] backdrop-blur-xl transition-shadow duration-300 sm:gap-4 sm:px-5',
-          focused &&
-            'shadow-[inset_0_0_0_1.5px_rgb(185_190_255/.55),0_0_0_6px_rgb(106_116_255/.12),0_30px_80px_-40px_rgb(0_0_0/.9)]',
+          'hero-search relative flex items-center gap-3 rounded-[22px] px-4 backdrop-blur-xl transition-shadow duration-300 sm:gap-4 sm:px-5',
+          focused && 'is-focused',
         )}
       >
-        <Icon name="search" size={22} className="shrink-0 text-muted" />
+        <Icon name="search" size={compact ? 20 : 22} className="shrink-0 text-muted" />
         <div className="relative min-w-0 flex-1">
           <input
             ref={input}
@@ -78,13 +93,20 @@ export function HeroSearch() {
             autoComplete="off"
             spellCheck={false}
             enterKeyHint="go"
-            className="h-16 w-full bg-transparent text-[18px] text-ink outline-none sm:h-[72px] sm:text-[21px]"
+            className={cn(
+              'w-full bg-transparent text-ink outline-none',
+              compact ? 'h-14 sm:h-[60px]' : 'h-16 sm:h-[72px]',
+              size,
+            )}
           />
           {!typing && (
             <span
               key={example}
               aria-hidden="true"
-              className="pointer-events-none absolute inset-y-0 left-0 flex animate-fade items-center truncate text-[18px] text-faint sm:text-[21px]"
+              className={cn(
+                'pointer-events-none absolute inset-y-0 left-0 flex animate-fade items-center truncate text-faint',
+                size,
+              )}
             >
               {example}
             </span>
@@ -97,14 +119,14 @@ export function HeroSearch() {
               setQuery('');
               input.current?.focus();
             }}
-            className="grid size-9 shrink-0 place-items-center rounded-full text-muted hover:bg-white/10 hover:text-ink"
+            className="grid size-9 shrink-0 place-items-center rounded-full text-muted hover:bg-ink/10 hover:text-ink"
             aria-label="Clear search"
           >
             <Icon name="x" size={18} />
           </button>
         ) : (
-          <span className="hidden shrink-0 rounded-full bg-white/[.06] px-3 py-1.5 text-[12px] text-muted sm:block">
-            Try “{EXAMPLES[1]}”
+          <span className="hidden shrink-0 rounded-full bg-ink/[.06] px-3 py-1.5 text-[12px] text-muted sm:block">
+            Try “{examples[1 % examples.length]}”
           </span>
         )}
       </div>
@@ -113,7 +135,7 @@ export function HeroSearch() {
       </p>
 
       {typing ? (
-        <div className="mt-3 rounded-[22px] bg-[rgb(21_21_19/.86)] p-2 shadow-[inset_0_0_0_1px_rgb(255_255_255/.08)] backdrop-blur-xl">
+        <div className="hero-results mt-3 rounded-[22px] p-2 backdrop-blur-xl">
           {results.length ? (
             <ResultList
               id={listId}

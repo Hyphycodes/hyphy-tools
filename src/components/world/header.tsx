@@ -31,7 +31,7 @@ export function WorldHeader() {
     () => false,
   );
   const mac = useSyncExternalStore(never, isMac, () => true);
-  const home = pathname === '/tools';
+  const home = pathname === '/tools' || pathname === '/tools/all';
   const [menu, setMenu] = useState(false);
   // Any navigation closes the phone menu.
   const [menuPath, setMenuPath] = useState(pathname);
@@ -60,7 +60,8 @@ export function WorldHeader() {
   }, [room]);
   const nav = [
     { label: 'Work', href: studio.work, external: true },
-    { label: 'Tools', href: '/tools', current: pathname.startsWith('/tools') },
+    { label: 'Tools', href: '/tools', current: pathname === '/tools' || Boolean(tool) },
+    { label: 'All tools', href: '/tools/all', current: pathname === '/tools/all' },
   ];
 
   return (
@@ -72,12 +73,12 @@ export function WorldHeader() {
         solid
           ? surface === 'light'
             ? 'bg-[color-mix(in_srgb,var(--w-canvas)_82%,transparent)] shadow-[0_1px_0_var(--color-line)] backdrop-blur-xl backdrop-saturate-150'
-            : 'bg-[rgb(11_11_10/.72)] shadow-[0_1px_0_rgb(255_255_255/.06)] backdrop-blur-xl backdrop-saturate-150'
+            : 'bg-[color-mix(in_srgb,var(--color-canvas)_74%,transparent)] shadow-[0_1px_0_var(--color-line)] backdrop-blur-xl backdrop-saturate-150'
           : 'bg-transparent',
       )}
     >
       <div className="safe-top mx-auto flex h-16 max-w-[1320px] items-center gap-4 px-4 sm:px-6 lg:px-8">
-        <IntentLink href="/tools" aria-label="Hyphy Tools — all tools" className="rounded-[10px]">
+        <IntentLink href="/tools" aria-label="Hyphy Tools — home" className="rounded-[10px]">
           <Wordmark />
         </IntentLink>
         <nav aria-label="Hyphy" className="ml-6 hidden items-center gap-1 md:flex">

@@ -19,10 +19,12 @@ async function noHorizontalScroll(page: Page) {
   expect(scroll).toBeLessThanOrEqual(width);
 }
 
-test('the front door is the marketplace, not a dashboard', async ({ page }) => {
+test('the front door is the tools home, not a dashboard', async ({ page }) => {
   await visit(page, '');
   await expect(page).toHaveURL(/\/platform\/tools$/);
-  await expect(page.getByRole('heading', { level: 1, name: 'What do you want to do?' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'What are you here for?' }),
+  ).toBeVisible();
   await expect(page.getByRole('region', { name: 'Demo Mode' })).toHaveCount(0);
   await expect(page.getByRole('link', { name: /Spaces/ })).toHaveCount(0);
 });
@@ -50,8 +52,8 @@ test('⌘K searches from any tool page', async ({ page }) => {
   await expect(page.getByRole('dialog').getByRole('option').first()).toContainText('Clean');
 });
 
-test('filters narrow the marketplace, and the address remembers', async ({ page }) => {
-  await visit(page, '/tools');
+test('filters narrow All tools, and the address remembers', async ({ page }) => {
+  await visit(page, '/tools/all');
   await page
     .getByRole('toolbar', { name: /Filter tools/ })
     .getByRole('button', { name: /Money/ })
@@ -60,9 +62,10 @@ test('filters narrow the marketplace, and the address remembers', async ({ page 
   await expect(page.getByRole('heading', { level: 2, name: 'Money' })).toBeVisible();
   await expect(page.getByRole('link', { name: /Subscriptions/ }).first()).toBeVisible();
   await page.getByRole('button', { name: 'Show everything' }).click();
-  await expect(page).toHaveURL(/\/tools$/);
-  // A shared filtered address opens filtered.
+  await expect(page).toHaveURL(/\/tools\/all$/);
+  // A shared filtered address opens filtered, older marketplace ones included.
   await visit(page, '/tools?c=drops');
+  await expect(page).toHaveURL(/\/tools\/all\?c=drops$/);
   await expect(page.getByRole('heading', { level: 2, name: 'Drops' })).toBeVisible();
 });
 
@@ -235,7 +238,14 @@ test('a Signal Page is published as its own link', async ({ page, browser }) => 
 
 test.describe('phones', () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
-  for (const path of ['/tools', '/tools/split', '/tools/qr', '/tools/pdf', '/tools/when']) {
+  for (const path of [
+    '/tools',
+    '/tools/all',
+    '/tools/split',
+    '/tools/qr',
+    '/tools/pdf',
+    '/tools/when',
+  ]) {
     test(`${path} fits the screen`, async ({ page }) => {
       await visit(page, path);
       await noHorizontalScroll(page);

@@ -1,4 +1,5 @@
 'use client';
+import { NextSteps } from './next-step';
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { cn } from '@/components/ui/cn';
 import { Icon } from '@/components/ui/icon';
@@ -108,6 +109,8 @@ export function MileageTool() {
   const [finished, setFinished] = useState<Trip | null>(null);
   const [editing, setEditing] = useState<Trip | null>(null);
   const [justSaved, setJustSaved] = useState<string | null>(null);
+  /** A drive just logged: the next thing is often its receipt. */
+  const [logged, setLogged] = useState(false);
   const [period, setPeriod] = useState<MileagePeriod>('month');
   const [kind, setKind] = useState<TripKind | null>(null);
   const drive = store.drive;
@@ -157,6 +160,7 @@ export function MileageTool() {
   }, [justSaved]);
 
   const start = () => {
+    setLogged(false);
     setFinished(null);
     setStore((current) => ({ ...current, drive: startDrive(Date.now()) }));
   };
@@ -178,6 +182,7 @@ export function MileageTool() {
   const keep = (trip: Trip) => {
     setStore((current) => saveTrip(current, { ...trip, updated: Date.now() }));
     setJustSaved(trip.id);
+    setLogged(true);
     setFinished(null);
     setEditing(null);
     if (!inMonthPeriod(trip.date, period, today)) setPeriod('all');
@@ -304,6 +309,14 @@ export function MileageTool() {
             <Icon name="plus" size={15} /> Add a trip by hand
           </button>
         </Road>
+        {logged && (
+          <NextSteps
+            from="mileage"
+            title="Trip saved"
+            steps={[{ tool: 'receipts', label: 'Add a receipt' }]}
+            className="px-1"
+          />
+        )}
 
         {routes.length > 0 && (
           <Surface className="grid gap-2">

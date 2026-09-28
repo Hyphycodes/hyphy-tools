@@ -30,11 +30,14 @@ async function scriptBytes(page: Page) {
   );
 }
 
-test('the marketplace scans fast: featured, everyday, then every tool as a row', async ({
+test('a first visit asks one question, then the marketplace scans fast below it', async ({
   page,
 }) => {
   await visit(page, '/tools');
-  await expect(page.getByRole('heading', { level: 2, name: 'Everyday' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'What are you here for?' }),
+  ).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: 'Everyday helpers' })).toBeVisible();
   await expect(page.getByRole('heading', { level: 2, name: 'All tools' })).toBeVisible();
   for (const shelf of ['Get together', 'Money', 'Links & QR', 'Images', 'Files & PDF'])
     await expect(page.getByRole('group', { name: shelf })).toBeVisible();
@@ -82,7 +85,9 @@ test('open several tools in a row, and back always lands on the marketplace', as
     await expect(page.locator('#tool [aria-busy="true"]')).toHaveCount(0);
     await page.goBack();
     await expect(page).toHaveURL(/\/tools$/);
-    await expect(page.getByRole('heading', { level: 1, name: 'What do you want to do?' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'What are you here for?' }),
+    ).toBeVisible();
   }
   // Tool to tool, then back through both.
   await page
@@ -99,21 +104,21 @@ test('open several tools in a row, and back always lands on the marketplace', as
   await page.goBack();
   await expect(page.getByRole('heading', { level: 1, name: 'Split' })).toBeVisible();
   await page.goBack();
-  await expect(page.getByRole('heading', { level: 1, name: 'What do you want to do?' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'What are you here for?' }),
+  ).toBeVisible();
 });
 
-test('a category is a filter with an address, and back undoes nothing unexpected', async ({
-  page,
-}) => {
-  await visit(page, '/tools');
+test('a category is a filter with an address on All tools', async ({ page }) => {
+  await visit(page, '/tools/all');
   const bar = page.getByRole('toolbar', { name: /Filter tools/ });
   await bar.getByRole('button', { name: 'Images' }).click();
   await expect(page).toHaveURL(/\?c=images$/);
   await expect(page.getByRole('heading', { level: 2, name: 'Images' })).toBeVisible();
   await expect(page.getByRole('link', { name: /Palette/ }).first()).toBeVisible();
   await bar.getByRole('button', { name: 'All' }).click();
-  await expect(page).toHaveURL(/\/tools$/);
-  await expect(page.getByRole('heading', { level: 2, name: 'Everyday' })).toBeVisible();
+  await expect(page).toHaveURL(/\/tools\/all$/);
+  await expect(page.getByRole('heading', { level: 2, name: 'Files & PDF' })).toBeVisible();
 });
 
 test('a tool page opens straight into the tool, with privacy one tap away', async ({ page }) => {
@@ -145,7 +150,7 @@ test.describe('on a phone', () => {
     expect(camera!.y + camera!.height).toBeLessThan(844);
     await page.goBack();
     await expect(
-      page.getByRole('heading', { level: 1, name: 'What do you want to do?' }),
+      page.getByRole('heading', { level: 1, name: 'What are you here for?' }),
     ).toBeVisible();
   });
 
@@ -169,7 +174,7 @@ test.describe('on a phone', () => {
   });
 
   test('the filter chips scroll sideways without scrolling the page', async ({ page }) => {
-    await visit(page, '/tools');
+    await visit(page, '/tools/all');
     const width = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(width).toBeLessThanOrEqual(390);
     await page

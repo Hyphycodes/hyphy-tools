@@ -1,4 +1,5 @@
-import { TOOL_IDS } from './ids';
+import { MODE_IDS, TOOL_IDS } from './ids';
+import { modes, quickGroups, situations } from './modes';
 import { categorySchema, familySchema, toolSchema, type Tool } from './schema';
 import { categories, families } from './taxonomy';
 
@@ -60,6 +61,35 @@ export function validateCatalog(list: readonly Tool[]): string[] {
 
   for (const id of TOOL_IDS)
     if (!list.some((tool) => tool.id === id)) say(undefined, `“${id}” has no entry`);
+
+  // Modes: every open tool is in at least one, and each mode's order has no ties.
+  for (const tool of list)
+    if (tool.visibility === 'public' && tool.status !== 'soon' && !Object.keys(tool.modes).length)
+      say(tool, 'belongs to no mode');
+  for (const mode of MODE_IDS) {
+    const ranks = list.flatMap((tool) => (tool.modes[mode] ? [tool.modes[mode].rank] : []));
+    if (new Set(ranks).size !== ranks.length)
+      say(undefined, `mode ${mode}: two tools share a rank`);
+    if (ranks.length < 6) say(undefined, `mode ${mode}: needs at least six tools to start with`);
+  }
+
+  // Situations and the "+": every step opens a listed tool people can use today.
+  const usable = (id: string) =>
+    list.some((tool) => tool.id === id && tool.visibility === 'public' && tool.status !== 'soon');
+  const situationIds = new Set(situations.map((situation) => situation.id));
+  for (const situation of situations) {
+    if (situation.steps.length < 2 || situation.steps.length > 4)
+      say(undefined, `situation ${situation.id}: takes two to four steps`);
+    for (const step of situation.steps)
+      if (!usable(step.tool))
+        say(undefined, `situation ${situation.id}: “${step.tool}” can’t open`);
+  }
+  for (const mode of modes)
+    for (const id of mode.situations)
+      if (!situationIds.has(id)) say(undefined, `mode ${mode.id}: no situation “${id}”`);
+  for (const group of quickGroups)
+    for (const action of group.actions)
+      if (!usable(action.tool)) say(undefined, `quick ${group.id}: “${action.tool}” can’t open`);
 
   return problems;
 }

@@ -8,7 +8,7 @@ import { Spark, Wordmark } from './wordmark';
 export function WorldFooter() {
   const browse = categories.filter((category) => inCategory(category.id).some(isReady));
   return (
-    <footer className="relative mt-20 border-t border-line">
+    <footer className="world-footer relative mt-20 border-t border-line">
       <div className="mx-auto grid max-w-[1320px] gap-10 px-4 py-12 sm:px-6 lg:grid-cols-[1.2fr_2fr] lg:px-8 lg:py-16">
         <div className="max-w-sm">
           <Wordmark />
@@ -17,7 +17,7 @@ export function WorldFooter() {
           </p>
           <a
             href={studio.home}
-            className="mt-5 inline-flex items-center gap-2 rounded-full bg-white/[.06] px-4 py-2 text-[14px] text-ink-2 shadow-[inset_0_0_0_1px_rgb(255_255_255/.07)] transition-colors hover:bg-white/10 hover:text-ink"
+            className="mt-5 inline-flex items-center gap-2 rounded-full bg-ink/[.06] px-4 py-2 text-[14px] text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line)] transition-colors hover:bg-ink/10 hover:text-ink"
           >
             <Spark size={12} className="text-[#b9beff]" /> Hyphy Studio: websites, tools and systems
           </a>
@@ -29,7 +29,7 @@ export function WorldFooter() {
               {browse.map((category) => (
                 <li key={category.id}>
                   <Link
-                    href={`/tools?c=${category.id}`}
+                    href={`/tools/all?c=${category.id}`}
                     prefetch={false}
                     className="inline-flex min-h-9 items-center text-ink-2 transition-colors hover:text-ink"
                   >

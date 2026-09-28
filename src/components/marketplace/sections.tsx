@@ -74,32 +74,56 @@ const QUICK: { id: ToolId; label: string }[] = [
   { id: 'mileage', label: 'Log a drive' },
 ];
 
-export function Hero() {
+export function Hero({
+  title = 'What do you want to do?',
+  level = 1,
+  search = true,
+  children,
+}: {
+  title?: string;
+  /** The first visit asks its own question first; then this is a section, not the page title. */
+  level?: 1 | 2;
+  search?: boolean;
+  /** Above the title: the mode switch. */
+  children?: ReactNode;
+} = {}) {
+  const Heading = level === 1 ? 'h1' : 'h2';
   return (
     <section
       aria-labelledby="hero-title"
-      className="relative isolate overflow-hidden px-4 pt-[84px] pb-8 sm:px-6 sm:pt-32 sm:pb-12 lg:px-8"
+      className={cn(
+        'relative isolate overflow-hidden px-4 sm:px-6 lg:px-8',
+        level === 1 ? 'pt-[84px] pb-8 sm:pt-32 sm:pb-12' : 'pt-10 pb-4 sm:pt-16',
+      )}
     >
       {/* Ambient light: a few tool colors, as gradients (no blur filters to repaint). */}
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10">
-        <div
-          className="drift absolute -inset-x-[20%] -top-[30%] h-[130%]"
-          style={{
-            background:
-              'radial-gradient(34% 30% at 18% 22%, rgb(184 243 90 / .12), transparent 70%), radial-gradient(34% 30% at 84% 30%, rgb(255 179 92 / .14), transparent 70%), radial-gradient(30% 26% at 52% 90%, rgb(62 224 208 / .09), transparent 70%)',
-          }}
-        />
-        <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-b from-transparent to-[#0b0b0a]" />
-      </div>
+      {level === 1 && (
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10">
+          <div
+            className="drift absolute -inset-x-[20%] -top-[30%] h-[130%]"
+            style={{
+              background:
+                'radial-gradient(34% 30% at 18% 22%, rgb(184 243 90 / .12), transparent 70%), radial-gradient(34% 30% at 84% 30%, rgb(255 179 92 / .14), transparent 70%), radial-gradient(30% 26% at 52% 90%, rgb(62 224 208 / .09), transparent 70%)',
+            }}
+          />
+          <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-b from-transparent to-canvas" />
+        </div>
+      )}
 
       <div className={wrap}>
-        <h1
+        {children}
+        <Heading
           id="hero-title"
-          className="animate-rise font-display text-[40px] leading-[0.95] font-extrabold tracking-[-0.045em] text-balance text-ink sm:text-[72px] lg:text-[88px]"
+          className={cn(
+            'animate-rise font-display leading-[0.95] font-extrabold tracking-[-0.045em] text-balance text-ink',
+            level === 1
+              ? 'text-[40px] sm:text-[72px] lg:text-[88px]'
+              : 'text-[28px] sm:text-[40px]',
+          )}
           style={{ fontVariationSettings: "'wdth' 114" }}
         >
-          What do you want to do?
-        </h1>
+          {title}
+        </Heading>
         <nav
           aria-label="Quick actions"
           className="mt-5 grid grid-cols-2 gap-2.5 sm:mt-10 sm:grid-cols-4 sm:gap-4"
@@ -114,9 +138,11 @@ export function Hero() {
             />
           ))}
         </nav>
-        <div className="mt-5 sm:mt-10">
-          <HeroSearch />
-        </div>
+        {search && (
+          <div className="mt-5 sm:mt-10">
+            <HeroSearch />
+          </div>
+        )}
       </div>
     </section>
   );

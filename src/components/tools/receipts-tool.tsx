@@ -1,4 +1,5 @@
 'use client';
+import { NextSteps } from './next-step';
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { cn } from '@/components/ui/cn';
 import { Icon } from '@/components/ui/icon';
@@ -93,6 +94,8 @@ export function ReceiptsTool() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [saved, setSaved] = useState<{ id: string; month: number } | null>(null);
+  /** Fuel or travel just filed: the drive itself belongs in Mileage. */
+  const [drove, setDrove] = useState(false);
   const [period, setPeriod] = useState<Period>('month');
   const [category, setCategory] = useState<ReceiptCategory | null>(null);
   const [query, setQuery] = useState('');
@@ -198,6 +201,7 @@ export function ReceiptsTool() {
       .filter((receipt) => receipt.date.slice(0, 7) === expense.date.slice(0, 7))
       .reduce((sum, receipt) => sum + receipt.total, 0);
     setSaved({ id: expense.id, month });
+    setDrove(expense.category === 'fuel' || expense.category === 'travel');
     setPeriod(inPeriod(expense.date, 'month', today) ? 'month' : 'all');
     setCategory(null);
     setQuery('');
@@ -277,6 +281,14 @@ export function ReceiptsTool() {
       <div className="grid min-w-0 gap-4 lg:sticky lg:top-24">
         <CaptureCard onFile={(file) => void capture(file)} onType={typeIt} />
         <MonthCard receipts={thisMonth} money={money} today={today} saved={saved} />
+        {drove && (
+          <NextSteps
+            from="receipts"
+            title="Filed"
+            steps={[{ tool: 'mileage', label: 'Log the drive' }]}
+            className="px-1"
+          />
+        )}
       </div>
 
       <section aria-labelledby="receipts-list" className="grid min-w-0 gap-4">

@@ -1,0 +1,381 @@
+/*
+  HYPHY TOOLS — the home's modes
+  ------------------------------------------------------------------
+  Modes are lenses over the same tools, and each has its own air. Like a tool's world, a mode
+  re-lights the product's tokens, so every part of the home (cards, search, situations, the
+  header over it) takes the mode on with no per-mode code:
+
+  Everyday   warm cream daylight, soft color, rounder and friendlier
+  Create     deep ink-violet with paint-bright light, image-first
+  Work       graphite, calm and sharp: hairlines, mint, tighter corners
+  All        Hyphy at night, as the marketplace always was
+
+  Flags on <html>, never :has(): `data-home` (this page is the home) and `data-lens` (the mode),
+  both set before first paint by HOME_BOOT and kept current by the home.
+*/
+
+html[data-home] .world-night {
+  --home-radius: 24px;
+  --switch-thumb: var(--color-ink);
+  --switch-on: var(--color-on-ink);
+  --home-card-shadow: none;
+  transition:
+    background-color 0.5s var(--ease-out),
+    color 0.5s var(--ease-out);
+}
+
+/* ---------- Everyday ---------- */
+
+html[data-home][data-lens='everyday'] {
+  --page-bg: #f6efe3;
+  color-scheme: light;
+}
+html[data-home][data-lens='everyday'] .world-night {
+  --color-canvas: #f6efe3;
+  --color-surface: #fffaf2;
+  --color-subtle: #efe6d6;
+  --color-well: #eadfcc;
+  --color-ink: #2a2016;
+  --color-ink-2: #4a3e30;
+  --color-muted: #7f705d;
+  --color-faint: #ab9d89;
+  --color-line: rgb(42 32 22 / 0.1);
+  --color-line-strong: rgb(42 32 22 / 0.18);
+  --color-on-ink: #fffaf2;
+  --color-signal: #e8572f;
+  --color-signal-soft: rgb(232 87 47 / 0.12);
+  --color-signal-ink: #b23c17;
+  --color-positive: #2f8a52;
+  --color-positive-soft: rgb(47 138 82 / 0.12);
+  --color-caution: #955800;
+  --color-caution-soft: rgb(240 185 87 / 0.2);
+  --color-critical: #c3301a;
+  --color-critical-soft: rgb(195 48 26 / 0.1);
+  --world-glass: rgb(255 250 242 / 0.86);
+  --world-edge: inset 0 1px 0 rgb(255 255 255 / 0.7), inset 0 0 0 1px rgb(42 32 22 / 0.08);
+  --home-radius: 28px;
+  --switch-thumb: #2a2016;
+  --switch-on: #fffaf2;
+  --home-card-shadow: 0 1px 0 rgb(255 255 255 / 0.6) inset, 0 16px 34px -22px rgb(92 58 22 / 0.45);
+  color-scheme: light;
+}
+html[data-home][data-lens='everyday'] .world-night::before {
+  opacity: 0.05;
+  mix-blend-mode: multiply;
+}
+html[data-home][data-lens='everyday'] .world-night .shadow-pop {
+  --tw-shadow: 0 0 0 1px rgb(42 32 22 / 0.08), 0 30px 60px -24px rgb(92 58 22 / 0.35);
+}
+html[data-home][data-lens='everyday'] .mode-title {
+  font-variation-settings: 'wdth' 120;
+  letter-spacing: -0.04em;
+}
+
+/* ---------- Create ---------- */
+
+html[data-home][data-lens='create'] {
+  --page-bg: #0d0a14;
+}
+html[data-home][data-lens='create'] .world-night {
+  --color-canvas: #0d0a14;
+  --color-surface: #18131f;
+  --color-subtle: #120e19;
+  --color-well: #231c2c;
+  --color-ink: #f4eefc;
+  --color-ink-2: #dacfe9;
+  --color-muted: #a396b5;
+  --color-faint: #766a88;
+  --color-line: rgb(244 238 252 / 0.09);
+  --color-line-strong: rgb(244 238 252 / 0.18);
+  --color-on-ink: #0d0a14;
+  --color-signal: #b07cff;
+  --color-signal-soft: rgb(176 124 255 / 0.18);
+  --color-signal-ink: #d8c2ff;
+  --world-glass: rgb(24 19 31 / 0.8);
+  --home-radius: 26px;
+  --switch-thumb: linear-gradient(100deg, #8f6bff, #ff4fa3 60%, #ff9a3d);
+  --switch-on: #fff;
+}
+html[data-home][data-lens='create'] .mode-title {
+  font-variation-settings: 'wdth' 125;
+  letter-spacing: -0.05em;
+  background: linear-gradient(100deg, #f4eefc 30%, #ffb3d6 60%, #ffc98a 85%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ---------- Work ---------- */
+
+html[data-home][data-lens='work'] {
+  --page-bg: #0b0d10;
+}
+html[data-home][data-lens='work'] .world-night {
+  --color-canvas: #0b0d10;
+  --color-surface: #13171c;
+  --color-subtle: #0f1216;
+  --color-well: #1a1f26;
+  --color-ink: #e8edf3;
+  --color-ink-2: #c5ced9;
+  --color-muted: #8894a3;
+  --color-faint: #5f6a78;
+  --color-line: rgb(214 226 240 / 0.08);
+  --color-line-strong: rgb(214 226 240 / 0.16);
+  --color-on-ink: #0b0d10;
+  --color-signal: #3ddc97;
+  --color-signal-soft: rgb(61 220 151 / 0.14);
+  --color-signal-ink: #8ff0c4;
+  --world-glass: rgb(19 23 28 / 0.84);
+  --home-radius: 18px;
+  --switch-thumb: #3ddc97;
+  --switch-on: #062014;
+}
+html[data-home][data-lens='work'] .world-night::before {
+  opacity: 0.03;
+}
+html[data-home][data-lens='work'] .mode-title {
+  font-weight: 760;
+  font-variation-settings: 'wdth' 100;
+  letter-spacing: -0.035em;
+}
+html[data-home][data-lens='work'] .world-night .label {
+  color: var(--color-muted);
+  letter-spacing: 0.12em;
+}
+
+/* ---------- the hero's light ---------- */
+
+.world-night .mode-ambient {
+  background:
+    radial-gradient(34% 30% at 18% 22%, rgb(184 243 90 / 0.12), transparent 70%),
+    radial-gradient(34% 30% at 84% 30%, rgb(255 179 92 / 0.14), transparent 70%),
+    radial-gradient(30% 26% at 52% 90%, rgb(62 224 208 / 0.09), transparent 70%);
+}
+.world-night .mode-ambient[data-lens='everyday'] {
+  background:
+    radial-gradient(34% 34% at 16% 26%, rgb(255 179 92 / 0.42), transparent 70%),
+    radial-gradient(30% 30% at 86% 22%, rgb(255 138 115 / 0.3), transparent 70%),
+    radial-gradient(34% 30% at 60% 92%, rgb(184 243 90 / 0.3), transparent 70%);
+}
+.world-night .mode-ambient[data-lens='create'] {
+  background:
+    radial-gradient(36% 34% at 14% 24%, rgb(143 107 255 / 0.34), transparent 70%),
+    radial-gradient(32% 32% at 86% 18%, rgb(255 79 163 / 0.3), transparent 70%),
+    radial-gradient(34% 30% at 58% 94%, rgb(255 197 61 / 0.18), transparent 70%);
+}
+.world-night .mode-ambient[data-lens='work'] {
+  background:
+    radial-gradient(40% 36% at 82% 18%, rgb(61 220 151 / 0.12), transparent 70%),
+    radial-gradient(36% 30% at 12% 40%, rgb(127 182 255 / 0.1), transparent 70%),
+    repeating-linear-gradient(90deg, rgb(214 226 240 / 0.035) 0 1px, transparent 1px 72px),
+    repeating-linear-gradient(0deg, rgb(214 226 240 / 0.035) 0 1px, transparent 1px 72px);
+}
+
+/* ---------- the parts ---------- */
+
+.world-night .mode-switch {
+  background: color-mix(in srgb, var(--color-ink) 6%, transparent);
+  box-shadow: inset 0 0 0 1px var(--color-line);
+}
+.world-night .mode-switch-thumb {
+  background: var(--switch-thumb, var(--color-ink));
+  box-shadow: 0 8px 20px -10px rgb(0 0 0 / 0.5);
+  transition:
+    transform 0.45s var(--ease-out),
+    width 0.45s var(--ease-out);
+}
+.world-night .quick-plus {
+  background: var(--switch-thumb, var(--color-ink));
+  color: var(--switch-on, var(--color-on-ink));
+  box-shadow: 0 14px 30px -14px rgb(0 0 0 / 0.6);
+}
+.world-night .quick-plus:hover {
+  filter: brightness(1.06);
+}
+
+.world-night .hero-search {
+  background: color-mix(in srgb, var(--color-surface) 80%, transparent);
+  box-shadow:
+    inset 0 0 0 1px var(--color-line-strong),
+    0 30px 80px -40px rgb(0 0 0 / 0.7);
+}
+.world-night .hero-search.is-focused {
+  box-shadow:
+    inset 0 0 0 1.5px color-mix(in srgb, var(--color-signal) 70%, transparent),
+    0 0 0 6px color-mix(in srgb, var(--color-signal) 14%, transparent),
+    0 30px 80px -40px rgb(0 0 0 / 0.7);
+}
+.world-night .hero-results {
+  background: color-mix(in srgb, var(--color-surface) 94%, transparent);
+  box-shadow: inset 0 0 0 1px var(--color-line);
+}
+
+.world-night .shelf-card {
+  border-radius: calc(var(--home-radius, 24px) - 4px);
+  box-shadow: var(--home-card-shadow, none);
+}
+html[data-home][data-lens='everyday'] .world-night .pinnable > a {
+  box-shadow: var(--home-card-shadow);
+}
+
+.world-night .situation {
+  border-radius: var(--home-radius, 24px);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.025), transparent 40%), var(--color-surface);
+  box-shadow: var(--world-edge), var(--home-card-shadow, 0 0 #0000);
+}
+.world-night .situation-icon {
+  background: color-mix(in srgb, var(--color-ink) 8%, transparent);
+  color: var(--color-ink);
+}
+html[data-home][data-lens='everyday'] .world-night .situation-icon {
+  background: #ffe2c2;
+  color: #8a3e12;
+}
+html[data-home][data-lens='create'] .world-night .situation-icon {
+  background: linear-gradient(140deg, rgb(143 107 255 / 0.35), rgb(255 79 163 / 0.3));
+}
+html[data-home][data-lens='work'] .world-night .situation-icon {
+  background: rgb(61 220 151 / 0.12);
+  color: #8ff0c4;
+}
+/* A path: a dotted line from the first tool to the last, behind their marks. */
+.world-night .situation-path::before {
+  content: '';
+  position: absolute;
+  left: 23px;
+  top: 30px;
+  bottom: 30px;
+  width: 2px;
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--color-line-strong) 0 4px,
+    transparent 4px 8px
+  );
+}
+
+.world-night .continue-card {
+  border-radius: var(--home-radius, 24px);
+  background:
+    radial-gradient(
+      120% 100% at 0% 0%,
+      color-mix(in srgb, var(--tool) 22%, transparent),
+      transparent 62%
+    ),
+    var(--color-surface);
+  box-shadow: var(--world-edge), var(--home-card-shadow, 0 0 #0000);
+}
+
+.world-night .browse-tile {
+  border-radius: 18px;
+  background: var(--color-surface);
+  box-shadow: var(--world-edge);
+}
+.world-night .browse-tile:hover {
+  background: color-mix(in srgb, var(--color-surface) 92%, var(--color-ink) 8%);
+}
+.world-night .browse-all {
+  background: var(--switch-thumb, var(--color-ink));
+  color: var(--switch-on, var(--color-on-ink));
+  box-shadow: none;
+}
+.world-night .browse-all:hover {
+  background: var(--switch-thumb, var(--color-ink));
+  filter: brightness(1.06);
+}
+
+/* The first visit's windows into each mode. */
+.world-night .mode-preview[data-preview='everyday'] {
+  --preview-bg: #f6efe3;
+  background:
+    radial-gradient(90% 80% at 100% 0%, rgb(255 179 92 / 0.6), transparent 60%),
+    radial-gradient(70% 70% at 0% 100%, rgb(184 243 90 / 0.45), transparent 62%), #f6efe3;
+  color: #2a2016;
+}
+.world-night .mode-preview[data-preview='create'] {
+  --preview-bg: #16101f;
+  background:
+    radial-gradient(90% 80% at 100% 0%, rgb(255 79 163 / 0.5), transparent 60%),
+    radial-gradient(80% 80% at 0% 100%, rgb(143 107 255 / 0.55), transparent 62%), #16101f;
+  color: #f7f1ff;
+}
+.world-night .mode-preview[data-preview='work'] {
+  --preview-bg: #11151a;
+  background:
+    radial-gradient(80% 70% at 100% 0%, rgb(61 220 151 / 0.28), transparent 60%),
+    repeating-linear-gradient(90deg, rgb(214 226 240 / 0.05) 0 1px, transparent 1px 36px),
+    repeating-linear-gradient(0deg, rgb(214 226 240 / 0.05) 0 1px, transparent 1px 36px), #11151a;
+  color: #e8edf3;
+  box-shadow: inset 0 0 0 1px rgb(214 226 240 / 0.1);
+}
+
+/* "Keep handy" rests hidden on a card until a pointer arrives; phones pin from the tool page and
+   from All tools, where the button always shows. */
+@media (hover: hover) {
+  .pinnable .pin-hover {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  .pinnable:hover .pin-hover,
+  .pinnable:focus-within .pin-hover {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (hover: none) {
+  .pinnable .pin-hover {
+    display: none;
+  }
+}
+
+/* The phone dock. */
+.world-night .dock {
+  background: color-mix(in srgb, var(--color-canvas) 86%, transparent);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  box-shadow: 0 -1px 0 var(--color-line);
+}
+@media (max-width: 767px) {
+  html[data-tools-dock] .world-footer {
+    padding-bottom: 76px;
+  }
+}
+
+.world-night .quick-sheet::backdrop {
+  background: rgb(0 0 0 / 0.5);
+}
+
+/* ---------- moving between modes ---------- */
+
+.world-night .home-swap {
+  animation: home-in 0.42s var(--ease-out) both;
+}
+@keyframes home-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/*
+  The server's first-visit home stays hidden for someone who already chose a mode, for the moment
+  it takes the page to render theirs; if the script never runs, it shows anyway.
+*/
+html[data-home][data-lens] [data-home-ssr] {
+  visibility: hidden;
+  animation: home-failsafe 0s linear 2.5s forwards;
+}
+@keyframes home-failsafe {
+  to {
+    visibility: visible;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-home] .world-night,
+  .world-night .mode-switch-thumb {
+    transition: none;
+  }
+  .world-night .home-swap {
+    animation: none;
+  }
+}

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { KeepHandy } from '@/components/home/pin';
 import { cn } from '@/components/ui/cn';
 import { Icon } from '@/components/ui/icon';
 import { isReady, privacyFacts, relatedTo, type Tool } from '@/lib/catalog';
@@ -44,7 +45,7 @@ export function ToolHeader({ tool }: { tool: Tool }) {
         <nav aria-label="Breadcrumb" className="-ml-1.5 shrink-0">
           <IntentLink
             href="/tools"
-            aria-label="All tools"
+            aria-label="Home"
             className="grid size-10 place-items-center rounded-full text-muted transition-colors hover:bg-ink/[.06] hover:text-ink"
           >
             <Icon name="chevron-left" size={20} />
@@ -70,6 +71,7 @@ export function ToolHeader({ tool }: { tool: Tool }) {
         </div>
         {ready && (
           <div className="-mr-1 flex shrink-0 items-center gap-1">
+            <KeepHandy tool={{ id: tool.id, name: tool.name }} />
             <PrivacyChip tool={tool} />
             <ShareButton
               title={`${tool.name} · Hyphy Tools`}

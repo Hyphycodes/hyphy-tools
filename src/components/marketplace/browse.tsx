@@ -12,6 +12,7 @@ import {
   type CategoryId,
   type Tool,
 } from '@/lib/catalog';
+import { Pinnable } from '@/components/home/pin';
 import { ToolCard } from './cards';
 
 type Filter = 'all' | 'drops' | CategoryId;
@@ -139,7 +140,9 @@ export function FilteredTools() {
             key={tool.id}
             style={{ animation: `rise .4s var(--ease-out) ${Math.min(index, 6) * 35}ms both` }}
           >
-            <ToolCard tool={tool} />
+            <Pinnable tool={tool} always>
+              <ToolCard tool={tool} />
+            </Pinnable>
           </div>
         ))}
       </div>

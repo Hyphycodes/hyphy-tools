@@ -5,8 +5,11 @@ import { ToolMark } from '@/components/marketplace/tool-mark';
 import { cn } from '@/components/ui/cn';
 import { Icon } from '@/components/ui/icon';
 import { useModalLock } from '@/components/ui/modal-lock';
+import { useHome } from '@/components/home/use-home';
 import { listedTools, privacyFacts, statusLabel, toolHref, type Tool } from '@/lib/catalog';
+import type { ModeId } from '@/lib/catalog/schema';
 import { searchTools, type SearchResult } from '@/lib/catalog/search';
+import { recentTools } from '@/lib/home/prefs';
 
 /*
  * Search, everywhere in the public world: the big box on the marketplace and ⌘K / "/" from any
@@ -31,9 +34,15 @@ export const EXAMPLES = [
   'merge PDFs',
 ];
 
-export function useToolSearch(query: string) {
+/** The mode someone's in, for search to lean toward (never to hide anything). */
+export function useSearchMode(): ModeId | null {
+  const lens = useHome()?.lens;
+  return lens && lens !== 'all' ? lens : null;
+}
+
+export function useToolSearch(query: string, mode: ModeId | null = null) {
   const deferred = useDeferredValue(query);
-  return useMemo(() => searchTools(deferred, listedTools, 8), [deferred]);
+  return useMemo(() => searchTools(deferred, listedTools, 8, { mode }), [deferred, mode]);
 }
 
 /**
@@ -71,7 +80,7 @@ export function ResultList({
             onClick={() => onPick(tool)}
             className={cn(
               'group flex cursor-pointer items-center gap-3.5 rounded-[14px] px-3 py-2.5 transition-colors',
-              selected ? 'bg-white/[.07]' : 'hover:bg-white/[.04]',
+              selected ? 'bg-ink/[.07]' : 'hover:bg-ink/[.04]',
             )}
             style={{ animation: `rise .32s var(--ease-out) ${index * 28}ms both` }}
           >
@@ -150,7 +159,8 @@ export function SearchPalette() {
   useModalLock(dialog);
   const listId = useId();
   const [query, setQuery] = useState('');
-  const results = useToolSearch(query);
+  const results = useToolSearch(query, useSearchMode());
+  const home = useHome();
   const pick = useCallback(
     (tool: Tool) => {
       dialog.current?.close();
@@ -159,7 +169,24 @@ export function SearchPalette() {
     [router],
   );
   const keys = useResultKeys(results, pick);
-  const picks = useMemo(() => listedTools.filter((tool) => tool.featured).slice(0, 5), []);
+  // An empty box starts from someone's own tools (pinned, then opened lately), or the favorites.
+  const picks = useMemo(() => {
+    const own = home
+      ? [
+          ...Object.entries(home.pins)
+            .filter(([, pin]) => pin.on)
+            .sort((a, b) => a[1].t - b[1].t)
+            .map(([id]) => id),
+          ...recentTools(home, 5).map((entry) => entry.id),
+        ]
+      : [];
+    const mine = [...new Set(own)]
+      .map((id) => listedTools.find((tool) => tool.id === id))
+      .filter((tool): tool is Tool => Boolean(tool));
+    return mine.length
+      ? { title: 'Your tools', tools: mine.slice(0, 5) }
+      : { title: 'Start here', tools: listedTools.filter((tool) => tool.featured).slice(0, 5) };
+  }, [home]);
 
   useEffect(() => {
     const open = (initial = '') => {
@@ -228,7 +255,7 @@ export function SearchPalette() {
           <button
             type="button"
             onClick={() => dialog.current?.close()}
-            className="rounded-[9px] px-2 py-1 text-[12.5px] text-muted hover:bg-white/5 hover:text-ink"
+            className="rounded-[9px] px-2 py-1 text-[12.5px] text-muted hover:bg-ink/5 hover:text-ink"
           >
             <span className="hidden sm:inline">Esc</span>
             <span className="sm:hidden">Close</span>
@@ -261,17 +288,17 @@ export function SearchPalette() {
                       setQuery(example);
                       input.current?.focus();
                     }}
-                    className="rounded-full bg-white/[.06] px-3 py-1.5 text-[13px] text-ink-2 transition-colors hover:bg-white/[.1] hover:text-ink"
+                    className="rounded-full bg-ink/[.06] px-3 py-1.5 text-[13px] text-ink-2 transition-colors hover:bg-ink/[.1] hover:text-ink"
                   >
                     {example}
                   </button>
                 ))}
               </div>
               <div>
-                <p className="label mb-1.5 px-1">Start here</p>
+                <p className="label mb-1.5 px-1">{picks.title}</p>
                 <ResultList
                   id={listId}
-                  results={picks.map((tool) => ({ tool, score: 0 }))}
+                  results={picks.tools.map((tool) => ({ tool, score: 0 }))}
                   active={-1}
                   onActive={() => {}}
                   onPick={pick}

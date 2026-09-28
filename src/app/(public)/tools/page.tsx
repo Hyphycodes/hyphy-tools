@@ -1,12 +1,10 @@
 import type { Metadata } from 'next';
-import { Suspense } from 'react';
-import { FilterBar, FilteredTools, LiveFilterBar } from '@/components/marketplace/browse';
+import { Home } from '@/components/home/home';
 import {
   AllTools,
   Creative,
   Everyday,
   Featured,
-  Hero,
   OnTheWay,
   People,
   PrivateByDesign,
@@ -20,31 +18,28 @@ export const metadata: Metadata = {
 };
 
 /**
- * The public Tools marketplace. Static: every section reads the registry at build time, and only
- * search and filtering run in the browser.
+ * The home. Static: the classic marketplace sections are rendered here from the registry at build
+ * time and handed to the home, which arranges them around the person (their mode, their tools,
+ * what they left open) in the browser. The full catalog lives at /tools/all.
  */
 export default function Marketplace() {
   return (
-    <>
-      <Hero />
-      {/* One tall container, so the filter bar stays pinned all the way down. */}
-      <div className="relative">
-        <Suspense fallback={<FilterBar value="all" />}>
-          <LiveFilterBar />
-        </Suspense>
-        <Suspense fallback={null}>
-          <FilteredTools />
-        </Suspense>
-        <div data-editorial>
+    <Home
+      classic={
+        <>
           <Featured />
           <Creative />
           <People />
           <Everyday />
+        </>
+      }
+      browse={
+        <>
           <AllTools />
           <PrivateByDesign />
           <OnTheWay />
-        </div>
-      </div>
-    </>
+        </>
+      }
+    />
   );
 }

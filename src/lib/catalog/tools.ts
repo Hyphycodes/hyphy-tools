@@ -63,6 +63,11 @@ export const tools: Tool[] = [
     pick: true,
     fresh: true,
     priority: 10,
+    modes: {
+      everyday: { rank: 1, line: 'Dinner, trips, anything shared' },
+      work: { rank: 10, line: 'Team lunches, down to the cent' },
+    },
+    tier: 'experience',
     steps: [
       'Take a photo of the receipt, or type the items in.',
       'Fix anything that was read wrong, and add who’s at the table.',
@@ -119,6 +124,11 @@ export const tools: Tool[] = [
     pick: true,
     fresh: true,
     priority: 20,
+    modes: {
+      everyday: { rank: 12, line: 'What you really pay each month' },
+      work: { rank: 6, line: 'Every tool the business pays for' },
+    },
+    tier: 'experience',
     steps: [
       'Add each service, what it costs and how often it charges.',
       'See your true monthly and yearly total, and what charges next.',
@@ -174,6 +184,10 @@ export const tools: Tool[] = [
     related: ['mileage', 'subscriptions', 'split'],
     fresh: true,
     priority: 21,
+    modes: {
+      work: { rank: 1, line: 'Snap it, check it, filed' },
+    },
+    tier: 'experience',
     steps: [
       'Take a photo of the receipt (or choose one, or a PDF).',
       'It’s read on your phone: check the total, the store and the date.',
@@ -232,6 +246,10 @@ export const tools: Tool[] = [
     related: ['receipts', 'subscriptions', 'split'],
     fresh: true,
     priority: 22,
+    modes: {
+      work: { rank: 2, line: 'Every business mile, logged' },
+    },
+    tier: 'experience',
     steps: [
       'Tap Start drive as you leave; keep the page open.',
       'Tap Stop when you arrive and pick what it was for.',
@@ -294,6 +312,10 @@ export const tools: Tool[] = [
     featured: true,
     fresh: true,
     priority: 12,
+    modes: {
+      everyday: { rank: 3, line: 'The night everyone’s free' },
+    },
+    tier: 'experience',
     steps: [
       'Pick the days and the hours you’re considering.',
       'Share the link. Each person paints when they’re free.',
@@ -349,6 +371,10 @@ export const tools: Tool[] = [
     related: ['when', 'split', 'wishlist'],
     fresh: true,
     priority: 14,
+    modes: {
+      everyday: { rank: 8, line: 'Potlucks, picnics, cookouts' },
+    },
+    tier: 'experience',
     steps: [
       'List what you need: drinks, sides, ice, a speaker.',
       'Share the link with everyone coming.',
@@ -409,6 +435,10 @@ export const tools: Tool[] = [
     related: ['plan', 'when', 'split'],
     fresh: true,
     priority: 13,
+    modes: {
+      everyday: { rank: 7, line: 'Let the group vote on a place' },
+    },
+    tier: 'experience',
     steps: [
       'Ask the question and add a few places: a name, a Maps or Yelp link, or an idea.',
       'Send the link. People tap Love it, Works for me or Not this one, then send it back.',
@@ -467,6 +497,10 @@ export const tools: Tool[] = [
     fresh: true,
     featured: true,
     priority: 11,
+    modes: {
+      everyday: { rank: 2, line: 'Birthdays, dinners, weekends away' },
+    },
+    tier: 'experience',
     steps: [
       'Pick what it is and name it; add the day, place and people if you know them.',
       'Send the invite. People tap I’m in, Maybe or Can’t, and send it back.',
@@ -524,6 +558,12 @@ export const tools: Tool[] = [
     related: ['signal-links', 'signal-pages', 'palette'],
     featured: true,
     priority: 11,
+    modes: {
+      everyday: { rank: 4, line: 'Wi-Fi, sharing, events' },
+      create: { rank: 4, line: 'Flyers, posts and designs' },
+      work: { rank: 4, line: 'Menus, reviews, marketing' },
+    },
+    tier: 'tool',
     steps: [
       'Choose what the code opens: a link, Wi-Fi, a contact, a call, a text.',
       'Style it. Contrast and logo size are checked so it still scans.',
@@ -575,6 +615,11 @@ export const tools: Tool[] = [
     related: ['qr', 'signal-links', 'palette'],
     pick: true,
     priority: 15,
+    modes: {
+      create: { rank: 7, line: 'One link for everything you make' },
+      work: { rank: 7, line: 'A page for your business' },
+    },
+    tier: 'experience',
     steps: [
       'Tap your name, bio and links on the phone to edit them.',
       'Pick a design and add your socials.',
@@ -632,6 +677,11 @@ export const tools: Tool[] = [
     related: ['qr', 'signal-pages', 'social-crop'],
     fresh: true,
     priority: 30,
+    modes: {
+      create: { rank: 8, line: 'Know which post worked' },
+      work: { rank: 5, line: 'Track every campaign link' },
+    },
+    tier: 'tool',
     steps: [
       'Paste the page you’re sending people to.',
       'Say where the link will live: an Instagram post, a newsletter, a flyer.',
@@ -685,6 +735,12 @@ export const tools: Tool[] = [
     related: ['convert', 'clean', 'duplicates'],
     pick: true,
     priority: 13,
+    modes: {
+      everyday: { rank: 6, line: 'Forms, tickets, paperwork' },
+      create: { rank: 5, line: 'Portfolios and printables' },
+      work: { rank: 3, line: 'Merge, reorder, ready to send' },
+    },
+    tier: 'tool',
     steps: [
       'Choose what to do: merge, organize, keep pages or split.',
       'Drop in your PDFs and see every page.',
@@ -737,6 +793,12 @@ export const tools: Tool[] = [
     related: ['pdf', 'resize', 'clean'],
     fresh: true,
     priority: 32,
+    modes: {
+      everyday: { rank: 11, line: 'HEIC to JPG, photos to PDF' },
+      create: { rank: 6, line: 'Any format you need' },
+      work: { rank: 8, line: 'Scans and photos into one PDF' },
+    },
+    tier: 'tool',
     steps: [
       'Choose a direction: images to PDF, or PDF to images.',
       'Add your files and put them in order.',
@@ -791,6 +853,12 @@ export const tools: Tool[] = [
     related: ['duplicates', 'pdf', 'convert'],
     fresh: true,
     priority: 31,
+    modes: {
+      everyday: { rank: 13, line: 'Tidy a messy folder' },
+      create: { rank: 10, line: 'Name a whole shoot at once' },
+      work: { rank: 9, line: 'Files named the way you file' },
+    },
+    tier: 'tool',
     steps: [
       'Choose your files, or a whole folder.',
       'Stack up rules: replace, number, add a date, fix capitals.',
@@ -841,6 +909,12 @@ export const tools: Tool[] = [
     related: ['clean', 'resize', 'pdf'],
     fresh: true,
     priority: 33,
+    modes: {
+      everyday: { rank: 14, line: 'Free up space' },
+      create: { rank: 9, line: 'Find the copies in a shoot' },
+      work: { rank: 11, line: 'Clear out the shared drive' },
+    },
+    tier: 'tool',
     steps: [
       'Choose a folder, or select a pile of files.',
       'Duplicates compares what’s inside each file.',
@@ -896,6 +970,12 @@ export const tools: Tool[] = [
     aliases: ['tinypng', 'squoosh', 'image compressor', 'image resize'],
     related: ['social-crop', 'palette', 'convert'],
     priority: 16,
+    modes: {
+      everyday: { rank: 5, line: 'Too big to send? Fixed.' },
+      create: { rank: 2, line: 'The right size, still sharp' },
+      work: { rank: 12, line: 'Photos light enough to email' },
+    },
+    tier: 'tool',
     steps: [
       'Drop in up to 20 photos.',
       'Pick a width, a format and a quality.',
@@ -951,6 +1031,10 @@ export const tools: Tool[] = [
     featured: true,
     fresh: true,
     priority: 17,
+    modes: {
+      create: { rank: 1, line: 'Every feed, one photo' },
+    },
+    tier: 'tool',
     steps: [
       'Add one photo.',
       'Pick the sizes you need and drag each frame to compose it.',
@@ -1004,6 +1088,10 @@ export const tools: Tool[] = [
     related: ['qr', 'signal-pages', 'social-crop'],
     fresh: true,
     priority: 18,
+    modes: {
+      create: { rank: 3, line: 'Colors straight out of a photo' },
+    },
+    tier: 'tool',
     steps: [
       'Drop in a photo or a logo.',
       'Get its key colors, strongest first.',
@@ -1060,6 +1148,10 @@ export const tools: Tool[] = [
     featured: true,
     fresh: true,
     priority: 19,
+    modes: {
+      everyday: { rank: 10, line: 'Gifts nobody doubles up on' },
+    },
+    tier: 'experience',
     steps: [
       'Add what you’d love: a link, a price, a note, how much you want it.',
       'Share the gift-giver link with family and friends, not with yourself.',
@@ -1110,6 +1202,10 @@ export const tools: Tool[] = [
     related: ['wishlist', 'plan', 'bring'],
     fresh: true,
     priority: 20,
+    modes: {
+      everyday: { rank: 9, line: 'Draw names, keep the secret' },
+    },
+    tier: 'experience',
     steps: [
       'Add everyone: type names or paste a list.',
       'Keep couples or housemates apart, and pick a budget if you like.',

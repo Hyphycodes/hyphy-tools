@@ -1,4 +1,5 @@
 'use client';
+import { takeCarried } from '@/lib/share/carry';
 import {
   useEffect,
   useId,
@@ -486,6 +487,11 @@ export function PaletteTool() {
   useLayoutEffect(() => {
     opener.current = open;
   });
+  // A photo carried over from another tool (Resize's "Make social sizes") opens at once.
+  useEffect(() => {
+    const carried = takeCarried('palette');
+    if (carried) opener.current([carried.file]);
+  }, []);
   const loaded = image !== null;
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {

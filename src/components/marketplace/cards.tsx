@@ -31,7 +31,7 @@ function StatusTag({ tool, className }: { tool: Tool; className?: string }) {
 }
 
 /** A card that is the tool's world: its room, its ink, a miniature of the tool in it. */
-function worldCard(tool: Tool): CSSProperties {
+export function worldCard(tool: Tool): CSSProperties {
   const world = worlds[tool.id];
   const ready = isReady(tool) && world.surface === 'light';
   return {
@@ -104,7 +104,16 @@ export function FeatureCard({
 }
 
 /** A miniature with a name and a line beneath: filtered views, two across on a phone. */
-export function ToolCard({ tool, className }: { tool: Tool; className?: string }) {
+export function ToolCard({
+  tool,
+  line,
+  className,
+}: {
+  tool: Tool;
+  /** What it's for here (a mode's words); the tagline otherwise. */
+  line?: string;
+  className?: string;
+}) {
   return (
     <IntentLink
       href={toolHref(tool)}
@@ -119,7 +128,7 @@ export function ToolCard({ tool, className }: { tool: Tool; className?: string }
           {tool.name}
         </h3>
         <p className="mt-0.5 line-clamp-2 text-[13px] leading-snug text-muted sm:text-[14px]">
-          {tool.tagline}
+          {line ?? tool.tagline}
         </p>
       </div>
     </IntentLink>
@@ -216,7 +225,15 @@ export function ToolRow({ tool, className }: { tool: Tool; className?: string })
  */
 
 /** A tall print: the miniature on top, the name beneath, all in the tool's world. */
-export function PosterCard({ tool, className }: { tool: Tool; className?: string }) {
+export function PosterCard({
+  tool,
+  line,
+  className,
+}: {
+  tool: Tool;
+  line?: string;
+  className?: string;
+}) {
   return (
     <IntentLink
       href={toolHref(tool)}
@@ -243,7 +260,7 @@ export function PosterCard({ tool, className }: { tool: Tool; className?: string
           </span>
         </span>
         <span className="mt-1.5 line-clamp-2 text-[13.5px] leading-snug opacity-65">
-          {tool.tagline}
+          {line ?? tool.tagline}
         </span>
       </div>
     </IntentLink>
@@ -254,10 +271,12 @@ export function PosterCard({ tool, className }: { tool: Tool; className?: string
 export function WashCard({
   tool,
   action,
+  line,
   className,
 }: {
   tool: Tool;
   action?: string;
+  line?: string;
   className?: string;
 }) {
   return (
@@ -278,7 +297,7 @@ export function WashCard({
           {tool.name}
         </span>
         <span className="mt-1.5 line-clamp-3 text-[13.5px] leading-snug opacity-70 sm:text-[14.5px]">
-          {tool.tagline}
+          {line ?? tool.tagline}
         </span>
         <span
           className="mt-4 inline-flex h-10 w-fit items-center gap-1.5 rounded-full px-4 text-[14px] font-semibold transition-transform duration-300 group-hover:translate-x-0.5"
@@ -292,7 +311,15 @@ export function WashCard({
 }
 
 /** A small tile: the miniature, the name, a line. */
-export function TileCard({ tool, className }: { tool: Tool; className?: string }) {
+export function TileCard({
+  tool,
+  line,
+  className,
+}: {
+  tool: Tool;
+  line?: string;
+  className?: string;
+}) {
   return (
     <IntentLink
       href={toolHref(tool)}
@@ -311,7 +338,7 @@ export function TileCard({ tool, className }: { tool: Tool; className?: string }
           <StatusTag tool={tool} />
         </span>
         <span className="mt-0.5 line-clamp-2 block text-[12.5px] leading-snug opacity-65 sm:text-[13px]">
-          {tool.tagline}
+          {line ?? tool.tagline}
         </span>
       </span>
     </IntentLink>

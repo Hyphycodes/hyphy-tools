@@ -15,7 +15,8 @@ Everything below is about the public side.
 | Path                            | What                                                                    |
 | ------------------------------- | ----------------------------------------------------------------------- |
 | `/`                             | Redirects to `/tools`                                                   |
-| `/tools`                        | The marketplace: search, filters (`?c=money`), featured, everyday, rows |
+| `/tools`                        | The home: modes, your tools, open work, situations (docs/HOME.md)       |
+| `/tools/all`                    | Every tool, filtered by what it helps with (`?c=money`)                 |
 | `/tools/{slug}`                 | One tool, in its own world: a slim line, the tool, an info drawer, next |
 | `/tools/{slug}/opengraph-image` | The share card for that tool                                            |
 | `/p#…`                          | A published Signal Page (the page rides inside the link)                |
@@ -63,7 +64,9 @@ really does its work in the browser.
 ## Adding a tool
 
 1. Add its id to `TOOL_IDS` (`ids.ts`) and an entry to `tools.ts` — copy, category, family,
-   privacy facts, keywords in people's words, aliases (other products people know), related tools.
+   privacy facts, keywords in people's words, aliases (other products people know), related tools,
+   the modes it belongs to (rank and line in each) and its tier. Add it to a situation or an
+   intent in `modes.ts` / `search.ts` if it truly belongs there (docs/HOME.md).
 2. Give it artwork in `src/components/marketplace/art.tsx` and, once it's open, a miniature in
    `src/components/marketplace/minis.tsx` — TypeScript asks for both.
 3. Give it a world in `src/components/marketplace/worlds.ts` (surface, room, paper, ink, second
@@ -110,7 +113,8 @@ result says so ("Signal Pages · for “linktree”"). The examples the user gav
 
 ## The marketplace and tool pages
 
-The marketplace opens on “What do you want to do?”: quick actions for the common jobs (each a
+The home above all this (modes, your tools, situations) is in docs/HOME.md. With "All" chosen,
+or on a first visit below the one question, the classic marketplace opens on “What do you want to do?”: quick actions for the common jobs (each a
 tiny version of its tool), then search, then two featured tools, three mood shelves (“Make it
 look good” prints, “Plans with people” wide cards, “Everyday helpers” tiles), every open tool as
 an app-style row under what it helps with, a one-line privacy note and what's on the way. Every

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { IconName } from '@/components/ui/icon';
 import type { ModuleId } from '@/lib/platform/types';
-import { CATEGORY_IDS, FAMILY_IDS, TOOL_IDS } from './ids';
+import { CATEGORY_IDS, FAMILY_IDS, MODE_IDS, TIER_IDS, TOOL_IDS } from './ids';
 
 /**
  * The shape of every public tool, defined once. Types are derived from these schemas, and
@@ -18,6 +18,23 @@ export type CategoryId = z.infer<typeof categoryId>;
 
 export const familyId = z.enum(FAMILY_IDS);
 export type FamilyId = z.infer<typeof familyId>;
+
+export const modeId = z.enum(MODE_IDS);
+export type ModeId = z.infer<typeof modeId>;
+
+export const tierId = z.enum(TIER_IDS);
+export type TierId = z.infer<typeof tierId>;
+
+/**
+ * How a tool fits a mode: where it ranks there (1 comes first; the first six are the mode's
+ * starter set) and what it's for in that mode's words. QR Studio is "Wi-Fi, sharing, events" in
+ * Everyday and "Menus, reviews, marketing" in Work: the same tool, a different context.
+ */
+export const modeFitSchema = z.object({
+  rank: z.number().int().min(1).max(99),
+  line: z.string().min(6).max(48),
+});
+export type ModeFit = z.infer<typeof modeFitSchema>;
 
 /** Only three statuses ever reach the surface: Available, Beta and Coming soon. */
 export const toolStatus = z.enum(['available', 'beta', 'soon']);
@@ -91,6 +108,10 @@ export const toolSchema = z.object({
   /** Honest limits of the current version. */
   limits: z.array(z.string()),
   later: z.array(laterSchema),
+  /** The modes it belongs to, with its rank and its line in each. Empty: only in "everything". */
+  modes: z.partialRecord(modeId, modeFitSchema),
+  /** Experiences, tools and quick tools get different amounts of room. */
+  tier: tierId,
   /** The same tool inside Hyphy Spaces (when accounts are on). */
   spaces: z.custom<ModuleId>((value) => typeof value === 'string').optional(),
 });

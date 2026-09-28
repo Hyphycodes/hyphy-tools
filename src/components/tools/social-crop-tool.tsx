@@ -1,4 +1,5 @@
 'use client';
+import { takeCarried } from '@/lib/share/carry';
 import {
   useEffect,
   useId,
@@ -876,6 +877,11 @@ export function SocialCropTool() {
   useLayoutEffect(() => {
     opener.current = open;
   });
+  // A photo carried over from another tool (Resize's "Make social sizes") opens at once.
+  useEffect(() => {
+    const carried = takeCarried('social-crop');
+    if (carried) opener.current([carried.file]);
+  }, []);
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
       const file = Array.from(event.clipboardData?.files ?? []).find((item) =>

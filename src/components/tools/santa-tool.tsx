@@ -1,4 +1,5 @@
 'use client';
+import { NextSteps } from './next-step';
 import {
   useEffect,
   useId,
@@ -227,6 +228,15 @@ export function SantaTool() {
             }
           }}
           onStartNew={startNew}
+        />
+      )}
+
+      {phase === 'send' && exchange?.drawn && (
+        <NextSteps
+          from="secret-santa"
+          title="Names drawn"
+          steps={[{ tool: 'wishlist', label: 'Make a Christmas List' }]}
+          className="px-1"
         />
       )}
 

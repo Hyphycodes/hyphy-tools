@@ -20,6 +20,7 @@ import {
   type Size,
 } from '@/lib/tools/resize';
 import { AttachPicker } from './attach-picker';
+import { NextSteps } from './next-step';
 import {
   ActionBar,
   Advanced,
@@ -1087,6 +1088,25 @@ export function ImageTool({ slug = '', canSave = false }: { slug?: string; canSa
             )}
           </div>
         </ActionBar>
+
+        {/* One photo, done: it can go straight on to be framed or sampled, no second upload. */}
+        {!workspace && ready && !busy && onlyOne && result && (
+          <NextSteps
+            from="resize"
+            steps={[
+              {
+                tool: 'social-crop',
+                label: 'Make social sizes',
+                file: new File([result.blob], result.name, { type: result.blob.type }),
+              },
+              {
+                tool: 'palette',
+                label: 'Pull its colors',
+                file: new File([result.blob], result.name, { type: result.blob.type }),
+              },
+            ]}
+          />
+        )}
 
         <div className="grid gap-2.5">
           <p className="text-[13.5px] font-semibold text-ink-2">Made for</p>
