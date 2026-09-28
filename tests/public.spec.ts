@@ -29,7 +29,7 @@ test('the front door is the marketplace, not a dashboard', async ({ page }) => {
 
 test('search understands what people mean', async ({ page }) => {
   await visit(page, '/tools');
-  const box = page.getByRole('combobox', { name: 'What do you need to do?' });
+  const box = page.getByRole('combobox', { name: 'Or search every tool' });
   await box.fill('linktree');
   await expect(page.getByRole('option').first()).toContainText('Signal Pages');
   await expect(page.getByRole('option').first()).toContainText('linktree');
