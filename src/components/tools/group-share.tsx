@@ -159,8 +159,11 @@ export function NamePrompt({
   cta = 'That’s me',
   onName,
   onCancel,
+  bare = false,
   className,
 }: {
+  /** Inside a sheet that already has the title: no heading of its own. */
+  bare?: boolean;
   title?: ReactNode;
   lead?: ReactNode;
   /** Names already in the group: tap one instead of typing. */
@@ -180,24 +183,26 @@ export function NamePrompt({
   return (
     <form
       onSubmit={submit}
-      aria-labelledby={`${id}-title`}
+      aria-labelledby={bare ? undefined : `${id}-title`}
       className={cn(
         'fx-rise grid gap-3 rounded-[22px] bg-surface p-4 shadow-lift sm:p-5',
         className,
       )}
     >
-      <div className="flex items-start gap-3">
-        <div className="min-w-0 flex-1">
-          <h2
-            id={`${id}-title`}
-            className="font-display text-[21px] leading-tight font-bold tracking-[-0.02em] text-ink"
-          >
-            {title}
-          </h2>
-          {lead && <p className="mt-1 text-[14px] leading-snug text-muted">{lead}</p>}
+      {!bare && (
+        <div className="flex items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <h2
+              id={`${id}-title`}
+              className="font-display text-[21px] leading-tight font-bold tracking-[-0.02em] text-ink"
+            >
+              {title}
+            </h2>
+            {lead && <p className="mt-1 text-[14px] leading-snug text-muted">{lead}</p>}
+          </div>
+          {onCancel && <IconButton icon="x" label="Not now" onClick={onCancel} />}
         </div>
-        {onCancel && <IconButton icon="x" label="Not now" onClick={onCancel} />}
-      </div>
+      )}
       {names.length > 0 && (
         <div className="flex flex-wrap gap-2" role="group" aria-label="Pick your name">
           {names.map((entry) => (
@@ -456,7 +461,7 @@ export function AskName({
     <Sheet open={open} onClose={onClose} width="sm" title={title} description={lead}>
       {open && (
         <NamePrompt
-          title={<span className="sr-only">{title}</span>}
+          bare
           names={names}
           initial={initial}
           cta={cta}

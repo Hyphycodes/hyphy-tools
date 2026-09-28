@@ -21,11 +21,16 @@ const FEATURED: { id: ToolId; action: string; kicker: string }[] = [
 
 /** Three shelves with three moods: made to look good, made for people, made to get it done. */
 const CREATIVE: ToolId[] = ['social-crop', 'palette', 'qr', 'signal-pages', 'resize'];
-const PEOPLE: { id: ToolId; action: string }[] = [
+const PEOPLE: { id: ToolId; action: string; wide?: boolean }[] = [
+  { id: 'plan', action: 'Make a plan', wide: true },
+  { id: 'where', action: 'Pick a place' },
   { id: 'bring', action: 'Start a list' },
+  { id: 'secret-santa', action: 'Draw names' },
   { id: 'wishlist', action: 'Make a wish list' },
 ];
 const EVERYDAY: ToolId[] = [
+  'receipts',
+  'mileage',
   'subscriptions',
   'pdf',
   'signal-links',
@@ -61,12 +66,12 @@ function SectionHead({
 const QUICK: { id: ToolId; label: string }[] = [
   { id: 'split', label: 'Split dinner' },
   { id: 'when', label: 'Find a time' },
+  { id: 'where', label: 'Pick a place' },
   { id: 'qr', label: 'Make a QR code' },
   { id: 'resize', label: 'Shrink a photo' },
+  { id: 'receipts', label: 'Scan a receipt' },
   { id: 'pdf', label: 'Merge PDFs' },
-  { id: 'social-crop', label: 'Crop for Instagram' },
-  { id: 'bring', label: 'Plan a potluck' },
-  { id: 'clean', label: 'Tidy file names' },
+  { id: 'mileage', label: 'Log a drive' },
 ];
 
 export function Hero() {
@@ -186,8 +191,13 @@ export function People() {
           lead="One link for the group chat. Nobody needs an account."
         />
         <div className="mt-5 grid gap-3 sm:mt-7 sm:grid-cols-2 sm:gap-5">
-          {PEOPLE.map(({ id, action }) => (
-            <WashCard key={id} tool={getTool(id)} action={action} />
+          {PEOPLE.map(({ id, action, wide }) => (
+            <WashCard
+              key={id}
+              tool={getTool(id)}
+              action={action}
+              className={wide ? 'sm:col-span-2 sm:min-h-[300px]' : undefined}
+            />
           ))}
         </div>
       </div>
@@ -207,7 +217,7 @@ export function Everyday() {
           title="Everyday helpers"
           lead="The small chores, done in a minute."
         />
-        <div className="mt-5 grid grid-cols-2 gap-3 sm:mt-7 sm:grid-cols-3 sm:gap-5 xl:grid-cols-6">
+        <div className="mt-5 grid grid-cols-2 gap-3 sm:mt-7 sm:grid-cols-4 sm:gap-5">
           {tools.map((tool) => (
             <TileCard key={tool.id} tool={tool} />
           ))}

@@ -557,10 +557,10 @@ export function BringTool() {
           <PlanReturn
             tool="bring"
             ready={total > 0}
-            attachment={() =>
+            attachment={async () =>
               total
                 ? {
-                    url: upToDate ?? window.location.href,
+                    url: await linkFor(list),
                     summary: needed
                       ? `${needed} ${needed === 1 ? 'thing' : 'things'} still needed`
                       : `All ${total} covered`,

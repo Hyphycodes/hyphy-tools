@@ -1,5 +1,4 @@
 'use client';
-import { useRouter } from 'next/navigation';
 import {
   useCallback,
   useEffect,
@@ -14,6 +13,7 @@ import { cn } from '@/components/ui/cn';
 import { Icon } from '@/components/ui/icon';
 import { Sheet } from '@/components/ui/sheet';
 import { useToast } from '@/components/ui/toast';
+import { BASE_PATH } from '@/lib/base-path';
 import { takeAttachments, toolForPlan, type Connected } from '@/lib/share/handoff';
 import { newId } from '@/lib/share/link-state';
 import { directionsUrl, type Place } from '@/lib/tools/places';
@@ -111,7 +111,6 @@ function describeNews({ before, after }: Received<Plan>, meId: string | null) {
 export function PlanTool() {
   const id = useId();
   const toast = useToast();
-  const router = useRouter();
   const send = useSendLink();
   const today = useSyncExternalStore(noop, todayHere, () => '');
   const [news, setNews] = useState<string | null>(null);
@@ -219,7 +218,10 @@ export function PlanTool() {
 
   const go = (tool: Connected) => {
     if (!plan) return;
-    router.push(toolForPlan(tool, plan.id, titleOf(plan)));
+    // A full navigation: this page keeps rewriting its own address, which can cancel a client one.
+    // A full navigation on purpose (see plan-return.tsx).
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+    window.location.assign(`${BASE_PATH}${toolForPlan(tool, plan.id, titleOf(plan))}`);
   };
 
   const saveName = (name: string) => {

@@ -1,12 +1,12 @@
 'use client';
-import { useRouter } from 'next/navigation';
 import { useCallback, useId, useState, type FormEvent } from 'react';
 import { cn } from '@/components/ui/cn';
 import { Field, Input } from '@/components/ui/form';
 import { Icon } from '@/components/ui/icon';
 import { Sheet } from '@/components/ui/sheet';
 import { useToast } from '@/components/ui/toast';
-import { newId } from '@/lib/share/link-state';
+import { BASE_PATH } from '@/lib/base-path';
+import { linkFor, newId } from '@/lib/share/link-state';
 import { directionsUrl, linkSource, type Place } from '@/lib/tools/places';
 import {
   addOption,
@@ -100,7 +100,6 @@ function describeNews({ before, after }: Received<WhereRound>, meId: string | nu
 export function WhereTool() {
   const id = useId();
   const toast = useToast();
-  const router = useRouter();
   const send = useSendLink();
   const handoff = usePlanHandoff();
   const [news, setNews] = useState<string | null>(null);
@@ -213,7 +212,9 @@ export function WhereTool() {
     if (lead.option.note) params.set('placeNote', lead.option.note);
     if (lead.option.url) params.set('placeUrl', lead.option.url);
     if (round?.when.trim()) params.set('when', round.when.trim());
-    router.push(`/tools/plan?${params}`);
+    // A full navigation on purpose (see plan-return.tsx).
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+    window.location.assign(`${BASE_PATH}/tools/plan?${params}`);
   };
 
   const openSheet = openOption ? options.find((option) => option.id === openOption) : undefined;
@@ -236,7 +237,7 @@ export function WhereTool() {
           <PlanReturn
             tool="where"
             ready={Boolean(lead)}
-            attachment={() => (link && round ? handBack(round, link) : null)}
+            attachment={async () => (round ? handBack(round, await linkFor(round)) : null)}
           />
         )}
         {session.problem && (

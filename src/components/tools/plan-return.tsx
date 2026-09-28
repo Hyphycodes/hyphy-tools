@@ -1,8 +1,8 @@
 'use client';
-import { useRouter } from 'next/navigation';
 import { useState, useSyncExternalStore } from 'react';
 import { cn } from '@/components/ui/cn';
 import { Icon } from '@/components/ui/icon';
+import { BASE_PATH } from '@/lib/base-path';
 import { handoffFrom, leaveForPlan, type Attachment, type Connected } from '@/lib/share/handoff';
 
 /*
@@ -61,7 +61,6 @@ export function PlanReturn({
   ready?: boolean;
   className?: string;
 }) {
-  const router = useRouter();
   const handoff = usePlanHandoff();
   const [busy, setBusy] = useState(false);
   if (!handoff) return null;
@@ -70,7 +69,10 @@ export function PlanReturn({
     const result = await attachment();
     if (result) leaveForPlan(handoff.plan, tool, result);
     forgetHandoff();
-    router.push(`/tools/plan?open=${handoff.plan}`);
+    // A full navigation: the page keeps rewriting its own address, which can cancel a client one.
+    // A full navigation on purpose (see plan-return.tsx).
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+    window.location.assign(`${BASE_PATH}/tools/plan?open=${handoff.plan}`);
   };
   return (
     <div

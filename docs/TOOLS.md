@@ -85,11 +85,17 @@ own static page and share card.
 - **This browser** — `useLocalState()` (`src/lib/share/local.ts`): validated localStorage, SSR-safe.
   Used for drafts (a bill, a subscription list, a Signal Page).
 - **The link itself** — `src/lib/share/link-state.ts`: state is compressed into the address after
-  `#` (`#z…`), which browsers never send to a server. When?, Bring, the Christmas List and shared
-  Split bills work this way: people pass the updated link back to the group, and opening a link
-  merges it with what this browser already knows. Every decoded link is validated with the tool's
-  zod schema — a link is input from a stranger.
-- **An account** — not built yet. Receipts and Mileage (working in Hyphy Spaces) wait for it.
+  `#` (`#z…`), which browsers never send to a server. When?, Bring, the Christmas List, Where?,
+  Plan and shared Split bills work this way: people pass the updated link back to the group, and
+  opening a link merges it with what this browser already knows. Every decoded link is validated
+  with the tool's zod schema — a link is input from a stranger.
+- **Photos in this browser** — `src/lib/share/photos.ts`: IndexedDB for pictures (Receipts),
+  made smaller first; the records beside them stay in `useLocalState`.
+- **An account** — not built yet. Receipts and Mileage keep everything in this browser today
+  (they also work inside Hyphy Spaces); with accounts they keep the same shapes and move.
+
+`useLocalState` writes a change still waiting in its debounce when the page goes away, so
+leaving right after a change (to another tool, say) never loses it.
 
 When persistence arrives, a tool keeps the same state shape and swaps where it lives: the link
 becomes an id, the zod schema stays the contract.
@@ -135,6 +141,45 @@ browsing slow; keep them out:
 - **Heavy engines load when used**: pdf-lib, PDF.js and the receipt reader are `import()`ed when
   a file is chosen, never at the top of a module. The marketplace test suite checks this.
 - **Glows are gradients, not blur filters**; animate transforms and opacity only.
+
+## Group sessions
+
+Where?, Plan (and, in their own words, When?, Bring and the Christmas List) are group sessions:
+one thing a group does together, living in its link. `src/lib/share/group.ts` is the device
+store (the sessions this browser keeps, its role in each — organizer or guest — and who this
+device is), `components/tools/group-session.ts` the hook that opens a link, merges it, keeps the
+address current and builds the shareable link, and `components/tools/group-share.tsx` the shared
+parts: send (the share sheet or the clipboard), a code to scan, the tick when it went out,
+“What should we call you?” (the name is offered again in every group tool on this device), the
+bar that asks a guest to send the link back, and the sessions list. Each tool brings only its
+schema and its merge (`mergeWhere`, `mergePlan`), tested for order-independence.
+
+Secret Santa is deliberately not a shared session: the draw stays in the organizer's browser and
+each person's private link carries only their own envelope (`slipFor`), so no link can reveal
+anyone else's match.
+
+## Plan connects the group tools
+
+A Plan opens When?, Where?, Bring and Split for its occasion (`/tools/when?plan=…&title=…`,
+`src/lib/share/handoff.ts`). The tool starts titled for the plan and shows “For Kamila's
+Birthday · Add to the plan” (`components/tools/plan-return.tsx`); that leaves the tool's link and
+a one-line summary in this browser under the plan's id, and `/tools/plan?open=…` takes them in:
+Where? brings its winner as the place, When? its best time as the day. Where? can also start a
+new plan from a winner (`/tools/plan?place=…`). The hops are full navigations on purpose: these
+pages keep rewriting their own address, which can cancel a client-side one.
+
+## Receipts and Mileage
+
+Receipts reads a photo once with the same on-device reader as Split
+(`readReceiptLines` in `lib/tools/receipt-reader.ts`), parses the amounts with `parseReceipt` and
+the date, card and category with `extractExpense` (`lib/tools/receipts.ts`), and asks only for
+what it couldn't read. What was found is saved with the record; nothing is read twice and nothing
+is uploaded. PDFs are drawn to a picture first (`lib/tools/pdf-render.ts`).
+
+Mileage measures a drive from `navigator.geolocation.watchPosition` while the page is open
+(`addFix` in `lib/tools/mileage.ts` ignores vague fixes, standing-still jitter and impossible
+jumps), keeps the screen on with the Wake Lock API where available, and survives a reload. The
+site's `Permissions-Policy` allows camera and location for itself only (`next.config.ts`).
 
 ## Split reads receipts on the device
 

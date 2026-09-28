@@ -1501,7 +1501,68 @@ const minis: Record<ToolId, Draw | null> = {
       </g>
     </>
   ),
-  mileage: null,
+  mileage: (w, a) => (
+    <>
+      <Shadow x={36} y={26} w={328} h={248} r={24} ink={w.ink} />
+      <rect x="36" y="26" width="328" height="248" rx="24" fill={w.paper} />
+      <g stroke={w.ink} strokeOpacity=".07" strokeWidth="10" strokeLinecap="round">
+        <path d="M36 110h328M36 196h328M128 26v248M262 26v248" />
+      </g>
+      <path
+        d="M36 70 L150 180 L364 150"
+        stroke={w.ink}
+        strokeOpacity=".06"
+        strokeWidth="18"
+        fill="none"
+      />
+      <path
+        d="M84 222 C 120 222, 128 168, 170 160 S 230 120, 262 118 S 300 82, 318 70"
+        fill="none"
+        stroke={w.glow}
+        strokeOpacity=".18"
+        strokeWidth="14"
+        strokeLinecap="round"
+      />
+      <path
+        d="M84 222 C 120 222, 128 168, 170 160 S 230 120, 262 118 S 300 82, 318 70"
+        fill="none"
+        stroke={a}
+        strokeWidth="5"
+        strokeLinecap="round"
+      />
+      <circle cx="84" cy="222" r="7" fill={w.paper} stroke={w.glow} strokeWidth="4" />
+      <path d="M318 76s14-12.4 14-22a14 14 0 0 0-28 0c0 9.6 14 22 14 22Z" fill={w.glow} />
+      <circle cx="318" cy="54" r="5" fill={a} />
+      <g transform="rotate(-3 150 92)">
+        <rect x="58" y="52" width="150" height="72" rx="20" fill={w.glow} />
+        <text
+          x="76"
+          y="80"
+          fontSize="10"
+          fontWeight="700"
+          fill="#ffffff"
+          opacity=".65"
+          style={sans}
+        >
+          DRIVE DONE
+        </text>
+        <text x="76" y="110" fontSize="28" fontWeight="800" fill="#ffffff" style={display}>
+          12.4
+          <tspan fontSize="14" fill="#ffffff" fillOpacity=".7">
+            {' '}
+            mi
+          </tspan>
+        </text>
+      </g>
+      <g>
+        <rect x="224" y="206" width="112" height="36" rx="18" fill={w.ink} />
+        <circle cx="244" cy="224" r="9" fill={a} />
+        <text x="260" y="228.5" fontSize="12" fontWeight="700" fill={w.paper} style={sans}>
+          Business
+        </text>
+      </g>
+    </>
+  ),
 };
 
 /**

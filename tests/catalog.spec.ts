@@ -122,6 +122,14 @@ test.describe('marketplace search speaks people’s language', () => {
     ['what should we eat', 'where'],
     ['secret santa', 'secret-santa'],
     ['mileage', 'mileage'],
+    ['track my miles', 'mileage'],
+    ['scan a receipt', 'receipts'],
+    ['expense report', 'receipts'],
+    ['where should we go', 'where'],
+    ['pick a restaurant', 'where'],
+    ['rsvp', 'plan'],
+    ['plan a birthday', 'plan'],
+    ['draw names', 'secret-santa'],
   ] as const)
     test(`“${query}” finds ${expected}`, () => {
       expect(top(query)).toBe(expected);
