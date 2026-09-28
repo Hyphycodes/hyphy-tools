@@ -24,6 +24,7 @@ import {
   formatDay,
   formatDuration,
   formatRange,
+  formatTime,
   localDay,
   MAX_DAYS,
   MAX_PEOPLE,
@@ -65,6 +66,7 @@ import {
   tint,
 } from './when-parts';
 import { DayParts, DayPicker, partsName } from './when-setup';
+import { PlanReturn, usePlanHandoff } from './plan-return';
 
 /*
  * When?: tap the days, pick the time of day, send the invite, and everyone paints when they're
@@ -338,6 +340,14 @@ function StartScreen({
   const [slot, setSlot] = useState<SlotSize>(60);
   const [saved, setSaved] = useState(savedAtStart);
   const titleInput = useRef<HTMLInputElement>(null);
+  // Opened from a Plan: the invite starts with the plan's name.
+  const handoff = usePlanHandoff();
+  const handoffTitle = handoff?.title ?? '';
+  useEffect(() => {
+    // The address is read once the page is interactive; the title follows it.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (handoffTitle) setTitle((current) => current || handoffTitle);
+  }, [handoffTitle]);
 
   const create = () => {
     if (!days.length) return;
@@ -760,6 +770,22 @@ function PlanView({
 
   return (
     <div className="grid gap-4">
+      <PlanReturn
+        tool="when"
+        ready={Boolean(winner)}
+        attachment={() => ({
+          url: window.location.href,
+          summary: winner
+            ? `${formatDay(plan.days[winner.day])} · ${formatTime(slotStart(plan, winner.from))}`
+            : total
+              ? `${total} ${total === 1 ? 'person has' : 'people have'} answered`
+              : 'Waiting for answers',
+          t: Date.now(),
+          ...(winner
+            ? { date: plan.days[winner.day], time: slotStart(plan, winner.from) % 1440 }
+            : {}),
+        })}
+      />
       {/* The plan, and where you are in it. */}
       <div ref={top} className="grid scroll-mt-24 gap-3 sm:flex sm:items-center sm:gap-4">
         <div className="flex min-w-0 flex-1 items-center gap-3">

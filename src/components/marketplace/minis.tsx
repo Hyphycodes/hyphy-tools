@@ -1202,10 +1202,158 @@ const minis: Record<ToolId, Draw | null> = {
     </>
   ),
 
+  where: (w, a) => {
+    const cards = [
+      { x: 44, name: 'Monteverde', votes: 8, colors: ['#ff6b5b', '#c2352b'], lead: true, tilt: -4 },
+      { x: 150, name: 'Aba', votes: 5, colors: ['#9b7bff', '#5b3fc4'], tilt: 2 },
+      { x: 256, name: 'Tacos', votes: 2, colors: ['#ffb35c', '#c46a14'], tilt: 5 },
+    ];
+    return (
+      <>
+        <rect x="24" y="18" width="352" height="74" rx="20" fill="#2f1636" />
+        <circle cx="344" cy="40" r="10" fill="#ffd9b8" />
+        {[40, 70, 96, 130, 170, 214, 250, 290, 320].map((x, index) => (
+          <rect
+            key={x}
+            x={x}
+            y={92 - [22, 34, 18, 40, 26, 36, 20, 30, 24][index]}
+            width={index % 2 ? 22 : 28}
+            height={[22, 34, 18, 40, 26, 36, 20, 30, 24][index]}
+            fill="#1c0d24"
+          />
+        ))}
+        <text x="44" y="50" fontSize="17" fontWeight="800" fill="#fff4ea" style={display}>
+          Where should we eat?
+        </text>
+        {cards.map((card) => (
+          <g key={card.name} transform={`rotate(${card.tilt} ${card.x + 50} 190)`}>
+            <Shadow x={card.x} y={112} w={100} h={150} r={14} ink={w.ink} />
+            <rect x={card.x} y={112} width="100" height="150" rx="14" fill={w.paper} />
+            <path
+              d={`M${card.x} ${126}a14 14 0 0 1 14-14h72a14 14 0 0 1 14 14v52H${card.x}Z`}
+              fill={card.colors[0]}
+            />
+            <path
+              d={`M${card.x + 50} 170s14-12.6 14-22.4a14 14 0 0 0-28 0c0 9.8 14 22.4 14 22.4Z`}
+              fill="#fffaf5"
+            />
+            <circle cx={card.x + 50} cy={147} r="5" fill={card.colors[1]} />
+            <text
+              x={card.x + 10}
+              y={200}
+              fontSize="12.5"
+              fontWeight="700"
+              fill={w.ink}
+              style={display}
+            >
+              {card.name}
+            </text>
+            <text x={card.x + 10} y={220} fontSize="10" fill={w.ink} opacity=".7" style={sans}>
+              ♥ {card.votes}
+            </text>
+            <rect
+              x={card.x + 8}
+              y={232}
+              width="84"
+              height="18"
+              rx="9"
+              fill={card.lead ? a : w.ink}
+              opacity={card.lead ? 1 : 0.08}
+            />
+            {card.lead && (
+              <text
+                x={card.x + 50}
+                y={244.5}
+                textAnchor="middle"
+                fontSize="9"
+                fontWeight="800"
+                fill={w.ink}
+                style={sans}
+              >
+                LEADING
+              </text>
+            )}
+          </g>
+        ))}
+      </>
+    );
+  },
+  plan: (w, a) => (
+    <>
+      <g transform="rotate(-2.5 200 150)">
+        <Shadow x={78} y={22} w={244} h={256} r={24} ink={w.ink} />
+        <rect x="78" y="22" width="244" height="256" rx="24" fill={w.paper} />
+        <path d="M78 46a24 24 0 0 1 24-24h196a24 24 0 0 1 24 24v44H78Z" fill={a} />
+        <circle cx="296" cy="90" r="30" fill={w.glow} opacity=".9" />
+        <path d="M78 76h244v14H78Z" fill={a} />
+        <ellipse cx="128" cy="52" rx="20" ry="7" fill="#ffffff" opacity=".6" />
+        <ellipse cx="220" cy="40" rx="26" ry="8" fill="#ffffff" opacity=".45" />
+        <rect x="96" y="38" width="36" height="36" rx="11" fill="#ffffff" />
+        <path
+          d="M106 62l6-16 12 12Zm6-16 1-4m8 6 4-1m-12-6 1 3"
+          stroke={a}
+          strokeWidth="2.4"
+          strokeLinecap="round"
+          fill="none"
+        />
+        <text
+          x="100"
+          y="124"
+          fontSize="9"
+          fontWeight="800"
+          fill={w.accentInk}
+          style={sans}
+          letterSpacing="1.4"
+        >
+          BIRTHDAY
+        </text>
+        <text x="100" y="152" fontSize="23" fontWeight="800" fill={w.ink} style={display}>
+          Kamila’s Birthday
+        </text>
+        {[
+          { y: 178, label: 'Saturday, October 17 · 7:30 PM' },
+          { y: 204, label: 'Monteverde' },
+        ].map((row) => (
+          <g key={row.y}>
+            <rect x="100" y={row.y - 12} width="20" height="20" rx="6" fill={a} opacity=".18" />
+            <text x="128" y={row.y + 3} fontSize="11" fontWeight="600" fill={w.ink} style={sans}>
+              {row.label}
+            </text>
+          </g>
+        ))}
+        {['#8ee0a0', '#8ecff5', '#f5d77a', '#ffb38a', '#c9b6ff'].map((color, index) => (
+          <circle
+            key={color}
+            cx={112 + index * 16}
+            cy={243}
+            r="11"
+            fill={color}
+            stroke={w.paper}
+            strokeWidth="2.5"
+          />
+        ))}
+        <text x="200" y="247" fontSize="11" fill={w.ink} opacity=".7" style={sans}>
+          8 people · 5 in
+        </text>
+      </g>
+      <g transform="rotate(4 330 250)">
+        <rect x="286" y="226" width="92" height="36" rx="18" fill={w.glow} />
+        <text
+          x="332"
+          y="249"
+          textAnchor="middle"
+          fontSize="12"
+          fontWeight="800"
+          fill={w.ink}
+          style={sans}
+        >
+          I’m in ✓
+        </text>
+      </g>
+    </>
+  ),
   receipts: null,
   mileage: null,
-  where: null,
-  plan: null,
   'secret-santa': null,
 };
 

@@ -24,8 +24,8 @@ const runtimes: Record<ToolId, ComponentType | null> = {
   split: tool(() => import('@/components/tools/split-tool').then((m) => m.SplitTool)),
   when: tool(() => import('@/components/tools/when-tool').then((m) => m.WhenTool)),
   bring: tool(() => import('@/components/tools/bring-tool').then((m) => m.BringTool)),
-  where: null,
-  plan: null,
+  where: tool(() => import('@/components/tools/where-tool').then((m) => m.WhereTool)),
+  plan: tool(() => import('@/components/tools/plan-tool').then((m) => m.PlanTool)),
   qr: tool(() => import('@/components/tools/qr-studio').then((m) => m.QrStudio)),
   'signal-pages': tool(() =>
     import('@/components/tools/signal-pages-tool').then((m) => m.SignalPagesTool),

@@ -50,18 +50,40 @@ export function useLocalState<T>(key: string, schema: $ZodType<T>, initial: T) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // A change not yet written: written when the page goes away or the tool closes, so leaving
+  // right after a change (to another tool, say) never loses it.
+  const pending = useRef<{ key: string; value: T } | null>(null);
+
   useEffect(() => {
     if (!loaded) return;
     if (skip.current) {
       skip.current = false;
       return;
     }
-    const timer = setTimeout(() => writeLocal(key, value), 250);
+    pending.current = { key, value };
+    const timer = setTimeout(() => {
+      writeLocal(key, value);
+      pending.current = null;
+    }, 250);
     return () => clearTimeout(timer);
   }, [key, value, loaded]);
 
+  useEffect(() => {
+    const flush = () => {
+      if (!pending.current) return;
+      writeLocal(pending.current.key, pending.current.value);
+      pending.current = null;
+    };
+    window.addEventListener('pagehide', flush);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      flush();
+    };
+  }, []);
+
   const reset = useCallback(
     (next: T) => {
+      pending.current = null;
       writeLocal(key, null);
       setValue(next);
     },

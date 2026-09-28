@@ -38,7 +38,12 @@ export type Pattern =
   | 'dots'
   | 'grid'
   | 'rays'
-  | 'gallery';
+  | 'gallery'
+  | 'map'
+  | 'invite'
+  | 'envelope'
+  | 'columns'
+  | 'route';
 
 export type Mood = 'social' | 'practical' | 'creative' | 'personal' | 'fun';
 
@@ -56,7 +61,11 @@ export type WorldObject =
   | 'tag'
   | 'ledger'
   | 'phone'
-  | 'link';
+  | 'link'
+  | 'places'
+  | 'invite'
+  | 'envelope'
+  | 'route';
 
 /** How things move: the duration and ease every transition in the tool reads. */
 export type Motion = 'paper' | 'snappy' | 'soft' | 'springy';
@@ -179,8 +188,40 @@ export const worlds: Record<ToolId, World> = {
     action: 'Start a list',
     journey: ['List what’s needed', 'Share the link', 'Everyone claims'],
   },
-  where: later('#ffd166', 'list', 'social'),
-  plan: later('#ffb35c', 'list', 'social'),
+  // A warm city night: plum sky, coral light, cream destination cards.
+  where: {
+    surface: 'light',
+    canvas: '#f7e6de',
+    paper: '#fffaf6',
+    ink: '#2a1420',
+    accentInk: '#b8322a',
+    glow: '#6b2f63',
+    third: '#ffc9b0',
+    pattern: 'map',
+    object: 'places',
+    motion: 'springy',
+    payoff: 'stamp',
+    mood: 'social',
+    action: 'Pick a place',
+    journey: ['Add a few places', 'Send the link', 'Everyone votes'],
+  },
+  // Blue sky over warm ivory, a little sunshine: an invitation.
+  plan: {
+    surface: 'light',
+    canvas: '#e6edfb',
+    paper: '#fffdf6',
+    ink: '#14203d',
+    accentInk: '#2f55d4',
+    glow: '#ffd84d',
+    third: '#bcd0f7',
+    pattern: 'invite',
+    object: 'invite',
+    motion: 'soft',
+    payoff: 'share',
+    mood: 'social',
+    action: 'Make a plan',
+    journey: ['What is it', 'When and where', 'Who’s in'],
+  },
   // A tiny design studio: bright cyan, white and ink.
   qr: {
     surface: 'light',

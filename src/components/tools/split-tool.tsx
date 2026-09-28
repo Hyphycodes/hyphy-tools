@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactN
 import { Icon } from '@/components/ui/icon';
 import type { ParsedReceipt } from '@/lib/tools/receipt';
 import { receiptReader } from '@/lib/tools/receipt-reader';
-import { decodeState, clearHash, newId } from '@/lib/share/link-state';
+import { decodeState, clearHash, linkFor, newId } from '@/lib/share/link-state';
 import { useLocalState } from '@/lib/share/local';
 import {
   computeSplit,
@@ -14,6 +14,7 @@ import {
   type SplitBill,
 } from '@/lib/tools/split';
 import { IconButton, Journey, Note } from './kit';
+import { PlanReturn } from './plan-return';
 import { NextBar, TextLink } from './split-parts';
 import { AssignView, PeopleView, rememberNames } from './split-people';
 import {
@@ -306,21 +307,26 @@ export function SplitTool() {
     return index > 0 ? FLOW[index - 1].step : 'start';
   };
   const bar = (current: Step) => (
-    <div className="mb-5 flex items-start gap-3">
-      <IconButton
-        icon="arrow-left"
-        label="Back"
-        onClick={() => back(previous(current))}
-        className="!size-11 !rounded-full bg-ink/[.06] !text-ink-2"
-      />
-      <Journey
-        className="flex-1 pt-1"
-        steps={FLOW.map((entry) => entry.label)}
-        current={FLOW.findIndex((entry) => entry.step === current)}
-        onPick={(index) => FLOW[index].step !== current && go(FLOW[index].step)}
-        reachable={(index) => reachable(FLOW[index].step)}
-      />
-    </div>
+    <>
+      {current !== 'done' && (
+        <PlanReturn tool="split" ready={false} attachment={() => null} className="mb-4" />
+      )}
+      <div className="mb-5 flex items-start gap-3">
+        <IconButton
+          icon="arrow-left"
+          label="Back"
+          onClick={() => back(previous(current))}
+          className="!size-11 !rounded-full bg-ink/[.06] !text-ink-2"
+        />
+        <Journey
+          className="flex-1 pt-1"
+          steps={FLOW.map((entry) => entry.label)}
+          current={FLOW.findIndex((entry) => entry.step === current)}
+          onPick={(index) => FLOW[index].step !== current && go(FLOW[index].step)}
+          reachable={(index) => reachable(FLOW[index].step)}
+        />
+      </div>
+    </>
   );
 
   // Steps that need a bill fall back to the start until there is one (a reload, a cleared bill).
@@ -471,6 +477,20 @@ export function SplitTool() {
   return (
     <Column>
       {bar('done')}
+      <PlanReturn
+        tool="split"
+        className="mb-4"
+        ready={result.total > 0}
+        attachment={async () =>
+          result.total > 0
+            ? {
+                url: await linkFor(bill),
+                summary: `${money(result.total)} · ${result.people.length} ${result.people.length === 1 ? 'person' : 'people'}`,
+                t: Date.now(),
+              }
+            : null
+        }
+      />
       <Result bill={bill} result={result} money={money} celebrate />
       <ShareArea bill={bill} result={result} />
       <div className="mt-6 flex flex-wrap justify-center gap-1 border-t border-line pt-4">

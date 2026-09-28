@@ -78,6 +78,7 @@ import {
   useSendLink,
   type Combined,
 } from './bring-share';
+import { PlanReturn, usePlanHandoff } from './plan-return';
 
 /*
  * Bring: who's bringing what. The list is the object: a picnic blanket of little things. The
@@ -144,6 +145,7 @@ export function BringTool() {
   const id = useId();
   const toast = useToast();
   const send = useSendLink();
+  const handoff = usePlanHandoff();
   const [store, setStore, { loaded }] = useLocalState<BringStore>(
     'hyphy.bring.v1',
     bringStoreSchema,
@@ -239,7 +241,10 @@ export function BringTool() {
   /** An organizer's change. The first one makes the list. */
   const edit = (change: (list: BringList, now: number) => BringList) => {
     const now = Date.now();
-    const fresh = newList(newId(), now);
+    // Opened from a Plan: the list starts with the plan's name.
+    const fresh = handoff?.title
+      ? setDetails(newList(newId(), now), { title: handoff.title }, now)
+      : newList(newId(), now);
     setStore((current) => {
       const entry = current.lists.find(
         (item) => item.list.id === current.current && item.role === 'organizer',
@@ -282,7 +287,7 @@ export function BringTool() {
     setSource(templateId ?? 'ideas');
     const template = TEMPLATES.find((entry) => entry.id === templateId);
     // The list takes the occasion's name (until it's given one of its own).
-    if (template && !list?.title.trim())
+    if (template && !list?.title.trim() && !handoff?.title)
       edit((current, now) => setDetails(current, { title: template.name }, now));
   };
   const remove = (itemId: string) => {
@@ -508,6 +513,7 @@ export function BringTool() {
   if (organizer && count === 0 && !started && !removal) {
     return (
       <div className="mx-auto grid w-full max-w-[880px] gap-5">
+        <PlanReturn tool="bring" ready={false} attachment={() => null} />
         {notices}
         <Blanket>
           <h2
@@ -547,6 +553,23 @@ export function BringTool() {
       )}
     >
       <div className="grid min-w-0 gap-4">
+        {list && (
+          <PlanReturn
+            tool="bring"
+            ready={total > 0}
+            attachment={() =>
+              total
+                ? {
+                    url: upToDate ?? window.location.href,
+                    summary: needed
+                      ? `${needed} ${needed === 1 ? 'thing' : 'things'} still needed`
+                      : `All ${total} covered`,
+                    t: Date.now(),
+                  }
+                : null
+            }
+          />
+        )}
         {notices}
 
         <Blanket>

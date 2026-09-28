@@ -144,6 +144,26 @@ import {
   Shrink,
   Smartphone,
   Wand2,
+  Coffee,
+  Wine,
+  Mountain,
+  Plane,
+  Clapperboard,
+  ThumbsUp,
+  ThumbsDown,
+  Navigation,
+  Map as MapIcon,
+  Cake,
+  MailOpen,
+  Briefcase,
+  Stethoscope,
+  HandHeart,
+  LocateFixed,
+  Shuffle,
+  TreePine,
+  Hammer,
+  Laptop,
+  Tent,
 } from 'lucide-react';
 
 /*
@@ -218,7 +238,9 @@ const brand = {
       <path d="M8 10.5V16M8 7.6v.1M11.5 16v-5.5M11.5 13c0-1.6 1-2.6 2.3-2.6s2.2.9 2.2 2.6V16" />
     </>
   ),
-  facebook: <path d="M14.5 21v-7.5h2.6l.4-3h-3V8.6c0-.9.3-1.5 1.6-1.5h1.5V4.4a20 20 0 0 0-2.3-.1c-2.3 0-3.8 1.4-3.8 3.9v2.3H9v3h2.5V21" />,
+  facebook: (
+    <path d="M14.5 21v-7.5h2.6l.4-3h-3V8.6c0-.9.3-1.5 1.6-1.5h1.5V4.4a20 20 0 0 0-2.3-.1c-2.3 0-3.8 1.4-3.8 3.9v2.3H9v3h2.5V21" />
+  ),
   spotify: (
     <>
       <circle cx="12" cy="12" r="9" />
@@ -377,6 +399,26 @@ const lucide = {
   shrink: Shrink,
   smartphone: Smartphone,
   wand: Wand2,
+  coffee: Coffee,
+  wine: Wine,
+  mountain: Mountain,
+  plane: Plane,
+  film: Clapperboard,
+  'thumbs-up': ThumbsUp,
+  'thumbs-down': ThumbsDown,
+  navigation: Navigation,
+  map: MapIcon,
+  cake: Cake,
+  'mail-open': MailOpen,
+  briefcase: Briefcase,
+  stethoscope: Stethoscope,
+  'hand-heart': HandHeart,
+  locate: LocateFixed,
+  shuffle: Shuffle,
+  tree: TreePine,
+  hammer: Hammer,
+  laptop: Laptop,
+  tent: Tent,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof brand | keyof typeof lucide;

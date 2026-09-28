@@ -1,11 +1,13 @@
 'use client';
-import { useCallback, useId, useState, useSyncExternalStore, type FormEvent } from 'react';
+import { useId, useState, type FormEvent } from 'react';
 import { cn } from '@/components/ui/cn';
 import { Icon } from '@/components/ui/icon';
 import { progress, type BringList, type BringStore } from '@/lib/tools/bring';
-import { ActionButton, IconButton, Label, Surface, useCopy } from './kit';
+import { ActionButton, IconButton, Label, Surface } from './kit';
 import { Gingham, PeopleStack } from './bring-art';
-import { LinkQr } from './share-link';
+import { joinNames, LinkExtras, SentMark, type SendResult } from './group-share';
+
+export { joinNames, useCanShare, useSendLink, type SendResult } from './group-share';
 
 /*
  * Bring's sharing: the invitation the organizer sends, the "send it back" a guest sends, and the
@@ -13,112 +15,6 @@ import { LinkQr } from './share-link';
  */
 
 export type Combined = { error: string; other?: string } | { done: string };
-export type SendResult = 'shared' | 'copied' | 'failed' | null;
-
-const noop = () => () => {};
-export function useCanShare() {
-  return useSyncExternalStore(
-    noop,
-    () => 'share' in navigator,
-    () => false,
-  );
-}
-
-/** The phone's share sheet where there is one, the clipboard where there isn't. */
-export function useSendLink() {
-  const canShare = useCanShare();
-  return useCallback(
-    async (link: string, title: string, text?: string): Promise<SendResult> => {
-      if (canShare) {
-        try {
-          await navigator.share({ title, text, url: link });
-          return 'shared';
-        } catch (error) {
-          if (error instanceof DOMException && error.name === 'AbortError') return null;
-        }
-      }
-      try {
-        await navigator.clipboard.writeText(link);
-        return 'copied';
-      } catch {
-        return 'failed';
-      }
-    },
-    [canShare],
-  );
-}
-
-export function joinNames(names: string[]) {
-  if (names.length <= 1) return names.join('');
-  return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
-}
-
-/** Copy the link, a code to scan, the list as text: the quieter ways to pass it on. */
-function LinkExtras({ link, text }: { link: string | null; text: string }) {
-  const { copy, copied } = useCopy();
-  const [qr, setQr] = useState(false);
-  const small =
-    'inline-flex h-11 items-center justify-center gap-1.5 rounded-full px-2.5 text-[13.5px] font-medium text-ink-2 transition-colors hover:bg-ink/[.07] hover:text-ink disabled:opacity-40 lg:h-10';
-  return (
-    <div className="grid gap-2">
-      <div className="flex flex-wrap justify-center gap-0.5">
-        <button
-          type="button"
-          disabled={!link}
-          onClick={() => link && void copy(link, 'Link copied')}
-          className={small}
-        >
-          <Icon name={link && copied === link ? 'check' : 'link-2'} size={15} />
-          {link && copied === link ? 'Copied' : 'Copy link'}
-        </button>
-        {link && link.length <= 1600 && (
-          <button
-            type="button"
-            aria-pressed={qr}
-            onClick={() => setQr((value) => !value)}
-            className={small}
-          >
-            <Icon name="qr" size={15} /> {qr ? 'Hide code' : 'Code to scan'}
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={() => void copy(text, 'Copied. Paste it in the group chat.')}
-          className={small}
-        >
-          <Icon name={copied === text ? 'check' : 'copy'} size={15} />
-          {copied === text ? 'Copied' : 'Copy as text'}
-        </button>
-      </div>
-      {qr && link && (
-        <div className="fx-pop mx-auto w-full max-w-[200px] rounded-[16px] bg-white p-3 shadow-[inset_0_0_0_1px_var(--color-line)]">
-          <LinkQr url={link} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** A tick that lands: the share went out. */
-function SentMark({ title, line }: { title: string; line: string }) {
-  return (
-    <div className="grid justify-items-center gap-2 text-center" role="status">
-      <span
-        className="fx-stamp grid size-16 place-items-center rounded-full text-[var(--on-accent,#12110d)] shadow-[0_14px_30px_-14px_var(--accent)]"
-        style={{ background: 'var(--accent, var(--color-ink))' }}
-      >
-        <Icon name="check" size={30} strokeWidth={3} />
-      </span>
-      <p
-        className="fx-rise mt-1 font-display text-[28px] leading-none font-extrabold tracking-[-0.03em] text-ink"
-        style={{ fontVariationSettings: "'wdth' 108" }}
-      >
-        {title}
-      </p>
-      <p className="fx-rise max-w-[30ch] text-[14px] leading-snug text-muted [--i:1]">{line}</p>
-    </div>
-  );
-}
 
 /** The organizer's invitation: what everyone will see, and the one big way to send it. */
 export function InviteCard({
