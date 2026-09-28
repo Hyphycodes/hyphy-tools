@@ -886,7 +886,7 @@ export function CountUp({
   }, [value, duration, reduced]);
   return (
     <span
-      className={cn(mono ? 'mono-num' : 'tabular-nums', className)}
+      className={cn(mono && 'mono-num', className)}
       aria-label={format(value)}
     >
       <span aria-hidden="true">{format(reduced ? value : shown)}</span>
@@ -1156,7 +1156,7 @@ export function PresetCards<T extends string>({
                   className="ml-auto rounded-full px-2 py-0.5 text-[10.5px] font-bold text-[var(--on-accent,#12110d)]"
                   style={{ background: ACCENT }}
                 >
-                  Best
+                  Recommended
                 </span>
               )}
             </span>
