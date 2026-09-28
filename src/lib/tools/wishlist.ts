@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as z from 'zod/mini';
 import {
   bump,
   claimerSchema,
@@ -113,19 +113,19 @@ export function domainOf(url: string) {
 
 /* ---------------- the list ---------------- */
 
-const urlSchema = z
-  .string()
-  .max(MAX_URL)
-  .refine((url) => url === '' || isWebUrl(url), 'Links must be web links (http or https)');
+const urlSchema = z.string().check(
+  z.maxLength(MAX_URL),
+  z.refine((url) => url === '' || isWebUrl(url), 'Links must be web links (http or https)'),
+);
 
 export const wishItemSchema = z.object({
   id: idSchema,
-  name: z.string().max(120),
+  name: z.string().check(z.maxLength(120)),
   url: urlSchema,
   /** In cents; 0 = no price given. */
-  price: z.number().int().min(0).max(MAX_PRICE),
+  price: z.int().check(z.minimum(0), z.maximum(MAX_PRICE)),
   /** Size, color, anything that helps. */
-  note: z.string().max(200),
+  note: z.string().check(z.maxLength(200)),
   want: z.enum(WANTS),
   updated: stampSchema,
 });
@@ -134,27 +134,27 @@ export type WishItem = z.infer<typeof wishItemSchema>;
 const listShape = {
   v: z.literal(1),
   id: idSchema,
-  title: z.string().max(80),
+  title: z.string().check(z.maxLength(80)),
   /** Whose list it is: "Maya". */
-  who: z.string().max(40),
+  who: z.string().check(z.maxLength(40)),
   occasion: z.enum(OCCASIONS),
   currency: z.enum(CURRENCIES),
   /** The owner's last change. The copy changed last decides the details and the order. */
   edited: stampSchema,
-  items: z.array(wishItemSchema).max(MAX_ITEMS),
-  removed: z.array(idSchema).max(MAX_REMOVED),
+  items: z.array(wishItemSchema).check(z.maxLength(MAX_ITEMS)),
+  removed: z.array(idSchema).check(z.maxLength(MAX_REMOVED)),
 };
 
 /** The owner's list, as kept in their browser. It has no claims in it, ever. */
 export const wishListSchema = z
   .object(listShape)
-  .refine((list) => distinctIds(list.items), 'Each item needs its own id');
+  .check(z.refine((list) => distinctIds(list.items), 'Each item needs its own id'));
 export type WishList = z.infer<typeof wishListSchema>;
 
 /** A gift-giver link: the list, plus who's getting what. */
 export const giftListSchema = z
   .object({ ...listShape, claims: claimsSchema(MAX_ITEMS) })
-  .refine((list) => distinctIds(list.items), 'Each item needs its own id');
+  .check(z.refine((list) => distinctIds(list.items), 'Each item needs its own id'));
 export type GiftList = z.infer<typeof giftListSchema>;
 
 export function newWishList(id: string, now: number): WishList {
@@ -324,9 +324,9 @@ export function restoreWish(list: WishList, removal: WishRemoval, now: number): 
 
 export const ownerStoreSchema = z.object({
   v: z.literal(1),
-  list: wishListSchema.nullable(),
+  list: z.nullable(wishListSchema),
   /** The list's `edited` when its gift-giver link was last made: later edits aren't in it. */
-  shared: stampSchema.nullable(),
+  shared: z.nullable(stampSchema),
 });
 export type OwnerStore = z.infer<typeof ownerStoreSchema>;
 export const EMPTY_OWNER: OwnerStore = { v: 1, list: null, shared: null };
@@ -415,8 +415,8 @@ export type Given = z.infer<typeof givenSchema>;
 export const givenStoreSchema = z.object({
   v: z.literal(1),
   /** Who claims from this device. The name may be blank: "Someone". */
-  me: claimerSchema.nullable(),
-  lists: z.array(givenSchema).max(MAX_SAVED),
+  me: z.nullable(claimerSchema),
+  lists: z.array(givenSchema).check(z.maxLength(MAX_SAVED)),
 });
 export type GivenStore = z.infer<typeof givenStoreSchema>;
 export const EMPTY_GIVEN: GivenStore = { v: 1, me: null, lists: [] };

@@ -5,6 +5,7 @@ import { useState, useSyncExternalStore } from 'react';
 import { cn } from '@/components/ui/cn';
 import { Icon } from '@/components/ui/icon';
 import { Kbd } from '@/components/ui/kbd';
+import { IntentLink } from '@/components/marketplace/intent-link';
 import { studio } from '@/lib/public';
 import { openSearch } from './search';
 import { Wordmark } from './wordmark';
@@ -53,9 +54,9 @@ export function WorldHeader() {
       )}
     >
       <div className="safe-top mx-auto flex h-16 max-w-[1320px] items-center gap-4 px-4 sm:px-6 lg:px-8">
-        <Link href="/tools" aria-label="Hyphy Tools — all tools" className="rounded-[10px]">
+        <IntentLink href="/tools" aria-label="Hyphy Tools — all tools" className="rounded-[10px]">
           <Wordmark />
-        </Link>
+        </IntentLink>
         <nav aria-label="Hyphy" className="ml-6 hidden items-center gap-1 md:flex">
           {nav.map((item) =>
             item.external ? (
@@ -67,7 +68,7 @@ export function WorldHeader() {
                 {item.label}
               </a>
             ) : (
-              <Link
+              <IntentLink
                 key={item.label}
                 href={item.href}
                 aria-current={item.current ? 'page' : undefined}
@@ -77,7 +78,7 @@ export function WorldHeader() {
                 )}
               >
                 {item.label}
-              </Link>
+              </IntentLink>
             ),
           )}
         </nav>

@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as z from 'zod/mini';
 
 /*
  * Claims on lists that live in their links (Bring, Christmas List). There's no master copy:
@@ -17,11 +17,11 @@ import { z } from 'zod';
  */
 
 /** List, item and claimer ids: the alphabet `newId` draws from, nothing else. */
-export const idSchema = z.string().regex(/^[a-z0-9]{1,24}$/);
+export const idSchema = z.string().check(z.regex(/^[a-z0-9]{1,24}$/));
 
 /** A moment, in milliseconds since 1970 (what `Date.now()` returns). */
 export const MAX_STAMP = 8_640_000_000_000;
-export const stampSchema = z.number().int().min(0).max(MAX_STAMP);
+export const stampSchema = z.int().check(z.minimum(0), z.maximum(MAX_STAMP));
 
 /** Removed items remembered per list, so older links can't bring them back. */
 export const MAX_REMOVED = 200;
@@ -32,15 +32,15 @@ export const MAX_RECORDS = 6;
 export const claimSchema = z.object({
   /** The claimer's device id. Only that device can release or change the claim. */
   by: idSchema,
-  name: z.string().max(40),
+  name: z.string().check(z.maxLength(40)),
   /** When it was claimed. The earliest claim holds the item. */
   at: stampSchema,
   /** When it last changed. Between two copies of one claim, the later change wins. */
   t: stampSchema,
   /** Released. Kept so an older link can't restore the claim. */
-  off: z.boolean().optional(),
+  off: z.optional(z.boolean()),
   /** Bought (Christmas List). */
-  got: z.boolean().optional(),
+  got: z.optional(z.boolean()),
 });
 export type Claim = z.infer<typeof claimSchema>;
 
@@ -49,12 +49,12 @@ export type Claims = Record<string, Claim[]>;
 
 export function claimsSchema(maxItems: number) {
   return z
-    .record(idSchema, z.array(claimSchema).max(MAX_RECORDS))
-    .refine((claims) => Object.keys(claims).length <= maxItems, 'Too many claimed items');
+    .record(idSchema, z.array(claimSchema).check(z.maxLength(MAX_RECORDS)))
+    .check(z.refine((claims) => Object.keys(claims).length <= maxItems, 'Too many claimed items'));
 }
 
 /** Who's claiming on this device: an id made here once, and the name they gave. */
-export const claimerSchema = z.object({ id: idSchema, name: z.string().max(40) });
+export const claimerSchema = z.object({ id: idSchema, name: z.string().check(z.maxLength(40)) });
 export type Claimer = z.infer<typeof claimerSchema>;
 
 /** A time that's later than `previous` even when this device's clock is behind another's. */

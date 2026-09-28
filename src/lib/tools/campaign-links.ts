@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as z from 'zod/mini';
 
 /*
  * Signal Links: a campaign link is a page's own address plus a few tags (utm_source, utm_medium,
@@ -133,23 +133,23 @@ export const placeById = (id: PlaceId | null): Place | null =>
 
 /* ---------------- The builder ---------------- */
 
-const tagText = z.string().max(200);
+const tagText = z.string().check(z.maxLength(200));
 
 export const draftSchema = z.object({
   /** The page, as pasted. */
-  page: z.string().max(4000),
-  place: z.enum(PLACE_IDS).nullable(),
+  page: z.string().check(z.maxLength(4000)),
+  place: z.nullable(z.enum(PLACE_IDS)),
   /** "What's it for?": becomes the campaign name. */
-  purpose: z.string().max(120),
+  purpose: z.string().check(z.maxLength(120)),
   /** "Which version?": becomes the content tag. */
-  version: z.string().max(120),
+  version: z.string().check(z.maxLength(120)),
   /** Tags typed by hand under Advanced. Each one wins over what the plain choices suggest. */
   raw: z.object({
-    utm_source: tagText.optional(),
-    utm_medium: tagText.optional(),
-    utm_campaign: tagText.optional(),
-    utm_content: tagText.optional(),
-    utm_term: tagText.optional(),
+    utm_source: z.optional(tagText),
+    utm_medium: z.optional(tagText),
+    utm_campaign: z.optional(tagText),
+    utm_content: z.optional(tagText),
+    utm_term: z.optional(tagText),
   }),
 });
 export type Draft = z.infer<typeof draftSchema>;
@@ -342,14 +342,14 @@ const isWebHref = (text: string) => {
 export const recentSchema = z
   .array(
     z.object({
-      id: z.string().min(1).max(24),
-      href: z.string().max(8000).refine(isWebHref),
+      id: z.string().check(z.minLength(1), z.maxLength(24)),
+      href: z.string().check(z.maxLength(8000), z.refine(isWebHref)),
       /** When it was last copied, opened or made into a code (ms). */
-      at: z.number().int().min(0),
+      at: z.int().check(z.minimum(0)),
       draft: draftSchema,
     }),
   )
-  .max(RECENT_LIMIT);
+  .check(z.maxLength(RECENT_LIMIT));
 export type Recent = z.infer<typeof recentSchema>[number];
 
 /** Newest first, each link once, at most 12. */

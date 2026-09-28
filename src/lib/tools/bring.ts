@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as z from 'zod/mini';
 import {
   bump,
   claimerSchema,
@@ -35,9 +35,9 @@ export const CATEGORY_NAMES: Record<Category, string> = {
 
 export const bringItemSchema = z.object({
   id: idSchema,
-  name: z.string().max(80),
+  name: z.string().check(z.maxLength(80)),
   /** How much, in the organizer's words: "2 bags", "for 8". */
-  qty: z.string().max(30),
+  qty: z.string().check(z.maxLength(30)),
   cat: z.enum(CATEGORIES),
   updated: stampSchema,
 });
@@ -47,17 +47,17 @@ export const bringListSchema = z
   .object({
     v: z.literal(1),
     id: idSchema,
-    title: z.string().max(80),
-    when: z.string().max(80),
-    where: z.string().max(120),
-    note: z.string().max(400),
+    title: z.string().check(z.maxLength(80)),
+    when: z.string().check(z.maxLength(80)),
+    where: z.string().check(z.maxLength(120)),
+    note: z.string().check(z.maxLength(400)),
     /** The organizer's last change. The copy changed last decides the details and the order. */
     edited: stampSchema,
-    items: z.array(bringItemSchema).max(MAX_ITEMS),
-    removed: z.array(idSchema).max(MAX_REMOVED),
+    items: z.array(bringItemSchema).check(z.maxLength(MAX_ITEMS)),
+    removed: z.array(idSchema).check(z.maxLength(MAX_REMOVED)),
     claims: claimsSchema(MAX_ITEMS),
   })
-  .refine((list) => distinctIds(list.items), 'Each item needs its own id');
+  .check(z.refine((list) => distinctIds(list.items), 'Each item needs its own id'));
 export type BringList = z.infer<typeof bringListSchema>;
 
 export function newList(id: string, now: number): BringList {
@@ -87,10 +87,10 @@ export type SavedList = z.infer<typeof savedSchema>;
 export const bringStoreSchema = z.object({
   v: z.literal(1),
   /** Who claims from this device. */
-  me: claimerSchema.nullable(),
+  me: z.nullable(claimerSchema),
   /** The list on screen when the page opens without a link. */
-  current: idSchema.nullable(),
-  lists: z.array(savedSchema).max(MAX_SAVED),
+  current: z.nullable(idSchema),
+  lists: z.array(savedSchema).check(z.maxLength(MAX_SAVED)),
 });
 export type BringStore = z.infer<typeof bringStoreSchema>;
 

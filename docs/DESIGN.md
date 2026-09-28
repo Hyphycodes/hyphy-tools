@@ -88,14 +88,18 @@ typefaces and tool colors, re-lit on Hyphy Studio's night surface (`#0b0b0a`).
 - **Tools bring the light.** Each tool has an accent and its own artwork
   (`components/marketplace/art.tsx`): a composition of what it makes, on a charcoal stage lit in
   its color. Families rhyme (Gather is warm, Signal electric, Image Lab sunlit, File Lab paper).
-- **Three presentations, never a wall of identical cards.** A tile (artwork first, words beneath,
-  no box), a feature (the artwork is the stage and the words sit in it) and a row (a mark and a
-  line, for the index). Sections vary their compositions: family stages, a two-up money spread,
-  a ticket for drops.
-- **Search is the centerpiece.** “What are you trying to do?” with examples that type themselves,
+- **Beauty that reduces friction.** People come to do something; the marketplace should let
+  them find it in seconds. Two featured moments at most, then compact cards and rows: a phone
+  screen shows eight or more tools. Three presentations: a feature (the artwork is the stage),
+  a card (artwork and a line, two across on a phone) and a row (the tool's mark and a line, like
+  an app listing). No counts, staff picks or stacks of badges.
+- **Search is the centerpiece.** “What do you need to do?” with a rotating example, job chips,
   results as you type, the reason a tool matched, and ⌘K everywhere.
-- **Motion with a job.** Sections reveal once as they arrive, the hero's light drifts slowly,
-  cards lift toward you on hover, opening a tool cross-fades the page. All CSS and the View
-  Transitions API; reduced motion turns every bit of it off.
+- **Plain words first, details second.** A tool page opens into the tool; privacy is one quiet
+  line ("Processed on your device") with the details a tap away. Implementation words (hashes,
+  links after the #, formats) never lead.
+- **Motion with a job, and cheap.** The hero's light drifts slowly, cards lift on hover, pages
+  fade in as they open. CSS transforms and opacity only (no blur filters, no view transitions);
+  reduced motion turns every bit of it off.
 - **Phones first.** The hero, search and filters fit 390px; family rows swipe; tools stack with
   their result first where it matters (QR draws above its controls); touch targets are 44px.

@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as z from 'zod/mini';
 import { csv } from '@/lib/files/download';
 import { allocate, CURRENCIES, formatMoney, minorUnits } from './split';
 
@@ -150,37 +150,37 @@ export function webLink(text: string): string | null {
   }
 }
 
-const id = z.string().min(1).max(24);
-const day = z.string().refine((text) => parseDay(text) !== null, 'Not a calendar day');
+const id = z.string().check(z.minLength(1), z.maxLength(24));
+const day = z.string().check(z.refine((text) => parseDay(text) !== null, 'Not a calendar day'));
 
 export const subscriptionSchema = z.object({
   id,
-  name: z.string().max(80).regex(/\S/),
+  name: z.string().check(z.maxLength(80), z.regex(/\S/)),
   /** What one charge costs, in minor units (cents). */
-  cost: z.number().int().min(0).max(MAX_CENTS),
-  every: z.number().int().min(1).max(MAX_EVERY),
+  cost: z.int().check(z.minimum(0), z.maximum(MAX_CENTS)),
+  every: z.int().check(z.minimum(1), z.maximum(MAX_EVERY)),
   unit: z.enum(UNITS),
   /** The next charge as entered: the anchor every later charge is counted from. */
   next: day,
   category: z.enum(CATEGORY_IDS),
   /** When a free trial turns paid, or ''. */
-  trialEnds: z.string().refine((text) => text === '' || parseDay(text) !== null),
-  notes: z.string().max(500),
+  trialEnds: z.string().check(z.refine((text) => text === '' || parseDay(text) !== null)),
+  notes: z.string().check(z.maxLength(500)),
   /** How to cancel: an http(s) link, or ''. */
-  cancelUrl: z
-    .string()
-    .max(2000)
-    .refine((text) => text === '' || webLink(text) !== null),
+  cancelUrl: z.string().check(
+    z.maxLength(2000),
+    z.refine((text) => text === '' || webLink(text) !== null),
+  ),
   paused: z.boolean(),
   /** Part of the made-up sample list. */
-  sample: z.boolean().optional(),
+  sample: z.optional(z.boolean()),
 });
 export type Subscription = z.infer<typeof subscriptionSchema>;
 
-const items = z
-  .array(subscriptionSchema)
-  .max(MAX_ITEMS)
-  .refine((list) => new Set(list.map((item) => item.id)).size === list.length, 'Repeated id');
+const items = z.array(subscriptionSchema).check(
+  z.maxLength(MAX_ITEMS),
+  z.refine((list) => new Set(list.map((item) => item.id)).size === list.length, 'Repeated id'),
+);
 
 export const SORTS = ['next', 'cost', 'name'] as const;
 export type SortBy = (typeof SORTS)[number];

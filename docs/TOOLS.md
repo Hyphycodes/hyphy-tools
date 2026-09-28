@@ -15,8 +15,8 @@ Everything below is about the public side.
 | Path                            | What                                                                    |
 | ------------------------------- | ----------------------------------------------------------------------- |
 | `/`                             | Redirects to `/tools`                                                   |
-| `/tools`                        | The marketplace: search, filters (`?c=money`), editorial sections       |
-| `/tools/{slug}`                 | One tool: header facts, the tool itself, how it works, privacy, related |
+| `/tools`                        | The marketplace: search, filters (`?c=money`), featured, everyday, rows |
+| `/tools/{slug}`                 | One tool: a slim header, the tool itself, how it works, privacy, next   |
 | `/tools/{slug}/opengraph-image` | The share card for that tool                                            |
 | `/p#…`                          | A published Signal Page (the page rides inside the link)                |
 | `/spaces`                       | Opens Hyphy Spaces (your last Space)                                    |
@@ -99,10 +99,59 @@ bonuses for whole phrases and a penalty for answering only half the question. Ty
 letters) and half-typed words count. When a tool matched through a name people know it by, the
 result says so ("Signal Pages · for “linktree”"). The examples the user gave are tests.
 
+## The marketplace and tool pages
+
+The marketplace answers "I need to do something": search first (with job chips), two featured
+tools (`FEATURED` in `components/marketplace/sections.tsx`, each with the job on its button), an
+Everyday grid of compact cards, then every open tool as an app-style row under what it helps
+with, a one-line privacy note and what's on the way. Three card sizes (`cards.tsx`): feature,
+card, row. No counts, staff picks or badges on the way in; only Beta and Soon are ever tagged.
+
+A tool page is a slim header (mark, name, tagline, one quiet "Processed on your device" line
+that opens the privacy details in a native popover, Share), then the tool, then how it works,
+where data goes, honest limits and "Open next". On a phone the tool starts on the first screen.
+
+## Performance rules
+
+Measured on the production build (iPhone viewport, 4× CPU throttle), these were what made
+browsing slow; keep them out:
+
+- **No `:has()` anchored on `<html>` or `body`.** It makes the browser restyle the whole page
+  after every DOM change (67 ms per change on the marketplace, unthrottled). Put a flag on
+  `<html>` instead: `data-world` (layout), `data-modal` (`useModalLock`), `data-demo-dock`.
+- **Tool links prefetch on intent.** Use `IntentLink` (`components/marketplace/intent-link.tsx`)
+  for links to tools and to the marketplace: it prefetches on touch, hover or focus. Plain
+  `<Link>` prefetches every static page it can see; on the marketplace that was over 1 MB.
+- **No view transitions for page changes**: snapshotting the old page was the slowest part of
+  opening a tool. `PageTransition` is a CSS fade on the new page.
+- **Client schemas use `zod/mini`.** Full `zod` is a 390 KB chunk; `lib/tools/*` schemas ship in
+  tool pages. `useLocalState` and `decodeState` accept either.
+- **Heavy engines load when used**: pdf-lib, PDF.js and the receipt reader are `import()`ed when
+  a file is chosen, never at the top of a module. The marketplace test suite checks this.
+- **Glows are gradients, not blur filters**; animate transforms and opacity only.
+
+## Split reads receipts on the device
+
+Split is receipt first: a photo (camera on phones, a file anywhere) is read by a
+`ReceiptReader` (`lib/tools/receipt-reader.ts`), parsed by `parseReceipt` (`lib/tools/receipt.ts`,
+tested in `tests/lib-receipt.spec.ts`) and shown for review before anything is split. Every
+reader declares `where` the photo goes and a one-line `privacy` sentence, which Split shows by
+the camera button; a reader that uploads must say so, and the tool's registry privacy facts must
+change with it.
+
+The reader today is Tesseract (WebAssembly) running in a worker. Its worker, engine and English
+model are copied from `node_modules` into `public/vendor/ocr` by `scripts/vendor-ocr.mjs` (run
+before `dev` and `build`; ignored by git), so reading a receipt talks to no one else. The first
+scan downloads about 4 MB, cached afterwards. A vision model behind a Hyphy route can replace it
+by returning a `ParsedReceipt` from a new reader in `receiptReader()`.
+
+Split's steps live in the address (`?step=people`), so the back gesture steps back through the
+check; typing items in and splitting evenly stay one tap from the start.
+
 ## Look and motion
 
 The public world is `.world-night` (`src/app/(public)/world.css`): the product's semantic tokens
 re-lit for dark, so tools written against tokens work in both the light Spaces product and the
-dark world. See docs/DESIGN.md. Motion is CSS and the View Transitions API only: reveals once on
-scroll (hidden only after the runtime starts, with a failsafe), a slow ambient drift in the hero,
-hover depth on cards, and nothing when reduced motion is on.
+dark world. See docs/DESIGN.md. Motion is CSS only: a fade as pages open, reveals once on scroll
+(hidden only after the runtime starts, with a failsafe), a slow ambient drift in the hero, hover
+depth on cards, and nothing when reduced motion is on.

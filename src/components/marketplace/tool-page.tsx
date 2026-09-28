@@ -1,10 +1,10 @@
-import Link from 'next/link';
 import type { CSSProperties, ReactNode } from 'react';
 import { cn } from '@/components/ui/cn';
 import { Icon } from '@/components/ui/icon';
 import { isReady, privacyFacts, relatedTo, type Tool } from '@/lib/catalog';
 import { ToolArt } from './art';
 import { ToolRow } from './cards';
+import { IntentLink } from './intent-link';
 import { ShareButton } from './share-button';
 import { ToolMark } from './tool-mark';
 
@@ -80,12 +80,12 @@ export function ToolHeader({ tool }: { tool: Tool }) {
       <div className={cn(wrap, 'grid items-end gap-6 lg:grid-cols-[minmax(0,1fr)_320px]')}>
         <div className="min-w-0 animate-rise">
           <nav aria-label="Breadcrumb" className="mb-3 sm:mb-5">
-            <Link
+            <IntentLink
               href="/tools"
               className="-ml-2 inline-flex h-9 items-center gap-1 rounded-full px-2 text-[14px] text-muted transition-colors hover:text-ink"
             >
               <Icon name="chevron-left" size={16} /> All tools
-            </Link>
+            </IntentLink>
           </nav>
           <div className="flex items-center gap-3.5 sm:gap-5">
             <ToolMark tool={tool} size="xl" className="max-sm:!size-12 max-sm:!rounded-[14px]" />

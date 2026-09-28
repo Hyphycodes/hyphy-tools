@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as z from 'zod/mini';
 
 /*
  * Signal Pages: a link-in-bio page that travels inside its own link. The page is validated like
@@ -121,7 +121,7 @@ export const NETWORKS = {
 export type NetworkId = keyof typeof NETWORKS;
 export const NETWORK_IDS = Object.keys(NETWORKS) as NetworkId[];
 
-const text = (max: number) => z.string().max(max);
+const text = (max: number) => z.string().check(z.maxLength(max));
 
 export const signalPageSchema = z.object({
   v: z.literal(1),
@@ -130,13 +130,19 @@ export const signalPageSchema = z.object({
   bio: text(160),
   design: z.enum(DESIGN_IDS as [DesignId, ...DesignId[]]),
   links: z
-    .array(z.object({ id: z.string().min(1).max(16), label: text(60), url: text(800) }))
-    .max(12),
+    .array(
+      z.object({
+        id: z.string().check(z.minLength(1), z.maxLength(16)),
+        label: text(60),
+        url: text(800),
+      }),
+    )
+    .check(z.maxLength(12)),
   socials: z
     .array(
       z.object({ network: z.enum(NETWORK_IDS as [NetworkId, ...NetworkId[]]), value: text(200) }),
     )
-    .max(8),
+    .check(z.maxLength(8)),
 });
 export type SignalPage = z.infer<typeof signalPageSchema>;
 

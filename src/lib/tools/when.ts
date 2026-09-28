@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as z from 'zod/mini';
 
 /*
  * When?: a group availability plan that lives entirely inside its link. A plan fixes its days,
@@ -177,22 +177,19 @@ export function formatDuration(minutes: number) {
 const printable = (text: string) =>
   !Array.from(text).some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127);
 
-const planId = z.string().regex(/^[a-z0-9]{6,16}$/);
-const personId = z.string().regex(/^[a-z0-9]{4,16}$/);
-const day = z
-  .string()
-  .regex(/^20\d\d-\d\d-\d\d$/)
-  .refine(isDay, 'Not a calendar day');
+const planId = z.string().check(z.regex(/^[a-z0-9]{6,16}$/));
+const personId = z.string().check(z.regex(/^[a-z0-9]{4,16}$/));
+const day = z.string().check(z.regex(/^20\d\d-\d\d-\d\d$/), z.refine(isDay, 'Not a calendar day'));
 /** An IANA name such as 'America/Chicago', 'Europe/London' or 'UTC'. */
 const TIME_ZONE = /^[A-Za-z][A-Za-z0-9_+-]*(\/[A-Za-z0-9_+-]+){0,2}$/;
 
 export const whenPersonSchema = z.object({
   id: personId,
-  name: z.string().trim().min(1).max(40).refine(printable),
+  name: z.string().check(z.trim(), z.minLength(1), z.maxLength(40), z.refine(printable)),
   /** Their free cells, packed (see packCells). */
-  times: z.string().max(112),
+  times: z.string().check(z.maxLength(112)),
   /** When they last saved, in ms: the later copy wins when two links are combined. */
-  updated: z.number().int().min(0).max(4_102_444_800_000),
+  updated: z.int().check(z.minimum(0), z.maximum(4_102_444_800_000)),
 });
 export type WhenPerson = z.infer<typeof whenPersonSchema>;
 
@@ -200,40 +197,42 @@ export const whenPlanSchema = z
   .object({
     v: z.literal(1),
     id: planId,
-    title: z.string().max(80).refine(printable),
-    tz: z.string().max(64).regex(TIME_ZONE),
-    days: z.array(day).min(1).max(MAX_DAYS),
+    title: z.string().check(z.maxLength(80), z.refine(printable)),
+    tz: z.string().check(z.maxLength(64), z.regex(TIME_ZONE)),
+    days: z.array(day).check(z.minLength(1), z.maxLength(MAX_DAYS)),
     /** Whole hours: 9 and 22 mean 9 AM to 10 PM, and 24 is midnight. */
-    start: z.number().int().min(0).max(23),
-    end: z.number().int().min(1).max(24),
+    start: z.int().check(z.minimum(0), z.maximum(23)),
+    end: z.int().check(z.minimum(1), z.maximum(24)),
     slot: z.union([z.literal(30), z.literal(60)]),
-    people: z.array(whenPersonSchema).max(MAX_PEOPLE),
+    people: z.array(whenPersonSchema).check(z.maxLength(MAX_PEOPLE)),
   })
-  .superRefine((plan, context) => {
-    const fail = (message: string, path: PropertyKey[]) =>
-      context.addIssue({ code: 'custom', message, path });
-    if (plan.end <= plan.start) fail('The hours end before they start', ['end']);
-    plan.days.forEach((value, index) => {
-      if (index && value <= plan.days[index - 1]) fail('Days go in order, once each', ['days']);
-    });
-    const seen = new Set<string>();
-    const cells = plan.end > plan.start ? cellCount(plan) : 0;
-    plan.people.forEach((person, index) => {
-      if (seen.has(person.id)) fail('Someone is in the plan twice', ['people', index, 'id']);
-      seen.add(person.id);
-      if (!cells || !unpackCells(person.times, cells))
-        fail('These times don’t fit this plan', ['people', index, 'times']);
-    });
-  });
+  .check(
+    z.superRefine((plan, context) => {
+      const fail = (message: string, path: PropertyKey[]) =>
+        context.addIssue({ code: 'custom', message, path });
+      if (plan.end <= plan.start) fail('The hours end before they start', ['end']);
+      plan.days.forEach((value, index) => {
+        if (index && value <= plan.days[index - 1]) fail('Days go in order, once each', ['days']);
+      });
+      const seen = new Set<string>();
+      const cells = plan.end > plan.start ? cellCount(plan) : 0;
+      plan.people.forEach((person, index) => {
+        if (seen.has(person.id)) fail('Someone is in the plan twice', ['people', index, 'id']);
+        seen.add(person.id);
+        if (!cells || !unpackCells(person.times, cells))
+          fail('These times don’t fit this plan', ['people', index, 'times']);
+      });
+    }),
+  );
 export type WhenPlan = z.infer<typeof whenPlanSchema>;
 
 /** What this device keeps of a plan: the plan, and which person in it is the one using it. */
 export const whenSavedSchema = z.object({
   v: z.literal(1),
   plan: whenPlanSchema,
-  me: personId.nullable(),
+  me: z.nullable(personId),
   /** When this device last saved it (ms), so recent plans list first. */
-  saved: z.number().int().min(0),
+  saved: z.int().check(z.minimum(0)),
 });
 export type WhenSaved = z.infer<typeof whenSavedSchema>;
 
