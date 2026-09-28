@@ -90,58 +90,72 @@ async function prepare(photo: Blob): Promise<HTMLCanvasElement> {
 type Line = { text: string; confidence: number };
 type Block = { paragraphs?: { lines?: Line[] }[] };
 
+/**
+ * The text on a receipt photo, line by line, read on this device (Tesseract in a worker). Split
+ * turns the lines into a bill; Receipts also looks in them for the date and how it was paid.
+ */
+export async function readReceiptLines(
+  photo: Blob,
+  {
+    onProgress,
+    signal,
+  }: { onProgress?: (progress: ReadProgress) => void; signal?: AbortSignal } = {},
+): Promise<ReceiptLine[]> {
+  const abort = () => {
+    if (signal?.aborted) throw new DOMException('Stopped', 'AbortError');
+  };
+  onProgress?.({ stage: 'preparing', progress: 0 });
+  const canvas = await prepare(photo);
+  abort();
+
+  const { createWorker, PSM } = await import('tesseract.js');
+  abort();
+  const vendor = `${window.location.origin}${BASE_PATH}/vendor/ocr`;
+  const worker = await createWorker('eng', 1, {
+    workerPath: `${vendor}/worker.min.js`,
+    corePath: vendor,
+    langPath: vendor,
+    gzip: true,
+    logger: (message: { status: string; progress: number }) => {
+      if (message.status === 'recognizing text')
+        onProgress?.({ stage: 'reading', progress: message.progress });
+      else if (/loading|initializ/.test(message.status))
+        onProgress?.({ stage: 'loading', progress: message.progress });
+    },
+  });
+  const stop = () => void worker.terminate();
+  signal?.addEventListener('abort', stop, { once: true });
+  try {
+    abort();
+    await worker.setParameters({
+      // One block of rows: keeps each item's name and its price (far right) on the same line.
+      tessedit_pageseg_mode: PSM.SINGLE_BLOCK,
+      preserve_interword_spaces: '1',
+    });
+    const { data } = await worker.recognize(canvas, {}, { text: true, blocks: true });
+    abort();
+    const blocks = (data.blocks ?? []) as Block[];
+    const lines: ReceiptLine[] = blocks.flatMap((block) =>
+      (block.paragraphs ?? []).flatMap((paragraph) =>
+        (paragraph.lines ?? []).map((line) => ({
+          text: line.text,
+          confidence: line.confidence,
+        })),
+      ),
+    );
+    return lines.length ? lines : data.text.split('\n').map((text) => ({ text }));
+  } finally {
+    signal?.removeEventListener('abort', stop);
+    stop();
+  }
+}
+
 const deviceReader: ReceiptReader = {
   id: 'device',
   where: 'device',
   privacy: 'Read right here on your device. The photo never leaves it.',
-  async read(photo, { onProgress, signal } = {}) {
-    const abort = () => {
-      if (signal?.aborted) throw new DOMException('Stopped', 'AbortError');
-    };
-    onProgress?.({ stage: 'preparing', progress: 0 });
-    const canvas = await prepare(photo);
-    abort();
-
-    const { createWorker, PSM } = await import('tesseract.js');
-    abort();
-    const vendor = `${window.location.origin}${BASE_PATH}/vendor/ocr`;
-    const worker = await createWorker('eng', 1, {
-      workerPath: `${vendor}/worker.min.js`,
-      corePath: vendor,
-      langPath: vendor,
-      gzip: true,
-      logger: (message: { status: string; progress: number }) => {
-        if (message.status === 'recognizing text')
-          onProgress?.({ stage: 'reading', progress: message.progress });
-        else if (/loading|initializ/.test(message.status))
-          onProgress?.({ stage: 'loading', progress: message.progress });
-      },
-    });
-    const stop = () => void worker.terminate();
-    signal?.addEventListener('abort', stop, { once: true });
-    try {
-      abort();
-      await worker.setParameters({
-        // One block of rows: keeps each item's name and its price (far right) on the same line.
-        tessedit_pageseg_mode: PSM.SINGLE_BLOCK,
-        preserve_interword_spaces: '1',
-      });
-      const { data } = await worker.recognize(canvas, {}, { text: true, blocks: true });
-      abort();
-      const blocks = (data.blocks ?? []) as Block[];
-      const lines: ReceiptLine[] = blocks.flatMap((block) =>
-        (block.paragraphs ?? []).flatMap((paragraph) =>
-          (paragraph.lines ?? []).map((line) => ({
-            text: line.text,
-            confidence: line.confidence,
-          })),
-        ),
-      );
-      return parseReceipt(lines.length ? lines : data.text.split('\n'));
-    } finally {
-      signal?.removeEventListener('abort', stop);
-      stop();
-    }
+  async read(photo, options = {}) {
+    return parseReceipt(await readReceiptLines(photo, options));
   },
 };
 

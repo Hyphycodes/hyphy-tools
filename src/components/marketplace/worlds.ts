@@ -152,7 +152,23 @@ export const worlds: Record<ToolId, World> = {
     action: 'Add up my subscriptions',
     journey: ['Pick what you pay for', 'See the real cost', 'Plan what to cut'],
   },
-  receipts: later('#b8f35a', 'receipt', 'practical'),
+  // Warm receipt paper on a quiet ledger: emerald and charcoal.
+  receipts: {
+    surface: 'light',
+    canvas: '#ecebe3',
+    paper: '#fffdf7',
+    ink: '#1d2420',
+    accentInk: '#146b45',
+    glow: '#e9d8a6',
+    third: '#9bb8a6',
+    pattern: 'columns',
+    object: 'receipt',
+    motion: 'paper',
+    payoff: 'count',
+    mood: 'practical',
+    action: 'Scan a receipt',
+    journey: ['Take a photo', 'Check it', 'Filed'],
+  },
   mileage: later('#8f9bff', 'ledger', 'practical'),
   // Sunrise: peach and warm cream, light calendar surfaces.
   when: {

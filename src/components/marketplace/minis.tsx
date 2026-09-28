@@ -1420,7 +1420,87 @@ const minis: Record<ToolId, Draw | null> = {
       </>
     );
   },
-  receipts: null,
+  receipts: (w, a) => (
+    <>
+      <g transform="rotate(-5 120 150)">
+        <Shadow x={52} y={34} w={128} h={214} r={4} ink={w.ink} />
+        <path
+          d="M52 38h128v200l-8 7-8-7-8 7-8-7-8 7-8-7-8 7-8-7-8 7-8-7-8 7-8-7-8 7-8-7-8 7-8-7Z"
+          fill={w.paper}
+        />
+        <rect x="80" y="56" width="72" height="8" rx="4" fill={w.ink} opacity=".75" />
+        <Bars x={68} y={82} widths={[52, 40, 60, 34, 46]} gap={16} fill={w.ink} h={5} />
+        {[82, 98, 114, 130, 146].map((y) => (
+          <rect key={y} x="142" y={y} width="24" height="5" rx="2.5" fill={w.ink} opacity=".25" />
+        ))}
+        <path d="M66 172h100" stroke={w.ink} strokeOpacity=".3" strokeDasharray="3 3" />
+        <text x="68" y="196" fontSize="10" fontWeight="700" fill={w.ink} style={mono}>
+          TOTAL
+        </text>
+        <text
+          x="166"
+          y="196"
+          textAnchor="end"
+          fontSize="10"
+          fontWeight="700"
+          fill={w.ink}
+          style={mono}
+        >
+          48.72
+        </text>
+        <rect x="46" y="132" width="140" height="4" rx="2" fill={a} />
+        <rect x="46" y="108" width="140" height="28" fill={a} opacity=".16" />
+      </g>
+      <path
+        d="M196 150h34"
+        stroke={w.ink}
+        strokeOpacity=".35"
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
+      <path
+        d="M224 142l9 8-9 8"
+        fill="none"
+        stroke={w.ink}
+        strokeOpacity=".35"
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
+      <g>
+        <Shadow x={244} y={92} w={130} h={116} r={18} ink={w.ink} />
+        <rect x="244" y="92" width="130" height="116" rx="18" fill={w.paper} />
+        <rect x="258" y="106" width="30" height="30" rx="9" fill="#d98b3a" />
+        <path
+          d="M266 128l10-10m-2-4 6 6-3 3-6-6Z"
+          stroke="#fff"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          fill="none"
+        />
+        <text x="296" y="118" fontSize="11" fontWeight="700" fill={w.ink} style={sans}>
+          Home Depot
+        </text>
+        <text x="296" y="132" fontSize="9" fill={w.ink} opacity=".6" style={sans}>
+          Materials · Sep 28
+        </text>
+        <text x="258" y="176" fontSize="26" fontWeight="800" fill={w.ink} style={display}>
+          $48.72
+        </text>
+        <rect x="258" y="186" width="58" height="12" rx="6" fill={a} />
+        <text
+          x="287"
+          y="195"
+          textAnchor="middle"
+          fontSize="7.5"
+          fontWeight="800"
+          fill="#fff"
+          style={sans}
+        >
+          FILED
+        </text>
+      </g>
+    </>
+  ),
   mileage: null,
 };
 

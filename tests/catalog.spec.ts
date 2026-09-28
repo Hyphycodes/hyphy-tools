@@ -62,10 +62,18 @@ test.describe('the tool registry', () => {
     expect(when.label).toContain('shared by link');
     expect(when.lines.join(' ')).toContain('never send to a server');
 
+    // A tool that works on a server with an account never claims the device.
+    const server = privacyFacts({
+      privacy: { processing: 'server', storage: ['account'] },
+    });
+    expect(server.local).toBe(false);
+    expect(server.lines.join(' ')).not.toContain('never uploaded');
+    expect(server.lines.join(' ')).toContain('doesn’t sell your personal data');
+
+    // Receipts reads photos on the device and keeps them in this browser.
     const receipts = privacyFacts(getTool('receipts'));
-    expect(receipts.local).toBe(false);
-    expect(receipts.lines.join(' ')).not.toContain('never uploaded');
-    expect(receipts.lines.join(' ')).toContain('doesn’t sell your personal data');
+    expect(receipts.local).toBe(true);
+    expect(receipts.lines.join(' ')).not.toContain('Nothing is kept');
 
     // A tool that keeps things in the browser never claims that nothing is kept.
     for (const tool of listedTools) {
