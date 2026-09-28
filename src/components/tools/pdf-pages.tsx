@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useId, useRef, useState } from 'react';
+import { useOptionalWorkspace } from '@/components/shell/workspace-context';
 import { cn } from '@/components/ui/cn';
 import { Icon } from '@/components/ui/icon';
 import { download } from '@/lib/files/download';
@@ -7,7 +8,7 @@ import { zip } from '@/lib/files/zip';
 import { formatBytes, plural } from '@/lib/platform/format';
 import { everyParts, formatRange, parseParts } from '@/lib/tools/pdf';
 import type { PdfPreview } from '@/lib/tools/pdf-preview';
-import { FileDrop, IconButton, Note } from './kit';
+import { ActionBar, ActionButton, FileDrop, IconButton, Note, SampleButton } from './kit';
 
 /*
  * Organize and Split: one PDF at a time, every page shown as it looks. Organize puts pages in a
@@ -156,14 +157,13 @@ function Start({
         multiple={false}
         accept=".pdf,application/pdf"
         icon="pdf"
-        accent="#ff6a3d"
+        accent="var(--accent)"
         title={reading ? 'Reading…' : `Choose a PDF to ${verb}`}
         hint={hint}
         disabled={reading}
         onFiles={([file]) => file && onFile(file)}
       />
-      <button
-        type="button"
+      <SampleButton
         disabled={sampling || reading}
         onClick={async () => {
           setSampling(true);
@@ -175,10 +175,9 @@ function Start({
             setSampling(false);
           }
         }}
-        className="mx-auto flex min-h-11 items-center gap-1.5 rounded-full px-4 text-[14px] font-medium text-signal-ink transition-colors hover:bg-signal-soft disabled:opacity-50"
       >
-        <Icon name="sparkles" size={15} /> Try a 7-page sample
-      </button>
+        Try a 7-page sample
+      </SampleButton>
       {error && (
         <Note icon="alert" tone="caution">
           {error}
@@ -201,8 +200,8 @@ function Result({
   if (!outputs.length) return null;
   const total = outputs.reduce((sum, output) => sum + output.blob.size, 0);
   return (
-    <div className="grid animate-rise gap-3 rounded-[18px] bg-[#ff6a3d]/12 p-4 shadow-[inset_0_0_0_1px_rgb(255_106_61/.25)]">
-      <p className="text-[14.5px] font-semibold text-ink">
+    <div className="grid animate-rise gap-3 rounded-[20px] bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] p-4 shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--accent)_35%,transparent)] sm:p-5">
+      <p className="font-display text-[20px] font-bold tracking-[-0.02em] text-ink">
         {outputs.length === 1 ? 'Your PDF is ready' : `${outputs.length} PDFs are ready`}
         <span className="ml-2 text-[12.5px] font-normal text-muted">{formatBytes(total)}</span>
       </p>
@@ -212,7 +211,7 @@ function Result({
             key={output.url}
             className="flex items-center gap-3 rounded-[12px] bg-surface px-3 py-2 shadow-card"
           >
-            <Icon name="pdf" size={17} className="shrink-0 text-[#ff6a3d]" />
+            <Icon name="pdf" size={17} className="shrink-0 text-[var(--accent)]" />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[14px] font-medium text-ink">{output.name}</span>
               <span className="block text-[12px] text-muted">
@@ -246,24 +245,24 @@ function Result({
                 setZipping(false);
               }
             }}
-            className="inline-flex h-11 items-center gap-2 rounded-[12px] bg-ink px-4 text-[15px] font-semibold text-on-ink disabled:opacity-50 lg:h-10 lg:text-[14px]"
+            className="inline-flex h-14 flex-1 items-center justify-center gap-2 rounded-[16px] bg-[var(--accent)] px-5 text-[16.5px] font-semibold text-[#12110d] shadow-[0_14px_32px_-16px_var(--accent)] transition-transform active:scale-[.985] disabled:opacity-50 sm:h-13 sm:text-[16px]"
           >
-            <Icon name="download" size={16} /> {zipping ? 'Zipping…' : `Download all (.zip)`}
+            <Icon name="download" size={19} /> {zipping ? 'Zipping…' : `Download all (.zip)`}
           </button>
         )}
         {outputs.length === 1 && (
           <a
             href={outputs[0].url}
             download={outputs[0].name}
-            className="inline-flex h-11 items-center gap-2 rounded-[12px] bg-ink px-4 text-[15px] font-semibold text-on-ink lg:h-10 lg:text-[14px]"
+            className="inline-flex h-14 flex-1 items-center justify-center gap-2 rounded-[16px] bg-[var(--accent)] px-5 text-[16.5px] font-semibold text-[#12110d] shadow-[0_14px_32px_-16px_var(--accent)] transition-transform active:scale-[.985] disabled:opacity-50 sm:h-13 sm:text-[16px]"
           >
-            <Icon name="download" size={16} /> Download PDF
+            <Icon name="download" size={19} /> Download PDF
           </a>
         )}
         <button
           type="button"
           onClick={onClear}
-          className="inline-flex h-11 items-center rounded-[12px] px-3 text-[14px] text-muted hover:bg-ink/5 hover:text-ink lg:h-10"
+          className="inline-flex h-14 items-center rounded-[16px] px-4 text-[14.5px] font-medium text-ink-2 hover:bg-ink/5 hover:text-ink sm:h-13"
         >
           Make changes
         </button>
@@ -300,7 +299,9 @@ async function loadSource(file: File) {
 const upright = (count: number): Page[] =>
   Array.from({ length: count }, (_, index) => ({ index, rotation: 0, removed: false }));
 
-export function PdfOrganize() {
+export function PdfOrganize({ onStarted }: { onStarted?: (started: boolean) => void }) {
+  // Inside a Space the tab bar holds the bottom of a phone screen: the action stays in place.
+  const workspace = useOptionalWorkspace();
   const { outputs, replace } = useOutputs();
   const [pages, setPages] = useState<Page[]>([]);
   const [busy, setBusy] = useState(false);
@@ -312,6 +313,8 @@ export function PdfOrganize() {
     replace([]);
     setMessage('');
   });
+  const started = pdf.loaded !== null;
+  useEffect(() => onStarted?.(started), [started, onStarted]);
 
   const change = (next: Page[]) => {
     setPages(next);
@@ -375,7 +378,7 @@ export function PdfOrganize() {
   return (
     <div className="grid gap-4">
       <div className="flex flex-wrap items-center gap-3 rounded-[14px] bg-subtle p-2.5 shadow-[inset_0_0_0_1px_var(--color-line)]">
-        <Icon name="pdf" size={18} className="ml-1 text-[#ff6a3d]" />
+        <Icon name="pdf" size={18} className="ml-1 text-[var(--accent)]" />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[14px] font-medium text-ink">
             {pdf.loaded.file.name}
@@ -422,7 +425,7 @@ export function PdfOrganize() {
             className={cn(
               'group rounded-[16px] p-2 transition-colors',
               dragging === position
-                ? 'bg-signal-soft'
+                ? 'bg-[color-mix(in_srgb,var(--accent)_16%,transparent)]'
                 : 'bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)]',
             )}
           >
@@ -501,25 +504,26 @@ export function PdfOrganize() {
           </li>
         ))}
       </ol>
-      <div className="flex flex-wrap items-center gap-2 border-t border-line pt-4">
-        <button
-          type="button"
-          onClick={save}
-          disabled={busy || !kept.length || !changed}
-          className="inline-flex h-11 items-center gap-2 rounded-[12px] bg-ink px-4 text-[15px] font-semibold text-on-ink disabled:opacity-40 lg:h-10 lg:text-[14px]"
-        >
-          {busy ? 'Working…' : `Make the new PDF · ${plural(kept.length, 'page')}`}
-        </button>
+      <div className="grid gap-2 border-t border-line pt-4">
+        <ActionBar className={cn('!mt-0', workspace && '!static !mx-0 !bg-none !px-0 !pt-0 !pb-0')}>
+          <ActionButton
+            onClick={save}
+            disabled={busy || !kept.length || !changed}
+            icon="file-stack"
+          >
+            {busy ? 'Working…' : `Make the new PDF · ${plural(kept.length, 'page')}`}
+          </ActionButton>
+        </ActionBar>
         {changed && (
           <button
             type="button"
             onClick={() => change(upright(pages.length))}
-            className="inline-flex h-11 items-center rounded-[12px] px-3 text-[14px] text-muted hover:bg-ink/5 hover:text-ink lg:h-10"
+            className="mx-auto inline-flex h-11 items-center rounded-[12px] px-3 text-[14px] text-muted hover:bg-ink/5 hover:text-ink lg:h-10"
           >
             Undo all changes
           </button>
         )}
-        <p role="status" className="text-[13px] text-muted">
+        <p role="status" className="text-center text-[13px] text-muted">
           {message ||
             (!changed
               ? 'Reorder, turn or remove a page to begin.'
@@ -539,9 +543,12 @@ export function PdfOrganize() {
 
 /* ---------------- Split ---------------- */
 
-export function PdfSplit() {
+export function PdfSplit({ onStarted }: { onStarted?: (started: boolean) => void }) {
+  const workspace = useOptionalWorkspace();
   const id = useId();
   const pdf = usePdf();
+  const started = pdf.loaded !== null;
+  useEffect(() => onStarted?.(started), [started, onStarted]);
   const { outputs, replace } = useOutputs();
   const [how, setHow] = useState<'every' | 'ranges'>('every');
   const [size, setSize] = useState(1);
@@ -599,7 +606,7 @@ export function PdfSplit() {
   return (
     <div className="grid gap-4">
       <div className="flex flex-wrap items-center gap-3 rounded-[14px] bg-subtle p-2.5 shadow-[inset_0_0_0_1px_var(--color-line)]">
-        <Icon name="pdf" size={18} className="ml-1 text-[#ff6a3d]" />
+        <Icon name="pdf" size={18} className="ml-1 text-[var(--accent)]" />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[14px] font-medium text-ink">
             {pdf.loaded.file.name}
@@ -639,7 +646,7 @@ export function PdfSplit() {
             className={cn(
               'rounded-[14px] p-3.5 text-left transition-colors',
               how === value
-                ? 'bg-surface shadow-[inset_0_0_0_1.5px_var(--color-ink)]'
+                ? 'bg-[color-mix(in_srgb,var(--accent)_13%,transparent)] shadow-[inset_0_0_0_2px_var(--accent)]'
                 : 'bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)] hover:bg-well',
             )}
           >
@@ -650,25 +657,11 @@ export function PdfSplit() {
       </div>
 
       {how === 'every' ? (
-        <label
-          htmlFor={`${id}-size`}
-          className="flex flex-wrap items-center gap-3 text-[14px] text-ink-2"
-        >
-          Pages in each file
-          <input
-            id={`${id}-size`}
-            type="number"
-            inputMode="numeric"
-            min={1}
-            max={total}
-            value={size}
-            onChange={(event) => {
-              setSize(Math.min(total, Math.max(1, Number(event.target.value) || 1)));
-              replace([]);
-            }}
-            className="num h-11 w-24 rounded-[11px] bg-subtle px-3 text-[16px] text-ink shadow-[inset_0_0_0_1px_var(--color-line-strong)] outline-none focus:shadow-[inset_0_0_0_1.5px_var(--color-signal)] lg:h-10 lg:text-[14.5px]"
-          />
-          <span className="flex gap-1.5">
+        <div className="grid gap-2">
+          <label htmlFor={`${id}-size`} className="text-[13.5px] font-medium text-ink-2">
+            Pages in each file
+          </label>
+          <div className="flex flex-wrap items-center gap-1.5">
             {[1, 2, 5, 10]
               .filter((option) => option < total)
               .map((option) => (
@@ -681,15 +674,31 @@ export function PdfSplit() {
                     replace([]);
                   }}
                   className={cn(
-                    'h-11 rounded-full px-3.5 text-[13.5px] transition-colors lg:h-9 lg:px-3 lg:text-[13px]',
-                    size === option ? 'bg-ink text-on-ink' : 'bg-well text-ink-2 hover:bg-ink/10',
+                    'h-11 rounded-full px-4 text-[14px] transition-colors lg:h-9 lg:px-3.5 lg:text-[13.5px]',
+                    size === option
+                      ? 'bg-[var(--accent)] font-medium text-[#12110d]'
+                      : 'bg-well text-ink-2 hover:bg-ink/10',
                   )}
                 >
-                  {option === 1 ? 'Every page' : option}
+                  {option === 1 ? 'Every page' : `${option} pages`}
                 </button>
               ))}
-          </span>
-        </label>
+            <input
+              id={`${id}-size`}
+              type="number"
+              inputMode="numeric"
+              enterKeyHint="done"
+              min={1}
+              max={total}
+              value={size}
+              onChange={(event) => {
+                setSize(Math.min(total, Math.max(1, Number(event.target.value) || 1)));
+                replace([]);
+              }}
+              className="num h-11 w-20 rounded-full bg-subtle px-4 text-[16px] text-ink shadow-[inset_0_0_0_1px_var(--color-line-strong)] outline-none focus:shadow-[inset_0_0_0_1.5px_var(--accent)] lg:h-9 lg:text-[14px]"
+            />
+          </div>
+        </div>
       ) : (
         <div className="grid gap-1.5">
           <label htmlFor={`${id}-ranges`} className="text-[13.5px] font-medium text-ink-2">
@@ -738,20 +747,21 @@ export function PdfSplit() {
         </ol>
       )}
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-line pt-4">
-        <button
-          type="button"
-          onClick={save}
-          disabled={busy || !parts?.length || (parts.length === 1 && parts[0].length === total)}
-          className="inline-flex h-11 items-center gap-2 rounded-[12px] bg-ink px-4 text-[15px] font-semibold text-on-ink disabled:opacity-40 lg:h-10 lg:text-[14px]"
-        >
-          {busy
-            ? 'Splitting…'
-            : parts?.length
-              ? `Split into ${plural(parts.length, 'file')}`
-              : 'Split'}
-        </button>
-        <p role="status" className="text-[13px] text-muted">
+      <div className="grid gap-2 border-t border-line pt-4">
+        <ActionBar className={cn('!mt-0', workspace && '!static !mx-0 !bg-none !px-0 !pt-0 !pb-0')}>
+          <ActionButton
+            onClick={save}
+            disabled={busy || !parts?.length || (parts.length === 1 && parts[0].length === total)}
+            icon="scissors"
+          >
+            {busy
+              ? 'Splitting…'
+              : parts?.length
+                ? `Split into ${plural(parts.length, 'file')}`
+                : 'Split'}
+          </ActionButton>
+        </ActionBar>
+        <p role="status" className="text-center text-[13px] text-muted">
           {message ||
             (how === 'ranges' && ranges.trim() && !parts
               ? `Use pages from 1 to ${total}, like 1-3, 5.`

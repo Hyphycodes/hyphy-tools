@@ -27,7 +27,16 @@ import {
   type Rule,
   type RuleType,
 } from '@/lib/tools/rename';
-import { CopyButton, FileDrop, IconButton, Label, Note, Surface } from './kit';
+import {
+  CopyButton,
+  FileDrop,
+  IconButton,
+  Label,
+  Note,
+  SampleButton,
+  StartPanel,
+  Surface,
+} from './kit';
 
 /*
  * Clean: a stack of renaming rules over the files a person chooses, with every new name previewed
@@ -35,7 +44,7 @@ import { CopyButton, FileDrop, IconButton, Label, Note, Surface } from './kit';
  * copies in a zip (plus a CSV of old → new). The files are only ever read on this device.
  */
 
-const ACCENT = '#c7b5ff';
+const ACCENT = 'var(--accent, #c7b5ff)';
 /** Rows shown before "Show all": enough to check, light enough to stay quick. */
 const SHOWN = 200;
 
@@ -98,6 +107,49 @@ const EXAMPLES = [
   ['Party 🎉 invite FINAL.pdf', 'party-invite-final.pdf'],
   ['notes   from  rosa .TXT', 'notes-from-rosa.txt'],
 ].map(([before, after]) => ({ key: before, ...diffNames(before, after) }));
+
+/** Messy names in, tidy names out: the whole tool, as a picture. */
+function CleanArt() {
+  return (
+    <ol aria-label="For example" className="grid gap-2 text-left">
+      {EXAMPLES.map((example, index) => (
+        <li
+          key={example.key}
+          className={cn(
+            'flex min-w-0 animate-rise items-center gap-2.5 rounded-[14px] bg-well/70 px-2.5 py-2 shadow-[inset_0_0_0_1px_var(--color-line)] sm:gap-3 sm:px-3.5 sm:py-2.5',
+            // Two say it on a phone; the third waits for a wider screen.
+            index === 2 && 'max-sm:hidden',
+          )}
+          style={{ animationDelay: `${index * 70}ms` }}
+        >
+          <span
+            aria-hidden="true"
+            className="grid size-8 shrink-0 place-items-center rounded-[9px] text-[#12110d]"
+            style={{ background: ACCENT }}
+          >
+            <Icon name={index === 0 ? 'image' : 'file-text'} size={16} />
+          </span>
+          <span className="grid min-w-0 flex-1 gap-0.5">
+            <span className="truncate text-[12.5px] text-muted line-through decoration-faint/70">
+              {example.before.map((part) => part.text).join('')}
+            </span>
+            <span className="truncate text-[14px] font-medium text-ink">
+              {example.after.map((part, position) =>
+                part.changed ? (
+                  <span key={position} style={{ color: ACCENT }}>
+                    {part.text}
+                  </span>
+                ) : (
+                  <span key={position}>{part.text}</span>
+                ),
+              )}
+            </span>
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
 
 /** A small shoot's worth of messy names, made on this device: real images and notes. */
 const SAMPLES: { path: string; modified: string; color?: string }[] = [
@@ -219,8 +271,9 @@ function summary(rule: Rule, error?: string) {
 export function CleanTool() {
   const id = useId();
   const [items, setItems] = useState<Item[]>([]);
-  const [rules, setRules] = useState<Rule[]>(START_RULES);
-  const [open, setOpen] = useState<string[]>([START_RULES[0].id]);
+  // No rules until one is picked: a rule's settings show only once it's added.
+  const [rules, setRules] = useState<Rule[]>([]);
+  const [open, setOpen] = useState<string[]>([]);
   const [undo, setUndo] = useState<Rule[] | null>(null);
   const [keepFolders, setKeepFolders] = useState(true);
   const [filter, setFilter] = useState<'all' | 'changed' | 'attention'>('all');
@@ -319,7 +372,7 @@ export function CleanTool() {
       const samples = await sampleFiles();
       setItems(samples.map((sample) => ({ id: nextItem.current++, ...sample })));
       // A fresh stack does nothing yet: start the sample off with a preset, to show the idea.
-      if (JSON.stringify(rules) === JSON.stringify(START_RULES)) {
+      if (!rules.length || JSON.stringify(rules) === JSON.stringify(START_RULES)) {
         setRules(presetRules('web'));
         setOpen([]);
         setNote(
@@ -340,6 +393,12 @@ export function CleanTool() {
     setRules((current) => [...current, rule]);
     setOpen((current) => [...current, rule.id]);
     setUndo(null);
+  };
+  /** A rule chip: tap to add it (its settings open), tap again to take it out. */
+  const toggleRule = (type: RuleType) => {
+    if (!rules.some((rule) => rule.type === type)) return addRule(type);
+    setUndo(rules);
+    setRules((current) => current.filter((rule) => rule.type !== type));
   };
   const moveRule = (index: number, by: -1 | 1) =>
     setRules((current) => {
@@ -397,66 +456,73 @@ export function CleanTool() {
     }
   }
 
+  if (!items.length)
+    return (
+      <StartPanel
+        art={<CleanArt />}
+        title="Tidy up messy file names"
+        lead="Pick the rules, see every new name before anything happens, then download renamed copies."
+        footer="Your originals stay exactly as they are. Nothing is uploaded."
+      >
+        <FileDrop
+          folder
+          onFiles={add}
+          disabled={busy}
+          icon="replace"
+          accent={ACCENT}
+          compact
+          title="Choose the files to rename"
+          hint="Or a whole folder: up to 1,000 files."
+        />
+        <SampleButton onClick={trySample} disabled={busy} className="mt-2">
+          No files handy? Try a messy sample
+        </SampleButton>
+        {note && (
+          <p role="status" className="mt-2 text-[13px] leading-relaxed text-ink-2">
+            {note}
+          </p>
+        )}
+      </StartPanel>
+    );
+
   return (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:items-start">
       <Surface className="grid grid-cols-1 gap-4 lg:col-start-1 lg:row-start-1">
-        {items.length === 0 ? (
-          <>
-            <FileDrop
-              folder
-              onFiles={add}
-              disabled={busy}
-              icon="replace"
-              accent={ACCENT}
-              title="Choose the files to rename"
-              hint="You get renamed copies to download. Your originals stay as they are."
-            />
+        <>
+          <div className="flex items-center gap-3">
+            <span
+              className="grid size-11 shrink-0 place-items-center rounded-[12px] text-[#12110d]"
+              style={{ background: ACCENT }}
+            >
+              <Icon name="files" size={20} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[15px] font-semibold text-ink">
+                {plural(items.length, 'file')} · {formatBytes(totalBytes)}
+              </p>
+              <p className="truncate text-[13px] text-muted">
+                {folders.size
+                  ? `${topFolder ? `From “${topFolder}”` : 'From several folders'} · ${plural(folders.size, 'folder')}`
+                  : 'Chosen one by one'}
+              </p>
+            </div>
             <button
               type="button"
-              onClick={trySample}
               disabled={busy}
-              className="mx-auto flex min-h-11 items-center gap-1.5 rounded-full px-3.5 text-[13.5px] font-medium text-signal-ink transition-colors hover:bg-signal-soft disabled:opacity-50"
+              onClick={() => {
+                setItems([]);
+                setNote('');
+                setStatus('');
+              }}
+              className="h-11 shrink-0 rounded-[11px] px-3.5 text-[14px] font-medium text-ink-2 hover:bg-ink/5 hover:text-ink disabled:opacity-45 lg:h-9 lg:text-[13.5px]"
             >
-              <Icon name="sparkles" size={15} /> No files handy? Try a messy sample
+              Start over
             </button>
-          </>
-        ) : (
-          <>
-            <div className="flex items-center gap-3">
-              <span
-                className="grid size-11 shrink-0 place-items-center rounded-[12px] text-[#12110d]"
-                style={{ background: ACCENT }}
-              >
-                <Icon name="files" size={20} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-[15px] font-semibold text-ink">
-                  {plural(items.length, 'file')} · {formatBytes(totalBytes)}
-                </p>
-                <p className="truncate text-[13px] text-muted">
-                  {folders.size
-                    ? `${topFolder ? `From “${topFolder}”` : 'From several folders'} · ${plural(folders.size, 'folder')}`
-                    : 'Chosen one by one'}
-                </p>
-              </div>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => {
-                  setItems([]);
-                  setNote('');
-                  setStatus('');
-                }}
-                className="h-11 shrink-0 rounded-[11px] px-3.5 text-[14px] font-medium text-ink-2 hover:bg-ink/5 hover:text-ink disabled:opacity-45 lg:h-9 lg:text-[13.5px]"
-              >
-                Start over
-              </button>
-            </div>
-            {items.length < MAX_FILES && (
-              <FileDrop folder compact onFiles={add} disabled={busy} icon="plus" title="Add more" />
-            )}
-          </>
-        )}
+          </div>
+          {items.length < MAX_FILES && (
+            <FileDrop folder compact onFiles={add} disabled={busy} icon="plus" title="Add more" />
+          )}
+        </>
         {note && (
           <p role="status" className="text-[13px] leading-relaxed text-ink-2">
             {note}
@@ -499,8 +565,32 @@ export function CleanTool() {
       {items.length > 0 && (
         <Surface className="grid grid-cols-1 gap-6 max-lg:order-last lg:col-start-1 lg:row-start-2">
           <section aria-labelledby={`${id}-rules`} className="grid grid-cols-1 gap-3">
-            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-              <Label id={`${id}-rules`}>Fine-tune · rules run top to bottom</Label>
+            <div className="flex min-h-6 flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+              <Label id={`${id}-rules`}>Or choose what to change</Label>
+              {rules.length > 1 && (
+                <span className="text-[12.5px] text-muted">Changes run top to bottom</span>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {RULE_TYPES.map((type) => {
+                const on = rules.some((rule) => rule.type === type);
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => toggleRule(type)}
+                    className={cn(
+                      'inline-flex min-h-11 items-center gap-1.5 rounded-full px-3.5 text-[14px] font-medium transition-[background-color,color,transform] active:scale-[.97] lg:min-h-9 lg:text-[13.5px]',
+                      on ? 'text-[#12110d]' : 'bg-well text-ink-2 hover:bg-ink/10 hover:text-ink',
+                    )}
+                    style={on ? { background: ACCENT } : undefined}
+                  >
+                    <Icon name={on ? 'check' : RULES[type].icon} size={15} />
+                    {RULES[type].title}
+                  </button>
+                );
+              })}
             </div>
             {rules.length > 0 ? (
               <ol className="grid grid-cols-1 gap-2">
@@ -530,27 +620,20 @@ export function CleanTool() {
               </ol>
             ) : (
               <p className="rounded-[14px] bg-subtle px-4 py-3.5 text-[13.5px] text-muted shadow-[inset_0_0_0_1px_var(--color-line)]">
-                No rules, so every name stays as it is. Add one below, or start from a common job.
+                Tap a change above and its settings open here. Or pick a quick fix.
               </p>
             )}
-          </section>
-
-          <section aria-labelledby={`${id}-add`} className="grid grid-cols-1 gap-2.5">
-            <Label id={`${id}-add`}>Add a rule</Label>
-            <div className="flex flex-wrap gap-1.5">
-              {RULE_TYPES.map((type) => (
-                <button
-                  key={type}
-                  type="button"
-                  onClick={() => addRule(type)}
-                  className="inline-flex h-11 items-center gap-1.5 rounded-full bg-well px-3.5 text-[13.5px] font-medium text-ink-2 transition-colors hover:bg-ink/10 hover:text-ink lg:h-9"
-                >
-                  <Icon name="plus" size={14} /> {RULES[type].title}
-                </button>
-              ))}
-            </div>
+            {rules.some((rule) => rule.type === 'replace') && (
+              <button
+                type="button"
+                onClick={() => addRule('replace')}
+                className="inline-flex h-11 items-center gap-1.5 justify-self-start rounded-[10px] px-2.5 text-[13.5px] font-medium text-ink-2 hover:bg-ink/5 hover:text-ink lg:h-9"
+              >
+                <Icon name="plus" size={14} /> Another find & replace
+              </button>
+            )}
             <p className="text-[12.5px] leading-relaxed text-muted">
-              Rules change the name, never the extension (.jpg, .pdf), except Extension case.
+              Changes touch the name, never the extension (.jpg, .pdf), except Extension case.
             </p>
           </section>
         </Surface>
@@ -559,187 +642,158 @@ export function CleanTool() {
       <aside
         id={`${id}-preview`}
         aria-label="New names"
-        className={cn(
-          'min-w-0 scroll-mt-24 gap-4 lg:sticky lg:top-24 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:grid',
-          items.length ? 'grid' : 'hidden',
-        )}
+        className="grid min-w-0 scroll-mt-24 gap-4 lg:sticky lg:top-24 lg:col-start-2 lg:row-span-2 lg:row-start-1"
       >
         <Surface className="grid grid-cols-1 gap-4">
-          {items.length === 0 ? (
-            <>
-              <div>
+          <>
+            <div className="flex items-end justify-between gap-3" aria-live="polite">
+              <div className="min-w-0">
                 <p className="label">Preview</p>
-                <p className="mt-2 text-[15px] font-semibold text-ink">
-                  Every new name shows here before anything happens.
-                </p>
-              </div>
-              <ol
-                aria-label="Example"
-                className="row-divide rounded-[16px] bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)]"
-              >
-                {EXAMPLES.map((example) => (
-                  <li key={example.key} className="grid gap-1 px-3.5 py-3">
-                    <Names before={example.before} after={example.after} />
-                  </li>
-                ))}
-              </ol>
-              <p className="text-[13px] leading-relaxed text-muted">
-                An example. Choose your files, stack up the rules on the left, then download renamed
-                copies in one zip, with a list of every old and new name.
-              </p>
-            </>
-          ) : (
-            <>
-              <div className="flex items-end justify-between gap-3" aria-live="polite">
-                <div className="min-w-0">
-                  <p className="label">Preview</p>
-                  <p className="mt-1.5 text-[15px] text-muted">
-                    <span
-                      className="mr-1.5 font-display text-[36px] leading-none font-extrabold tracking-[-0.04em] text-ink"
-                      style={{ fontVariationSettings: "'wdth' 110" }}
-                    >
-                      {view.changed}
-                    </span>
-                    of {plural(view.rows.length, 'name')} change
-                  </p>
-                </div>
-                <p className="shrink-0 text-right text-[12.5px] leading-relaxed text-muted">
-                  {plural(view.rows.length - view.changed, 'stays', 'stay')} as{' '}
-                  {view.rows.length - view.changed === 1 ? 'it is' : 'they are'}
-                  <br />
-                  {view.attention ? (
-                    <span className="text-caution">
-                      {view.attention} {view.attention === 1 ? 'needs' : 'need'} attention
-                    </span>
-                  ) : (
-                    'No problems'
-                  )}
-                </p>
-              </div>
-
-              <div role="group" aria-label="Show" className="flex flex-wrap gap-1.5">
-                {(
-                  [
-                    ['all', `All ${view.rows.length}`],
-                    ['changed', `Changed ${view.changed}`],
-                    ['attention', `Needs attention ${view.attention}`],
-                  ] as const
-                ).map(([value, label]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    aria-pressed={filter === value}
-                    onClick={() => {
-                      setFilter(value);
-                      setShowAll(false);
-                    }}
-                    className={cn(
-                      'h-11 rounded-full px-3.5 text-[13px] font-medium transition-colors lg:h-9 lg:px-3',
-                      filter === value
-                        ? 'bg-ink text-on-ink'
-                        : 'bg-well text-ink-2 hover:bg-ink/10',
-                    )}
+                <p className="mt-1.5 text-[15px] text-muted">
+                  <span
+                    className="mr-1.5 font-display text-[36px] leading-none font-extrabold tracking-[-0.04em] text-ink"
+                    style={{ fontVariationSettings: "'wdth' 110" }}
                   >
-                    {label}
-                  </button>
-                ))}
+                    {view.changed}
+                  </span>
+                  of {plural(view.rows.length, 'name')} change
+                </p>
               </div>
-
-              {skipped > 0 && (
-                <Note icon="alert" tone="caution">
-                  A find & replace pattern doesn’t work yet, so that rule is skipped. Open it to see
-                  why.
-                </Note>
-              )}
-
-              <div className="max-h-[min(62vh,560px)] overflow-y-auto rounded-[16px] bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)] lg:max-h-[calc(100dvh-27rem)] lg:min-h-[220px]">
-                {visibleRows.length ? (
-                  <ol className="row-divide">
-                    {visibleRows.map((row) => (
-                      <PreviewRow key={row.index} row={row} showFolder={folders.size > 0} />
-                    ))}
-                  </ol>
+              <p className="shrink-0 text-right text-[12.5px] leading-relaxed text-muted">
+                {plural(view.rows.length - view.changed, 'stays', 'stay')} as{' '}
+                {view.rows.length - view.changed === 1 ? 'it is' : 'they are'}
+                <br />
+                {view.attention ? (
+                  <span className="text-caution">
+                    {view.attention} {view.attention === 1 ? 'needs' : 'need'} attention
+                  </span>
                 ) : (
-                  <p className="px-4 py-6 text-center text-[13.5px] text-muted">
-                    {filter === 'changed'
-                      ? 'No name changes yet. Add a rule or pick a common job.'
-                      : 'Nothing needs attention.'}
-                  </p>
+                  'No problems'
                 )}
-                {rows.length > visibleRows.length && (
-                  <button
-                    type="button"
-                    onClick={() => setShowAll(true)}
-                    className="flex h-11 w-full items-center justify-center gap-1.5 border-t border-line text-[13.5px] font-medium text-ink-2 hover:bg-ink/5 hover:text-ink"
-                  >
-                    Show all {rows.length.toLocaleString('en-US')}
-                  </button>
-                )}
-              </div>
+              </p>
+            </div>
 
-              {problemsHere.size > 0 && (
-                <ul className="grid gap-1.5 text-[12.5px] leading-relaxed text-muted">
-                  {[...problemsHere].map((problem) => (
-                    <li key={problem} className="flex gap-2">
-                      <Icon name="alert" size={14} className="mt-[3px] shrink-0 text-caution" />
-                      <span>
-                        <span className="font-medium text-ink-2">{PROBLEMS[problem].label}:</span>{' '}
-                        {PROBLEMS[problem].detail}
-                      </span>
-                    </li>
+            <div role="group" aria-label="Show" className="flex flex-wrap gap-1.5">
+              {(
+                [
+                  ['all', `All ${view.rows.length}`],
+                  ['changed', `Changed ${view.changed}`],
+                  ['attention', `Needs attention ${view.attention}`],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={filter === value}
+                  onClick={() => {
+                    setFilter(value);
+                    setShowAll(false);
+                  }}
+                  className={cn(
+                    'h-11 rounded-full px-3.5 text-[13px] font-medium transition-colors lg:h-9 lg:px-3',
+                    filter === value ? 'bg-ink text-on-ink' : 'bg-well text-ink-2 hover:bg-ink/10',
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {skipped > 0 && (
+              <Note icon="alert" tone="caution">
+                A find & replace pattern doesn’t work yet, so that rule is skipped. Open it to see
+                why.
+              </Note>
+            )}
+
+            <div className="max-h-[min(62vh,560px)] overflow-y-auto rounded-[16px] bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)] lg:max-h-[calc(100dvh-27rem)] lg:min-h-[220px]">
+              {visibleRows.length ? (
+                <ol className="row-divide">
+                  {visibleRows.map((row) => (
+                    <PreviewRow key={row.index} row={row} showFolder={folders.size > 0} />
                   ))}
-                </ul>
+                </ol>
+              ) : (
+                <p className="px-4 py-6 text-center text-[13.5px] text-muted">
+                  {filter === 'changed'
+                    ? 'No name changes yet. Pick a quick fix or choose what to change.'
+                    : 'Nothing needs attention.'}
+                </p>
               )}
-
-              <div className="grid gap-3 border-t border-line pt-4">
-                {folders.size > 0 && (
-                  <Check checked={keepFolders} onChange={setKeepFolders}>
-                    Keep the folders in the zip
-                    <span className="block text-[12.5px] text-muted">
-                      {keepFolders
-                        ? 'Each copy goes in the same folder as its original.'
-                        : 'Every copy sits side by side; names that clash get (2).'}
-                    </span>
-                  </Check>
-                )}
+              {rows.length > visibleRows.length && (
                 <button
                   type="button"
-                  onClick={downloadZip}
-                  disabled={busy}
-                  className="inline-flex h-12 items-center justify-center gap-2 rounded-[12px] bg-ink px-4 text-[15px] font-semibold text-on-ink transition-colors hover:bg-ink-2 disabled:opacity-45 lg:h-11 lg:text-[14.5px]"
+                  onClick={() => setShowAll(true)}
+                  className="flex h-11 w-full items-center justify-center gap-1.5 border-t border-line text-[13.5px] font-medium text-ink-2 hover:bg-ink/5 hover:text-ink"
                 >
-                  {busy ? (
-                    <Icon name="loader" size={17} className="animate-spin" />
-                  ) : (
-                    <Icon name="download" size={17} />
-                  )}
-                  Download renamed copies (.zip)
+                  Show all {rows.length.toLocaleString('en-US')}
                 </button>
-                <div className="grid grid-cols-2 gap-2">
-                  <CopyButton
-                    text={csvText}
-                    label="Copy the list"
-                    what="Rename list copied, as CSV"
-                    className="!h-11 lg:!h-10"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => downloadText(csvText, 'rename-list.csv', 'text/csv')}
-                    className="inline-flex h-11 items-center justify-center gap-2 rounded-[11px] bg-well px-3.5 text-[14px] font-medium text-ink-2 transition-colors hover:bg-ink/10 hover:text-ink lg:h-10 lg:text-[13.5px]"
-                  >
-                    <Icon name="file-text" size={15} /> List (CSV)
-                  </button>
-                </div>
-                <p role="status" className="min-h-5 text-[13px] leading-relaxed text-ink-2">
-                  {status}
-                </p>
-                <p className="text-[12.5px] leading-relaxed text-muted">
-                  You get renamed copies in one zip; your originals stay exactly as they are. The
-                  list has every old and new name.
-                </p>
+              )}
+            </div>
+
+            {problemsHere.size > 0 && (
+              <ul className="grid gap-1.5 text-[12.5px] leading-relaxed text-muted">
+                {[...problemsHere].map((problem) => (
+                  <li key={problem} className="flex gap-2">
+                    <Icon name="alert" size={14} className="mt-[3px] shrink-0 text-caution" />
+                    <span>
+                      <span className="font-medium text-ink-2">{PROBLEMS[problem].label}:</span>{' '}
+                      {PROBLEMS[problem].detail}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <div className="grid gap-3 border-t border-line pt-4">
+              {folders.size > 0 && (
+                <Check checked={keepFolders} onChange={setKeepFolders}>
+                  Keep the folders in the zip
+                  <span className="block text-[12.5px] text-muted">
+                    {keepFolders
+                      ? 'Each copy goes in the same folder as its original.'
+                      : 'Every copy sits side by side; names that clash get (2).'}
+                  </span>
+                </Check>
+              )}
+              <button
+                type="button"
+                onClick={downloadZip}
+                disabled={busy}
+                className="inline-flex h-14 items-center justify-center gap-2 rounded-[16px] px-5 text-[16.5px] font-semibold text-[#12110d] shadow-[0_14px_32px_-16px_var(--accent,transparent)] transition-[transform,opacity] active:scale-[.985] disabled:opacity-45 sm:h-13 sm:text-[16px]"
+                style={{ background: ACCENT }}
+              >
+                {busy ? (
+                  <Icon name="loader" size={19} className="animate-spin" />
+                ) : (
+                  <Icon name="download" size={19} />
+                )}
+                Download renamed copies
+              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <CopyButton
+                  text={csvText}
+                  label="Copy the list"
+                  what="Rename list copied, as CSV"
+                  className="!h-11 lg:!h-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => downloadText(csvText, 'rename-list.csv', 'text/csv')}
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-[11px] bg-well px-3.5 text-[14px] font-medium text-ink-2 transition-colors hover:bg-ink/10 hover:text-ink lg:h-10 lg:text-[13.5px]"
+                >
+                  <Icon name="file-text" size={15} /> List (CSV)
+                </button>
               </div>
-            </>
-          )}
+              <p role="status" className="min-h-5 text-[13px] leading-relaxed text-ink-2">
+                {status}
+              </p>
+              <p className="text-[12.5px] leading-relaxed text-muted">
+                You get renamed copies in one zip; your originals stay exactly as they are. The list
+                has every old and new name.
+              </p>
+            </div>
+          </>
         </Surface>
       </aside>
     </div>
@@ -782,8 +836,8 @@ function Names({
               part.changed ? (
                 <ins
                   key={index}
-                  className="rounded-[3px] text-ink underline decoration-[#c7b5ff] decoration-2 underline-offset-[3px]"
-                  style={{ background: 'color-mix(in oklab, #c7b5ff 24%, transparent)' }}
+                  className="rounded-[3px] text-ink underline decoration-[var(--accent,#c7b5ff)] decoration-2 underline-offset-[3px]"
+                  style={{ background: `color-mix(in oklab, ${ACCENT} 24%, transparent)` }}
                 >
                   {part.text}
                 </ins>

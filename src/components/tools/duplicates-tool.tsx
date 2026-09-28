@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type DragEvent } from 'react';
 import { cn } from '@/components/ui/cn';
 import { Segmented } from '@/components/ui/form';
 import { Icon } from '@/components/ui/icon';
@@ -21,7 +21,7 @@ import {
   type ScanFile,
 } from '@/lib/tools/duplicates';
 import { folderOf, splitName } from '@/lib/tools/rename';
-import { FileDrop, Note, Surface } from './kit';
+import { FileDrop, Note, SampleButton, StartPanel, Surface } from './kit';
 
 /*
  * Duplicates: exact copies among the files or folder a person chooses. Sizes are compared first;
@@ -30,7 +30,7 @@ import { FileDrop, Note, Surface } from './kit';
  * a web page can't, and this one doesn't try.
  */
 
-const ACCENT = '#9fb2ff';
+const ACCENT = 'var(--accent, #9fb2ff)';
 /** Groups (and name clashes) shown at a time; the rest are a tap away. */
 const PAGE = 20;
 
@@ -113,6 +113,44 @@ function sampleFiles() {
   });
 }
 
+/** A folder with the same file in it three times: two of them extra. */
+function DuplicatesArt() {
+  return (
+    <div aria-hidden="true" className="relative mx-auto h-[118px] w-[250px]">
+      <span className="absolute inset-x-6 top-5 bottom-0 rounded-[18px] bg-well shadow-[inset_0_0_0_1px_var(--color-line)]" />
+      <span className="absolute top-2 left-6 h-6 w-20 rounded-t-[12px] bg-well" />
+      {[0, 1, 2].map((index) => (
+        <span
+          key={index}
+          className={cn(
+            'absolute top-9 grid h-[66px] w-[54px] place-items-center rounded-[10px] bg-white shadow-lift',
+            index > 0 && 'opacity-80',
+          )}
+          style={{
+            left: `${52 + index * 52}px`,
+            transform: `rotate(${[-6, 0, 6][index]}deg)`,
+          }}
+        >
+          <span
+            className="block size-7 rounded-[7px]"
+            style={{ background: 'linear-gradient(160deg,#f6b77a,#8a6a4f)' }}
+          />
+          {index > 0 && (
+            <span
+              className="absolute -top-2 -right-2 grid size-6 place-items-center rounded-full text-[#12110d] shadow-lift"
+              style={{ background: ACCENT }}
+            >
+              <Icon name="copy" size={12} />
+            </span>
+          )}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+const hasFiles = (event: DragEvent) => Array.from(event.dataTransfer.types).includes('Files');
+
 export function DuplicatesTool() {
   const id = useId();
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -129,6 +167,8 @@ export function DuplicatesTool() {
   const scan = useRef<AbortController | null>(null);
   const nextId = useRef(0);
   const painted = useRef(0);
+  const folderInput = useRef<HTMLInputElement>(null);
+  const filesInput = useRef<HTMLInputElement>(null);
 
   // Leaving the page stops a scan that's still reading.
   useEffect(() => {
@@ -250,6 +290,89 @@ export function DuplicatesTool() {
   const downloadReport = () =>
     downloadText(reportCsv(groups, keepFor), 'duplicates-report.csv', 'text/csv');
 
+  const take = (files: File[]) =>
+    add(files.map((file) => ({ file, path: file.webkitRelativePath || file.name })));
+
+  if (!entries.length)
+    return (
+      <div
+        onDragOver={(event) => {
+          if (!hasFiles(event)) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'copy';
+        }}
+        onDrop={(event) => {
+          if (!hasFiles(event)) return;
+          event.preventDefault();
+          take(Array.from(event.dataTransfer.files));
+        }}
+      >
+        <StartPanel
+          art={<DuplicatesArt />}
+          title="Find the copies taking up space"
+          lead="Choose a folder and every exact copy turns up, even under another name."
+          footer={
+            <Note icon="shield-check" className="text-left">
+              Nothing is moved or deleted. You get a list with the one to keep already suggested,
+              and you decide.
+            </Note>
+          }
+        >
+          <div className="grid gap-2 sm:mx-auto sm:max-w-[360px]">
+            <button
+              type="button"
+              onClick={() => folderInput.current?.click()}
+              className="inline-flex h-14 items-center justify-center gap-2 rounded-[16px] px-5 text-[16.5px] font-semibold text-[#12110d] shadow-[0_14px_32px_-16px_var(--accent,transparent)] transition-transform active:scale-[.985] sm:h-13 sm:text-[16px]"
+              style={{ background: ACCENT }}
+            >
+              <Icon name="folder-open" size={19} /> Choose a folder
+            </button>
+            <button
+              type="button"
+              onClick={() => filesInput.current?.click()}
+              className="inline-flex h-12 items-center justify-center gap-2 rounded-[14px] px-4 text-[15px] font-medium text-ink-2 transition-colors hover:bg-ink/5 hover:text-ink"
+            >
+              Or pick some files
+            </button>
+          </div>
+          <input
+            ref={folderInput}
+            type="file"
+            multiple
+            className="sr-only"
+            tabIndex={-1}
+            aria-label="Choose a folder"
+            // A folder picker: every file inside, with its path.
+            {...({ webkitdirectory: '' } as Record<string, string>)}
+            onChange={(event) => {
+              take(Array.from(event.target.files ?? []));
+              event.target.value = '';
+            }}
+          />
+          <input
+            ref={filesInput}
+            type="file"
+            multiple
+            className="sr-only"
+            tabIndex={-1}
+            aria-label="Choose files"
+            onChange={(event) => {
+              take(Array.from(event.target.files ?? []));
+              event.target.value = '';
+            }}
+          />
+          <SampleButton onClick={() => add(sampleFiles())} className="mt-3">
+            Try a sample folder with copies in it
+          </SampleButton>
+          {note && (
+            <p role="status" className="mt-2 text-[13px] leading-relaxed text-ink-2">
+              {note}
+            </p>
+          )}
+        </StartPanel>
+      </div>
+    );
+
   const percent =
     progress && progress.bytesTotal
       ? Math.round((progress.bytesDone / progress.bytesTotal) * 100)
@@ -258,65 +381,43 @@ export function DuplicatesTool() {
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:items-start">
       <Surface className="grid grid-cols-1 gap-4 lg:col-start-1 lg:row-start-1">
-        {entries.length === 0 ? (
-          <>
-            <FileDrop
-              folder
-              onFiles={(files) =>
-                add(files.map((file) => ({ file, path: file.webkitRelativePath || file.name })))
-              }
-              icon="copy"
-              accent={ACCENT}
-              title="Choose a folder, or a pile of files"
-              hint="Finds files that are exactly the same, even under different names. Nothing gets deleted."
-            />
+        <>
+          <div className="flex items-center gap-3">
+            <span
+              className="grid size-11 shrink-0 place-items-center rounded-[12px] text-[#12110d]"
+              style={{ background: ACCENT }}
+            >
+              <Icon name="folder-search" size={20} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[15px] font-semibold text-ink">
+                {plural(entries.length, 'file')} · {formatSize(totalBytes)}
+              </p>
+              <p className="truncate text-[13px] text-muted">
+                {onlyNames
+                  ? 'Chosen one by one'
+                  : `${tops.size === 1 ? `From “${[...tops][0]}”` : 'From several folders'} · ${plural(folders.size, 'folder')}`}
+              </p>
+            </div>
             <button
               type="button"
-              onClick={() => add(sampleFiles())}
-              className="mx-auto flex min-h-11 items-center gap-1.5 rounded-full px-3.5 text-[13.5px] font-medium text-signal-ink transition-colors hover:bg-signal-soft"
+              onClick={startOver}
+              className="h-11 shrink-0 rounded-[11px] px-3.5 text-[14px] font-medium text-ink-2 hover:bg-ink/5 hover:text-ink lg:h-9 lg:text-[13.5px]"
             >
-              <Icon name="sparkles" size={15} /> Try a sample folder with copies in it
+              Start over
             </button>
-          </>
-        ) : (
-          <>
-            <div className="flex items-center gap-3">
-              <span
-                className="grid size-11 shrink-0 place-items-center rounded-[12px] text-[#12110d]"
-                style={{ background: ACCENT }}
-              >
-                <Icon name="folder-search" size={20} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-[15px] font-semibold text-ink">
-                  {plural(entries.length, 'file')} · {formatSize(totalBytes)}
-                </p>
-                <p className="truncate text-[13px] text-muted">
-                  {onlyNames
-                    ? 'Chosen one by one'
-                    : `${tops.size === 1 ? `From “${[...tops][0]}”` : 'From several folders'} · ${plural(folders.size, 'folder')}`}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={startOver}
-                className="h-11 shrink-0 rounded-[11px] px-3.5 text-[14px] font-medium text-ink-2 hover:bg-ink/5 hover:text-ink lg:h-9 lg:text-[13.5px]"
-              >
-                Start over
-              </button>
-            </div>
-            <FileDrop
-              folder
-              compact
-              disabled={phase === 'running'}
-              onFiles={(files) =>
-                add(files.map((file) => ({ file, path: file.webkitRelativePath || file.name })))
-              }
-              icon="plus"
-              title="Add another folder or more files"
-            />
-          </>
-        )}
+          </div>
+          <FileDrop
+            folder
+            compact
+            disabled={phase === 'running'}
+            onFiles={(files) =>
+              add(files.map((file) => ({ file, path: file.webkitRelativePath || file.name })))
+            }
+            icon="plus"
+            title="Add another folder or more files"
+          />
+        </>
         {note && (
           <p role="status" className="text-[13px] leading-relaxed text-ink-2">
             {note}
@@ -490,15 +591,16 @@ export function DuplicatesTool() {
                   <button
                     type="button"
                     onClick={downloadReport}
-                    className="inline-flex h-12 items-center justify-center gap-2 rounded-[12px] bg-ink px-4 text-[15px] font-semibold text-on-ink transition-colors hover:bg-ink-2 lg:h-11 lg:text-[14.5px]"
+                    className="inline-flex h-14 items-center justify-center gap-2 rounded-[16px] px-5 text-[16.5px] font-semibold text-[#12110d] shadow-[0_14px_32px_-16px_var(--accent,transparent)] transition-transform active:scale-[.985] sm:h-13 sm:text-[16px]"
+                    style={{ background: ACCENT }}
                   >
-                    <Icon name="download" size={17} /> Download the report (CSV)
+                    <Icon name="download" size={19} /> Download the list of copies
                   </button>
                   <div className="grid gap-2 border-t border-line pt-4">
                     <p className="text-[14px] font-semibold text-ink">What to do next</p>
                     <ol className="grid list-decimal gap-1.5 pl-5 text-[13.5px] leading-relaxed text-ink-2 marker:text-muted">
                       <li>Nothing has been moved or deleted.</li>
-                      <li>Download the report, so you have every path in one list.</li>
+                      <li>Download the list of copies, so you have every path in one place.</li>
                       <li>
                         {onlyNames
                           ? 'Find each file marked “Extra copy” on your computer'

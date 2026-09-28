@@ -13,11 +13,14 @@ export function ShareButton({
   text,
   className,
   label = 'Share',
+  compact = false,
 }: {
   title: string;
   text?: string;
   className?: string;
   label?: string;
+  /** Just the icon on a phone; the word from `sm` up. */
+  compact?: boolean;
 }) {
   const toast = useToast();
   const [copied, setCopied] = useState(false);
@@ -46,13 +49,14 @@ export function ShareButton({
     <button
       type="button"
       onClick={share}
+      aria-label={compact ? label : undefined}
       className={cn(
         'inline-flex h-10 items-center gap-2 rounded-full bg-white/[.06] px-4 text-[14px] font-medium text-ink-2 shadow-[inset_0_0_0_1px_rgb(255_255_255/.08)] transition-colors hover:bg-white/10 hover:text-ink',
         className,
       )}
     >
       <Icon name={copied ? 'check' : 'share'} size={16} />
-      {copied ? 'Copied' : label}
+      <span className={cn(compact && 'max-sm:sr-only')}>{copied ? 'Copied' : label}</span>
     </button>
   );
 }

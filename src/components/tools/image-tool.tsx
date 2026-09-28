@@ -1,14 +1,15 @@
 'use client';
 import Link from 'next/link';
-import { useEffect, useId, useRef, useState, type DragEvent } from 'react';
+import { useEffect, useId, useRef, useState, type CSSProperties, type DragEvent } from 'react';
 import { SaveProgress, useSaveToFiles } from '@/components/files/save-to-files';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/components/ui/cn';
-import { Field, Input, Select } from '@/components/ui/form';
-import { Icon } from '@/components/ui/icon';
+import { Field, Input } from '@/components/ui/form';
+import { Icon, type IconName } from '@/components/ui/icon';
 import { useToast } from '@/components/ui/toast';
 import { useOptionalWorkspace } from '@/components/shell/workspace-context';
 import { AttachPicker } from './attach-picker';
+import { ActionBar, ActionButton, Choices, MoreOptions, SampleButton, StartPanel } from './kit';
 import { formatBytes } from '@/lib/platform/format';
 
 /*
@@ -20,13 +21,6 @@ import { formatBytes } from '@/lib/platform/format';
 
 const MAX_FILES = 20;
 const MAX_BYTES = 40 * 1024 * 1024;
-/** Everyday sizes, by the width they're kept to. Large is the default: sharp on any screen. */
-const PRESETS = [
-  { width: '800', label: 'Small' },
-  { width: '1200', label: 'Medium' },
-  { width: '1920', label: 'Large' },
-  { width: '', label: 'Original' },
-];
 const FORMATS = [
   { value: 'original', label: 'Same as original' },
   { value: 'image/webp', label: 'WebP' },
@@ -48,6 +42,72 @@ const ACCEPT = 'image/*';
 
 type Format = (typeof FORMATS)[number]['value'];
 type Settings = { maxWidth: string; format: Format; quality: number };
+
+type Goal = 'web' | 'email' | 'smallest' | 'full';
+/** What the photos are for, instead of numbers. For the web is the default: sharp on any screen. */
+const GOALS: (Settings & { id: Goal; label: string; hint: string; icon: IconName })[] = [
+  {
+    id: 'web',
+    label: 'For the web',
+    hint: 'sharp on any screen',
+    icon: 'globe',
+    maxWidth: '1920',
+    format: 'original',
+    quality: 80,
+  },
+  {
+    id: 'email',
+    label: 'For email',
+    hint: 'light enough to attach',
+    icon: 'mail',
+    maxWidth: '1200',
+    format: 'image/jpeg',
+    quality: 75,
+  },
+  {
+    id: 'smallest',
+    label: 'Smallest file',
+    hint: 'as light as it gets',
+    icon: 'zoom-out',
+    maxWidth: '800',
+    format: 'image/webp',
+    quality: 60,
+  },
+  {
+    id: 'full',
+    label: 'Full size',
+    hint: 'every pixel, just lighter',
+    icon: 'image',
+    maxWidth: '',
+    format: 'original',
+    quality: 80,
+  },
+];
+
+/** Before and after, drawn: what this tool does, at a glance. */
+function BeforeAfter() {
+  const photo = 'bg-[linear-gradient(180deg,#f6b77a,#f7d9a8_45%,#8a6a4f_46%,#3a3129)] shadow-lift';
+  return (
+    <div
+      aria-hidden="true"
+      className="flex items-end justify-center gap-4 rounded-[18px] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] px-4 pt-5 pb-3"
+    >
+      <div className="w-[40%] max-w-[170px]">
+        <span className={cn('block aspect-[4/3] rounded-[10px]', photo)} />
+        <p className="mt-2 text-center text-[12px] text-muted">
+          <span className="mono-num text-ink">4.8 MB</span>
+        </p>
+      </div>
+      <Icon name="arrow-right" size={18} className="mb-10 text-[var(--accent)]" />
+      <div className="w-[24%] max-w-[100px]">
+        <span className={cn('block aspect-[4/3] rounded-[8px]', photo)} />
+        <p className="mt-2 text-center text-[12px] text-muted">
+          <span className="mono-num font-semibold text-ink">380 KB</span>
+        </p>
+      </div>
+    </div>
+  );
+}
 type Size = { width: number; height: number };
 type Result = Size & {
   size: number;
@@ -205,6 +265,15 @@ export function ImageTool({ slug = '', canSave = false }: { slug?: string; canSa
   const [applied, setApplied] = useState('');
   const settingsOf = (value: Settings) => `${value.maxWidth}|${value.format}|${value.quality}`;
   const settings = settingsOf({ maxWidth, format, quality });
+  const goal = GOALS.find((option) => settingsOf(option) === settings)?.id ?? null;
+  /** A goal applies at once: there's nothing else to press. */
+  const pickGoal = (id: Goal) => {
+    const next = GOALS.find((option) => option.id === id)!;
+    setMaxWidth(next.maxWidth);
+    setFormat(next.format);
+    setQuality(next.quality);
+    if (items.length && settingsOf(next) !== applied) void convertAll(items, next);
+  };
   const nextId = useRef(0);
   const run = useRef(0);
   const urls = useRef(new Set<string>());
@@ -431,227 +500,239 @@ export function ImageTool({ slug = '', canSave = false }: { slug?: string; canSa
     });
   };
 
+  const input_ = (
+    <input
+      ref={input}
+      id={`${id}-files`}
+      type="file"
+      accept={ACCEPT}
+      multiple
+      disabled={busy}
+      className="sr-only"
+      onChange={(event) => {
+        add(event.target.files);
+        event.target.value = '';
+      }}
+    />
+  );
+  const drop = {
+    onDragEnter: (event: DragEvent) => {
+      if (!hasFiles(event) || busy) return;
+      event.preventDefault();
+      setOver(true);
+    },
+    onDragOver: (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = busy ? 'none' : 'copy';
+    },
+    onDragLeave: (event: DragEvent) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOver(false);
+    },
+    onDrop: (event: DragEvent) => {
+      event.preventDefault();
+      setOver(false);
+      add(event.dataTransfer.files);
+    },
+  };
+  const goals = (
+    <Choices
+      label="Make them"
+      scroll
+      value={goal}
+      onChange={pickGoal}
+      options={GOALS.map((option) => ({
+        value: option.id,
+        label: option.label,
+        icon: option.icon,
+      }))}
+    />
+  );
+
+  if (!items.length)
+    return (
+      <div style={{ '--resize': 'var(--accent, #ffc53d)' } as CSSProperties}>
+        <div style={{ '--accent': 'var(--resize)' } as CSSProperties}>
+          {input_}
+          <StartPanel
+            art={<BeforeAfter />}
+            title="Make photos lighter"
+            lead="Same picture, a fraction of the weight. They shrink the moment you add them."
+            footer={`Up to ${MAX_FILES} at a time · photos never leave this device`}
+          >
+            {/* The whole area is the button: tap anywhere to choose, or drop photos on it. */}
+            <label
+              htmlFor={`${id}-files`}
+              {...drop}
+              className={cn(
+                'flex min-h-[112px] cursor-pointer flex-col items-center justify-center gap-2 rounded-[20px] border-[1.5px] border-dashed px-4 py-5 transition-colors',
+                over
+                  ? 'border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]'
+                  : 'border-line-strong bg-subtle hover:bg-well/60',
+              )}
+            >
+              <span className="inline-flex h-14 items-center gap-2 rounded-[16px] bg-[var(--accent)] px-7 text-[16.5px] font-semibold text-[#12110d] shadow-[0_14px_32px_-16px_var(--accent)]">
+                <Icon name="image" size={19} />
+                {over ? 'Drop to add' : 'Choose photos'}
+              </span>
+              <span className="hidden text-[13px] text-muted sm:block">or drop them here</span>
+            </label>
+            <SampleButton onClick={trySample} disabled={busy} className="mt-2">
+              Try a sample photo
+            </SampleButton>
+            <div className="mt-4 grid gap-2.5 border-t border-line pt-5 text-left">
+              <p className="text-[13.5px] font-medium text-ink-2">
+                Make them{' '}
+                <span className="font-normal text-muted">
+                  · {GOALS.find((option) => option.id === goal)?.hint ?? 'your own settings'}
+                </span>
+              </p>
+              {goals}
+            </div>
+            {message && (
+              <p role="status" className="mt-3 text-[13px] text-muted">
+                {message}
+              </p>
+            )}
+          </StartPanel>
+        </div>
+      </div>
+    );
+
   return (
-    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-      <div className="grid min-w-0 grid-cols-1 content-start gap-5 rounded-[20px] bg-surface p-4 shadow-card sm:p-5">
-        <input
-          ref={input}
-          id={`${id}-files`}
-          type="file"
-          accept={ACCEPT}
-          multiple
-          disabled={busy}
-          className="sr-only"
-          onChange={(event) => {
-            add(event.target.files);
-            event.target.value = '';
-          }}
-        />
-        {/* The whole area is the button: tap anywhere to choose, or drop photos on it. */}
-        <label
-          htmlFor={`${id}-files`}
-          data-over={over || undefined}
-          onDragEnter={(event) => {
-            if (!hasFiles(event) || busy) return;
-            event.preventDefault();
-            setOver(true);
-          }}
-          onDragOver={(event) => {
-            if (!hasFiles(event)) return;
-            event.preventDefault();
-            event.dataTransfer.dropEffect = busy ? 'none' : 'copy';
-          }}
-          onDragLeave={(event) => {
-            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOver(false);
-          }}
-          onDrop={(event) => {
-            event.preventDefault();
-            setOver(false);
-            add(event.dataTransfer.files);
-          }}
-          className={cn(
-            'flex cursor-pointer items-center rounded-[18px] border-[1.5px] border-dashed text-center transition-colors',
-            items.length
-              ? 'min-h-14 justify-center gap-2.5 px-4 py-3'
-              : 'flex-col justify-center gap-3 px-4 py-9',
-            over ? 'border-signal bg-signal-soft' : 'border-line-strong bg-subtle hover:bg-well/60',
-            busy && 'pointer-events-none opacity-60',
-          )}
-        >
-          <span
+    <div style={{ '--resize': 'var(--accent, #ffc53d)' } as CSSProperties}>
+      <div
+        style={{ '--accent': 'var(--resize)' } as CSSProperties}
+        className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]"
+      >
+        <div className="grid min-w-0 grid-cols-1 content-start gap-5 rounded-[20px] bg-surface p-4 shadow-card sm:p-5">
+          {input_}
+          <label
+            htmlFor={`${id}-files`}
+            {...drop}
             className={cn(
-              'grid shrink-0 place-items-center rounded-full bg-tool-image text-ink shadow-[inset_0_0_0_1px_rgb(0_0_0/.08)]',
-              items.length ? 'size-8' : 'size-12',
+              'flex min-h-14 cursor-pointer items-center justify-center gap-2.5 rounded-[18px] border-[1.5px] border-dashed px-4 py-3 text-center transition-colors',
+              over
+                ? 'border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]'
+                : 'border-line-strong bg-subtle hover:bg-well/60',
+              busy && 'pointer-events-none opacity-60',
             )}
           >
-            <Icon name={items.length ? 'plus' : 'image'} size={items.length ? 16 : 22} />
-          </span>
-          {items.length ? (
+            <span className="grid size-8 shrink-0 place-items-center rounded-full bg-[var(--accent)] text-[#12110d]">
+              <Icon name="plus" size={16} />
+            </span>
             <span className="text-[15px] font-semibold">
               {over ? 'Drop to add' : 'Add more photos'}
             </span>
-          ) : (
-            <>
-              <span className="inline-flex h-12 items-center rounded-[13px] bg-ink px-6 text-[16px] font-semibold text-on-ink shadow-card">
-                {over ? 'Drop to add' : 'Choose photos'}
-              </span>
-              <span className="text-[13px] text-muted">
-                They shrink right away · up to {MAX_FILES} at a time
-              </span>
-            </>
-          )}
-        </label>
+          </label>
 
-        {items.length > 0 && (
-          <>
-            <div className="grid gap-2">
-              <span id={`${id}-size`} className="text-[13.5px] font-medium text-ink-2">
-                Size
+          <div className="grid gap-2.5">
+            <p className="text-[13.5px] font-medium text-ink-2">
+              Make them{' '}
+              <span className="font-normal text-muted">
+                · {GOALS.find((option) => option.id === goal)?.hint ?? 'your own settings'}
               </span>
-              <div
-                role="group"
-                aria-labelledby={`${id}-size`}
-                className="grid grid-cols-4 gap-1 rounded-[14px] bg-well p-1"
+            </p>
+            {goals}
+          </div>
+
+          <MoreOptions
+            summary={`${maxWidth ? `${maxWidth} wide` : 'Full size'}${format !== 'original' ? ` · ${FORMATS.find((option) => option.value === format)?.label}` : ''}`}
+          >
+            <div className="grid gap-4">
+              <Field
+                label="Exact width"
+                htmlFor={`${id}-width`}
+                hint="Leave blank to keep the original size. Photos are never made bigger."
               >
-                {PRESETS.map((preset) => (
-                  <button
-                    key={preset.label}
-                    type="button"
-                    aria-pressed={maxWidth === preset.width}
-                    onClick={() => {
-                      setMaxWidth(preset.width);
-                      // A new size applies at once: there's nothing else to press.
-                      if (preset.width !== applied.split('|')[0])
-                        void convertAll(items, { maxWidth: preset.width, format, quality });
-                    }}
-                    className={cn(
-                      'grid min-h-12 place-content-center rounded-[10px] px-1 text-[14px] leading-tight font-medium transition-colors lg:min-h-11',
-                      maxWidth === preset.width
-                        ? 'bg-surface text-ink shadow-card'
-                        : 'text-muted hover:text-ink',
-                    )}
-                  >
-                    {preset.label}
-                    <span className="mono-num block text-[11px] font-normal text-muted">
-                      {preset.width ? `${preset.width} px` : 'Full size'}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <details className="group rounded-[14px] bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)]">
-              <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 px-3.5 text-[14px] font-medium text-ink-2 [&::-webkit-details-marker]:hidden">
-                <Icon name="sliders" size={15} className="shrink-0 text-muted" />
-                <span className="shrink-0">More options</span>
-                <span className="min-w-0 truncate text-[12.5px] font-normal text-muted">
-                  {FORMATS.find((option) => option.value === format)?.label}
-                  {format !== 'image/png' && ` · quality ${quality}`}
-                </span>
-                <Icon
-                  name="chevron-down"
-                  size={16}
-                  className="ml-auto shrink-0 text-muted transition-transform group-open:rotate-180"
-                />
-              </summary>
-              <div className="grid gap-4 px-3.5 pt-1 pb-4">
-                <Field
-                  label="Exact width"
-                  htmlFor={`${id}-width`}
-                  hint="Leave blank to keep the original size. Photos are never made bigger."
-                >
-                  <div className="relative">
-                    <Input
-                      id={`${id}-width`}
-                      type="number"
-                      inputMode="numeric"
-                      min={1}
-                      max={20000}
-                      step={1}
-                      placeholder="Original"
-                      value={maxWidth}
-                      onChange={(event) => setMaxWidth(event.target.value)}
-                      className="num pr-10"
-                    />
-                    <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-[13px] text-muted">
-                      px
-                    </span>
-                  </div>
-                </Field>
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Save as" htmlFor={`${id}-format`}>
-                    <Select
-                      id={`${id}-format`}
-                      value={format}
-                      onChange={(event) => setFormat(event.target.value as Format)}
-                    >
-                      {FORMATS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-                  {format !== 'image/png' && (
-                    <Field
-                      label={
-                        <span className="flex w-full justify-between">
-                          Quality{' '}
-                          <span className="mono-num text-[11px] font-normal text-faint">
-                            {quality}
-                          </span>
-                        </span>
-                      }
-                      htmlFor={`${id}-quality`}
-                      hint="Lower makes lighter files."
-                    >
-                      <input
-                        id={`${id}-quality`}
-                        type="range"
-                        min={40}
-                        max={100}
-                        step={1}
-                        value={quality}
-                        onChange={(event) => setQuality(Number(event.target.value))}
-                        className="mt-3 w-full"
-                      />
-                    </Field>
-                  )}
+                <div className="relative">
+                  <Input
+                    id={`${id}-width`}
+                    type="number"
+                    inputMode="numeric"
+                    enterKeyHint="done"
+                    min={1}
+                    max={20000}
+                    step={1}
+                    placeholder="Original"
+                    value={maxWidth}
+                    onChange={(event) => setMaxWidth(event.target.value)}
+                    className="num pr-10"
+                  />
+                  <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-[13px] text-muted">
+                    px
+                  </span>
                 </div>
+              </Field>
+              <div className="grid gap-2">
+                <p className="text-[13px] font-medium text-ink-2">Save as</p>
+                <Choices
+                  label="Save as"
+                  value={format}
+                  onChange={setFormat}
+                  options={FORMATS.map((option) => ({
+                    value: option.value,
+                    label: option.value === 'original' ? 'Same' : option.label,
+                  }))}
+                />
               </div>
-            </details>
+              {format !== 'image/png' && (
+                <Field
+                  label={
+                    <span className="flex w-full justify-between">
+                      Quality{' '}
+                      <span className="mono-num text-[11px] font-normal text-faint">{quality}</span>
+                    </span>
+                  }
+                  htmlFor={`${id}-quality`}
+                  hint="Lower makes lighter files."
+                >
+                  <input
+                    id={`${id}-quality`}
+                    type="range"
+                    min={40}
+                    max={100}
+                    step={1}
+                    value={quality}
+                    onChange={(event) => setQuality(Number(event.target.value))}
+                    className="mt-3 w-full accent-[var(--accent)]"
+                  />
+                </Field>
+              )}
+            </div>
+          </MoreOptions>
 
+          <ActionBar
+            className={cn('!mt-0', workspace && '!static !mx-0 !bg-none !px-0 !pt-0 !pb-0')}
+          >
             <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
               {finished.length > 0 && !stale && !busy ? (
-                <Button variant="primary" onClick={downloadAll} className="!h-12 !text-[15.5px]">
-                  <Icon name="download" size={17} />
+                <ActionButton icon="download" onClick={downloadAll}>
                   {finished.length === 1 ? 'Download' : `Download all ${finished.length}`}
-                </Button>
+                </ActionButton>
               ) : (
-                <Button
-                  variant="primary"
+                <ActionButton
                   disabled={busy}
+                  icon={busy ? 'loader' : 'refresh'}
                   onClick={() => convertAll()}
-                  className="!h-12 !text-[15.5px]"
+                  className={cn(busy && '[&>svg]:animate-spin')}
                 >
                   {busy
                     ? `Shrinking ${Math.max(working, 0) + 1} of ${items.length}…`
                     : `Apply to ${items.length === 1 ? 'the photo' : `all ${items.length}`}`}
-                </Button>
+                </ActionButton>
               )}
-              <Button variant="ghost" onClick={clear} className="!h-12">
+              <ActionButton variant="quiet" onClick={clear} className="!w-auto">
                 Clear
-              </Button>
+              </ActionButton>
             </div>
-          </>
-        )}
-        <p role="status" className={cn('text-[13px] text-muted', !message && 'sr-only')}>
-          {message}
-        </p>
-      </div>
+          </ActionBar>
+          <p role="status" className={cn('text-[13px] text-muted', !message && 'sr-only')}>
+            {message}
+          </p>
+        </div>
 
-      <div className="min-w-0 rounded-[20px] bg-surface shadow-card">
-        {items.length > 0 && (
+        <div className="min-w-0 rounded-[20px] bg-surface shadow-card">
           <div className="flex items-center justify-between gap-3 px-4 pt-4 pb-2">
             <h2 className="text-[14px] font-semibold">
               Your photos{' '}
@@ -666,44 +747,6 @@ export function ImageTool({ slug = '', canSave = false }: { slug?: string; canSa
               </span>
             )}
           </div>
-        )}
-        {items.length === 0 ? (
-          // Before and after, drawn: what this tool does, at a glance.
-          <div className="px-4 pt-4 pb-6">
-            <div className="flex items-end justify-center gap-5 rounded-[16px] bg-tool-image/20 px-4 pt-8 pb-6">
-              <figure className="w-[46%] max-w-[210px]">
-                <span
-                  className="block aspect-[4/3] rounded-[10px] bg-[linear-gradient(180deg,#f6b77a,#f7d9a8_45%,#8a6a4f_46%,#3a3129)] shadow-lift"
-                  aria-hidden="true"
-                />
-                <figcaption className="mt-2 text-center text-[12px] text-muted">
-                  <span className="mono-num text-ink">4032×3024</span> · 4.8 MB
-                </figcaption>
-              </figure>
-              <Icon name="arrow-right" size={18} className="mb-12 text-ink/35" />
-              <figure className="w-[28%] max-w-[120px]">
-                <span
-                  className="block aspect-[4/3] rounded-[8px] bg-[linear-gradient(180deg,#f6b77a,#f7d9a8_45%,#8a6a4f_46%,#3a3129)] shadow-lift"
-                  aria-hidden="true"
-                />
-                <figcaption className="mt-2 text-center text-[12px] text-muted">
-                  <span className="mono-num text-ink">1920×1440</span> · 380 KB
-                </figcaption>
-              </figure>
-            </div>
-            <p className="mt-4 text-center text-[14px] text-ink-2">
-              Add photos and they shrink right away — same picture, a fraction of the weight.
-            </p>
-            <button
-              type="button"
-              onClick={trySample}
-              disabled={busy}
-              className="mx-auto mt-2 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[13.5px] font-medium text-signal-ink transition-colors hover:bg-signal-soft disabled:opacity-50"
-            >
-              <Icon name="sparkles" size={15} /> Try a sample photo
-            </button>
-          </div>
-        ) : (
           <>
             {/* The latest result, large: the picture is the same, the weight isn't. */}
             {latest?.result && latest.source && (
@@ -813,35 +856,33 @@ export function ImageTool({ slug = '', canSave = false }: { slug?: string; canSa
               })}
             </ol>
           </>
-        )}
-        {savable && finished.length > 0 && !busy && (
-          <div className="grid gap-2 border-t border-line px-4 py-3">
-            {savedIds !== null ? (
-              <Link
-                href={workspace!.href(
-                  finished.length === 1 ? `/files?file=${savedIds}` : '/files?view=made',
-                )}
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-[11px] bg-positive-soft text-[15px] font-medium text-positive lg:h-9 lg:text-[13.5px]"
-              >
-                <Icon name="check" size={16} /> Saved to Files · Open
-              </Link>
-            ) : (
-              <>
-                <AttachPicker value={projectId} onChange={setProjectId} className="!bg-subtle" />
-                <Button onClick={saveResults} disabled={saving} className="w-full">
-                  <Icon name="files" size={16} />{' '}
-                  {saving ? 'Saving…' : `Save ${finished.length} to Files`}
-                </Button>
-                <SaveProgress state={saver.state} className="text-center" />
-              </>
-            )}
-          </div>
-        )}
-        {items.length > 0 && (
+          {savable && finished.length > 0 && !busy && (
+            <div className="grid gap-2 border-t border-line px-4 py-3">
+              {savedIds !== null ? (
+                <Link
+                  href={workspace!.href(
+                    finished.length === 1 ? `/files?file=${savedIds}` : '/files?view=made',
+                  )}
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-[11px] bg-positive-soft text-[15px] font-medium text-positive lg:h-9 lg:text-[13.5px]"
+                >
+                  <Icon name="check" size={16} /> Saved to Files · Open
+                </Link>
+              ) : (
+                <>
+                  <AttachPicker value={projectId} onChange={setProjectId} className="!bg-subtle" />
+                  <Button onClick={saveResults} disabled={saving} className="w-full">
+                    <Icon name="files" size={16} />{' '}
+                    {saving ? 'Saving…' : `Save ${finished.length} to Files`}
+                  </Button>
+                  <SaveProgress state={saver.state} className="text-center" />
+                </>
+              )}
+            </div>
+          )}
           <p className="px-4 pb-4 text-[12px] text-faint">
             Copies leave out where the photo was taken and camera details.
           </p>
-        )}
+        </div>
       </div>
     </div>
   );

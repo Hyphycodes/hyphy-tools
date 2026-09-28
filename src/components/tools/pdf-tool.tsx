@@ -1,16 +1,25 @@
 'use client';
 import Link from 'next/link';
-import { useEffect, useId, useRef, useState, type DragEvent } from 'react';
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type CSSProperties,
+  type DragEvent,
+  type ReactNode,
+} from 'react';
 import { SaveProgress, useSaveToFiles } from '@/components/files/save-to-files';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/components/ui/cn';
-import { Input, Segmented } from '@/components/ui/form';
+import { Input } from '@/components/ui/form';
 import { Icon } from '@/components/ui/icon';
 import { useToast } from '@/components/ui/toast';
 import { useOptionalWorkspace } from '@/components/shell/workspace-context';
 import { AttachPicker } from './attach-picker';
 import { formatBytes, plural } from '@/lib/platform/format';
 import { formatRange, parseRange } from '@/lib/tools/pdf';
+import { ActionBar, ActionButton, MoreOptions, SampleButton } from './kit';
 import { PdfOrganize, PdfSplit } from './pdf-pages';
 import type { PdfPreview } from '@/lib/tools/pdf-preview';
 
@@ -73,29 +82,171 @@ function Sheet({ src, label, className }: { src?: string; label?: string; classN
 
 type PdfMode = 'merge' | 'organize' | 'extract' | 'split';
 
-/** The four jobs, with shorter names where a phone is narrow. */
-const MODES: { value: PdfMode; label: React.ReactNode }[] = [
-  {
-    value: 'merge',
-    label: (
-      <>
-        <span className="sm:hidden">Merge</span>
-        <span className="hidden sm:inline">Merge PDFs</span>
-      </>
-    ),
-  },
-  { value: 'organize', label: 'Organize' },
-  {
-    value: 'extract',
-    label: (
-      <>
-        <span className="sm:hidden">Extract</span>
-        <span className="hidden sm:inline">Extract pages</span>
-      </>
-    ),
-  },
-  { value: 'split', label: 'Split' },
+/** Little pages, drawn: what each job does to them. */
+function JobArt({ mode }: { mode: PdfMode }) {
+  const sheet = (x: number, y: number, key: string | number, dim = false, turn = 0) => (
+    <rect
+      key={key}
+      x={x}
+      y={y}
+      width="15"
+      height="20"
+      rx="2.5"
+      transform={turn ? `rotate(${turn} ${x + 7.5} ${y + 10})` : undefined}
+      className={cn('fill-white stroke-[rgb(0_0_0/.14)]', dim && 'opacity-35')}
+    />
+  );
+  const accent = { fill: 'var(--accent)' };
+  return (
+    <svg viewBox="0 0 72 36" aria-hidden="true" className="h-9 w-[72px] overflow-visible">
+      {mode === 'merge' && (
+        <>
+          {sheet(2, 2, 'a', false, -8)}
+          {sheet(2, 14, 'b', false, 6)}
+          <path d="M22 18h14" className="stroke-[var(--accent)]" strokeWidth="2.2" />
+          <path d="M33 14l4 4-4 4" className="fill-none stroke-[var(--accent)]" strokeWidth="2.2" />
+          {sheet(47, 5, 'c')}
+          {sheet(50, 8, 'd')}
+          <rect x="53" y="11" width="15" height="20" rx="2.5" style={accent} />
+        </>
+      )}
+      {mode === 'organize' && (
+        <>
+          {sheet(4, 8, 'a')}
+          <rect
+            x="28"
+            y="6"
+            width="15"
+            height="20"
+            rx="2.5"
+            transform="rotate(12 35.5 16)"
+            style={accent}
+          />
+          {sheet(52, 8, 'c')}
+          <path
+            d="M12 33c8 4 16 4 23 0"
+            className="fill-none stroke-[var(--accent)]"
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
+        </>
+      )}
+      {mode === 'extract' && (
+        <>
+          {[0, 1, 2, 3].map((index) =>
+            index % 2 ? (
+              sheet(index * 18, 8, index, true)
+            ) : (
+              <g key={index}>
+                <rect x={index * 18} y="8" width="15" height="20" rx="2.5" style={accent} />
+                <path
+                  d={`M${index * 18 + 4} 18l3 3 5-6`}
+                  className="fill-none stroke-[#12110d]"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </g>
+            ),
+          )}
+        </>
+      )}
+      {mode === 'split' && (
+        <>
+          {sheet(4, 8, 'a')}
+          <path
+            d="M24 18h10"
+            className="stroke-[var(--accent)]"
+            strokeWidth="2.2"
+            strokeDasharray="3 3"
+          />
+          <rect
+            x="40"
+            y="2"
+            width="15"
+            height="20"
+            rx="2.5"
+            transform="rotate(-8 47.5 12)"
+            style={accent}
+          />
+          {sheet(52, 14, 'c', false, 8)}
+        </>
+      )}
+    </svg>
+  );
+}
+
+/** The four jobs, as pictures to pick from. */
+const JOBS: { value: PdfMode; label: string; hint: string }[] = [
+  { value: 'merge', label: 'Merge', hint: 'Many PDFs into one' },
+  { value: 'organize', label: 'Organize', hint: 'Reorder, turn, remove' },
+  { value: 'extract', label: 'Keep pages', hint: 'Pull out the ones you need' },
+  { value: 'split', label: 'Split', hint: 'One PDF into several' },
 ];
+
+/**
+ * What to do with the PDFs: big picture cards to start, a slim row of chips once there's a file
+ * (picking another job starts it fresh).
+ */
+function JobPicker({
+  value,
+  onChange,
+  compact,
+}: {
+  value: PdfMode;
+  onChange: (mode: PdfMode) => void;
+  compact: boolean;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="What to do"
+      className={cn(
+        compact
+          ? 'scroller -mx-4 flex gap-1.5 overflow-x-auto px-4 sm:mx-0 sm:flex-wrap sm:px-0'
+          : 'grid grid-cols-2 gap-2.5 sm:grid-cols-4',
+      )}
+    >
+      {JOBS.map((job) => {
+        const on = job.value === value;
+        return compact ? (
+          <button
+            key={job.value}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            onClick={() => !on && onChange(job.value)}
+            className={cn(
+              'inline-flex min-h-11 shrink-0 items-center rounded-full px-4 text-[14.5px] font-medium whitespace-nowrap transition-[background-color,color,transform] active:scale-[.97] lg:min-h-10 lg:text-[14px]',
+              on ? 'text-[#12110d]' : 'bg-well text-ink-2 hover:bg-ink/10 hover:text-ink',
+            )}
+            style={on ? { background: 'var(--accent)' } : undefined}
+          >
+            {job.label}
+          </button>
+        ) : (
+          <button
+            key={job.value}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            onClick={() => onChange(job.value)}
+            className={cn(
+              'flex min-w-0 flex-col items-start gap-2 rounded-[18px] p-3.5 text-left transition-[background-color,box-shadow,transform] active:scale-[.98]',
+              on
+                ? 'bg-[color-mix(in_srgb,var(--accent)_13%,transparent)] shadow-[inset_0_0_0_2px_var(--accent)]'
+                : 'bg-well shadow-[inset_0_0_0_1px_var(--color-line)] hover:bg-ink/[.09]',
+            )}
+          >
+            <JobArt mode={job.value} />
+            <span className="text-[15.5px] leading-tight font-semibold text-ink">{job.label}</span>
+            <span className="-mt-1.5 text-[12.5px] leading-snug text-muted">{job.hint}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 /**
  * Runs anywhere. Inside a Space (`slug`, `canSave`) merged and extracted PDFs can also be saved to
@@ -103,16 +254,41 @@ const MODES: { value: PdfMode; label: React.ReactNode }[] = [
  * the device.
  */
 export function PdfTool({ slug = '', canSave = false }: { slug?: string; canSave?: boolean }) {
-  const id = useId();
   const [mode, setMode] = useState<PdfMode>('merge');
-  if (mode === 'organize' || mode === 'split')
-    return (
-      <div className="min-w-0 rounded-[22px] bg-surface p-4 shadow-card sm:p-5">
-        <Segmented name={`${id}-mode`} value={mode} onChange={setMode} options={MODES} />
-        <div className="mt-4">{mode === 'organize' ? <PdfOrganize /> : <PdfSplit />}</div>
+  const [started, setStarted] = useState(false);
+  const pick = (next: PdfMode) => {
+    setMode(next);
+    setStarted(false);
+  };
+  const picker = <JobPicker value={mode} onChange={pick} compact={started} />;
+  return (
+    // The tool's own color, even inside a Space where there's no world around it.
+    <div style={{ '--pdf': 'var(--accent, #ff6a3d)' } as CSSProperties}>
+      <div style={{ '--accent': 'var(--pdf)' } as CSSProperties}>
+        {mode === 'organize' || mode === 'split' ? (
+          <div className="min-w-0 rounded-[22px] bg-surface p-4 shadow-card sm:p-5">
+            {picker}
+            <div className="mt-4">
+              {mode === 'organize' ? (
+                <PdfOrganize onStarted={setStarted} />
+              ) : (
+                <PdfSplit onStarted={setStarted} />
+              )}
+            </div>
+          </div>
+        ) : (
+          <PdfCombine
+            key={mode}
+            slug={slug}
+            canSave={canSave}
+            mode={mode}
+            picker={picker}
+            onStarted={setStarted}
+          />
+        )}
       </div>
-    );
-  return <PdfCombine slug={slug} canSave={canSave} mode={mode} onMode={setMode} />;
+    </div>
+  );
 }
 
 /** Merge (Hyphy Studio's PDF Merge) and Extract: many files in, or one file's chosen pages out. */
@@ -120,16 +296,17 @@ function PdfCombine({
   slug,
   canSave,
   mode,
-  onMode,
+  picker,
+  onStarted,
 }: {
   slug: string;
   canSave: boolean;
   mode: 'merge' | 'extract';
-  onMode: (mode: PdfMode) => void;
+  picker: ReactNode;
+  onStarted: (started: boolean) => void;
 }) {
   const id = useId();
   const toast = useToast();
-  const setMode = onMode;
   const [files, setFiles] = useState<Entry[]>([]);
   const [thumbs, setThumbs] = useState<(string | undefined)[]>([]);
   const [keep, setKeep] = useState<number[]>([]);
@@ -158,6 +335,8 @@ function PdfCombine({
     },
     [],
   );
+
+  useEffect(() => onStarted(files.length > 0), [files.length, onStarted]);
 
   // On a phone the new PDF lands below the pages: bring its Download button into view.
   useEffect(() => {
@@ -378,22 +557,7 @@ function PdfCombine({
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
       <div className="min-w-0 rounded-[22px] bg-surface p-4 shadow-card sm:p-5">
-        <Segmented
-          name={`${id}-mode`}
-          value={mode}
-          onChange={(value) => {
-            generation.current += 1;
-            open.current?.close();
-            open.current = null;
-            setMode(value);
-            setFiles([]);
-            setThumbs([]);
-            setKeep([]);
-            setRange('');
-            clearResult();
-          }}
-          options={MODES}
-        />
+        {picker}
         <input
           ref={input}
           id={`${id}-files`}
@@ -412,15 +576,9 @@ function PdfCombine({
           {files.length === 0 && (
             <>
               <DropZone htmlFor={`${id}-files`} mode={mode} busy={busy} onFiles={add} />
-              <button
-                type="button"
-                onClick={trySamples}
-                disabled={busy}
-                className="mx-auto mt-2 flex min-h-11 items-center gap-1.5 rounded-full px-4 text-[14px] font-medium text-signal-ink transition-colors hover:bg-signal-soft disabled:opacity-50"
-              >
-                <Icon name="sparkles" size={15} />
+              <SampleButton onClick={trySamples} disabled={busy} className="mt-2">
                 {mode === 'merge' ? 'No PDFs handy? Try three samples' : 'Try a 7-page sample'}
-              </button>
+              </SampleButton>
             </>
           )}
 
@@ -449,7 +607,9 @@ function PdfCombine({
                     }}
                     className={cn(
                       'group relative animate-rise cursor-grab rounded-[16px] p-2 transition-all active:cursor-grabbing',
-                      dragging === index ? 'bg-signal-soft opacity-70' : 'hover:bg-subtle',
+                      dragging === index
+                        ? 'bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] opacity-70'
+                        : 'hover:bg-subtle',
                     )}
                   >
                     <div className="relative px-1.5 pt-1.5">
@@ -530,7 +690,7 @@ function PdfCombine({
           {mode === 'extract' && files.length === 1 && (
             <>
               <div className="mb-3 flex items-center gap-3 rounded-[14px] bg-subtle p-2.5 shadow-[inset_0_0_0_1px_var(--color-line)]">
-                <Icon name="pdf" size={18} className="ml-1 text-tool-pdf" />
+                <Icon name="pdf" size={18} className="ml-1 text-[var(--accent)]" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[13.5px] font-medium">
                     {files[0].file.name}
@@ -547,31 +707,12 @@ function PdfCombine({
                   Change
                 </label>
               </div>
-              <div className="mb-3 flex flex-wrap items-end gap-2">
-                <div className="min-w-[160px] flex-1">
-                  <label
-                    htmlFor={`${id}-range`}
-                    className="mb-1.5 block text-[13px] font-medium text-ink-2"
-                  >
-                    Pages to keep{' '}
-                    {files[0].pages ? (
-                      <span className="font-normal text-muted">(1–{files[0].pages})</span>
-                    ) : null}
-                  </label>
-                  <Input
-                    id={`${id}-range`}
-                    value={range}
-                    onChange={(event) => typeRange(event.target.value)}
-                    placeholder="Tap pages below, or type 1-3, 5"
-                    aria-invalid={rangeInvalid}
-                    className={cn(
-                      rangeInvalid && '!shadow-[inset_0_0_0_1.5px_var(--color-caution)]',
-                    )}
-                  />
-                </div>
-                <Button
-                  size="sm"
-                  variant="ghost"
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[14px] font-medium text-ink">
+                  {keep.length ? `Keeping ${plural(keep.length, 'page')}` : 'Tap the pages to keep'}
+                </p>
+                <button
+                  type="button"
                   disabled={!files[0].pages}
                   onClick={() => {
                     const all = Array.from({ length: files[0].pages ?? 0 }, (_, index) => index);
@@ -579,9 +720,10 @@ function PdfCombine({
                     setRange(keep.length === all.length ? '' : formatRange(all));
                     clearResult();
                   }}
+                  className="inline-flex min-h-11 items-center rounded-full bg-well px-4 text-[14px] font-medium text-ink-2 transition-colors hover:bg-ink/10 hover:text-ink disabled:opacity-45 lg:min-h-9 lg:text-[13.5px]"
                 >
                   {keep.length && keep.length === files[0].pages ? 'Select none' : 'Select all'}
-                </Button>
+                </button>
               </div>
               <ol className="grid grid-cols-3 gap-2.5 sm:grid-cols-4 xl:grid-cols-5">
                 {thumbs.map((src, index) => {
@@ -595,7 +737,9 @@ function PdfCombine({
                         onClick={() => toggle(index)}
                         className={cn(
                           'group relative block w-full rounded-[10px] p-1.5 transition-all',
-                          on ? 'bg-signal-soft' : 'hover:bg-subtle',
+                          on
+                            ? 'bg-[color-mix(in_srgb,var(--accent)_16%,transparent)]'
+                            : 'hover:bg-subtle',
                         )}
                       >
                         <Sheet
@@ -604,15 +748,14 @@ function PdfCombine({
                           className={cn(
                             'transition-[opacity,transform] duration-200',
                             keep.length > 0 && !on && 'opacity-45',
-                            on &&
-                              'shadow-[0_0_0_2px_var(--color-signal),0_8px_18px_-8px_rgb(50_64_255/.5)]',
+                            on && 'shadow-[0_0_0_2px_var(--accent),0_8px_18px_-8px_var(--accent)]',
                           )}
                         />
                         <span
                           className={cn(
                             'absolute top-3 right-3 grid size-5 place-items-center rounded-full transition-all',
                             on
-                              ? 'scale-100 bg-signal text-white'
+                              ? 'scale-100 bg-[var(--accent)] text-[#12110d]'
                               : 'scale-90 bg-white/90 text-transparent shadow-[inset_0_0_0_1.5px_var(--color-line-strong)]',
                           )}
                           aria-hidden="true"
@@ -622,7 +765,7 @@ function PdfCombine({
                         <span
                           className={cn(
                             'mono-num mt-1 block text-center text-[11px]',
-                            on ? 'font-medium text-signal-ink' : 'text-muted',
+                            on ? 'font-semibold text-ink' : 'text-muted',
                           )}
                         >
                           {index + 1}
@@ -632,53 +775,74 @@ function PdfCombine({
                   );
                 })}
               </ol>
+              <MoreOptions
+                label="Type page numbers instead"
+                summary={range || undefined}
+                className="mt-3"
+              >
+                <label
+                  htmlFor={`${id}-range`}
+                  className="mb-1.5 block text-[13px] font-medium text-ink-2"
+                >
+                  Pages to keep{' '}
+                  {files[0].pages ? (
+                    <span className="font-normal text-muted">(1–{files[0].pages})</span>
+                  ) : null}
+                </label>
+                <Input
+                  id={`${id}-range`}
+                  value={range}
+                  inputMode="numeric"
+                  enterKeyHint="done"
+                  autoComplete="off"
+                  onChange={(event) => typeRange(event.target.value)}
+                  placeholder="Like 1-3, 5"
+                  aria-invalid={rangeInvalid}
+                  className={cn(rangeInvalid && '!shadow-[inset_0_0_0_1.5px_var(--color-caution)]')}
+                />
+              </MoreOptions>
             </>
           )}
         </div>
 
         {files.length > 0 && (
-          <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-line pt-4">
-            <Button
-              variant="primary"
-              onClick={run}
-              disabled={!ready || busy}
-              className="max-lg:!h-12 max-lg:!text-[15.5px]"
-            >
-              {busy ? (
-                <>
-                  <span
-                    className="size-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white"
-                    aria-hidden="true"
-                  />
-                  Working…
-                </>
-              ) : mode === 'merge' ? (
-                `Merge ${files.length >= 2 ? `${files.length} PDFs` : 'PDFs'}`
-              ) : (
-                `Extract ${keep.length ? plural(keep.length, 'page') : 'pages'}`
-              )}
-            </Button>
-            {files.length > 0 && (
-              <Button
-                variant="ghost"
-                disabled={busy}
-                onClick={() => {
-                  generation.current += 1;
-                  clearResult();
-                  setFiles([]);
-                  setThumbs([]);
-                  setKeep([]);
-                  setRange('');
-                }}
-              >
-                Start over
-              </Button>
-            )}
+          <div className="mt-5 border-t border-line pt-4">
             {mode === 'merge' && totalPages > 0 && (
-              <span className="ml-auto text-[12.5px] text-muted">
-                {plural(totalPages, 'page')} in total
-              </span>
+              <p className="mb-2 text-[12.5px] text-muted">{plural(totalPages, 'page')} in total</p>
             )}
+            <ActionBar
+              className={cn('!mt-0', workspace && '!static !mx-0 !bg-none !px-0 !pt-0 !pb-0')}
+            >
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+                <ActionButton
+                  onClick={run}
+                  disabled={!ready || busy}
+                  icon={busy ? 'loader' : mode === 'merge' ? 'file-stack' : 'check'}
+                  className={cn(busy && '[&>svg]:animate-spin')}
+                >
+                  {busy
+                    ? 'Working…'
+                    : mode === 'merge'
+                      ? `Merge ${files.length >= 2 ? `${files.length} PDFs` : 'PDFs'}`
+                      : `Extract ${keep.length ? plural(keep.length, 'page') : 'pages'}`}
+                </ActionButton>
+                <ActionButton
+                  variant="quiet"
+                  disabled={busy}
+                  className="!w-auto"
+                  onClick={() => {
+                    generation.current += 1;
+                    clearResult();
+                    setFiles([]);
+                    setThumbs([]);
+                    setKeep([]);
+                    setRange('');
+                  }}
+                >
+                  Start over
+                </ActionButton>
+              </div>
+            </ActionBar>
           </div>
         )}
         <p
@@ -706,7 +870,9 @@ function PdfCombine({
           ref={resultCard}
           className={cn(
             'scroll-mt-24 scroll-mb-4 rounded-[24px] p-6 transition-colors duration-300',
-            result ? 'bg-tool-pdf/25' : 'bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)]',
+            result
+              ? 'bg-[color-mix(in_srgb,var(--accent)_22%,transparent)]'
+              : 'bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)]',
           )}
         >
           {result ? (
@@ -731,7 +897,12 @@ function PdfCombine({
                   {plural(result.pages, 'page')}
                 </span>
               </div>
-              <p className="mt-6 truncate text-center text-[15px] font-semibold">{result.name}</p>
+              <p className="mt-6 text-center font-display text-[24px] leading-tight font-bold tracking-[-0.02em] text-ink">
+                Your PDF is ready
+              </p>
+              <p className="mt-1 truncate text-center text-[14px] font-medium text-ink-2">
+                {result.name}
+              </p>
               <p className="text-center text-[13px] text-ink/60">
                 {plural(result.pages, 'page')} · {formatBytes(result.size)}
               </p>
@@ -739,9 +910,9 @@ function PdfCombine({
                 <a
                   href={result.url}
                   download={result.name}
-                  className="inline-flex h-11 items-center justify-center gap-2 rounded-[11px] bg-ink px-4 text-[15px] font-medium text-on-ink transition-colors hover:bg-ink-2 lg:h-10 lg:text-[14px]"
+                  className="inline-flex h-14 items-center justify-center gap-2 rounded-[16px] bg-[var(--accent)] px-5 text-[16.5px] font-semibold text-[#12110d] shadow-[0_14px_32px_-16px_var(--accent)] transition-transform active:scale-[.985] sm:h-13 sm:text-[16px]"
                 >
-                  <Icon name="download" size={16} /> Download PDF
+                  <Icon name="download" size={19} /> Download PDF
                 </a>
                 {savable &&
                   (saved !== null ? (
@@ -826,12 +997,14 @@ function DropZone({
       className={cn(
         'flex cursor-pointer flex-col items-center justify-center gap-2 rounded-[18px] border-[1.5px] border-dashed text-center transition-colors',
         compact ? 'aspect-[8.5/11] px-2' : 'px-4 py-9',
-        over ? 'border-signal bg-signal-soft' : 'border-line-strong bg-subtle hover:bg-well/60',
+        over
+          ? 'border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]'
+          : 'border-line-strong bg-subtle hover:bg-well/60',
       )}
     >
       <span
         className={cn(
-          'grid place-items-center rounded-full bg-tool-pdf text-ink shadow-[inset_0_0_0_1px_rgb(0_0_0/.08)]',
+          'grid place-items-center rounded-full bg-[var(--accent)] text-[#12110d] shadow-[inset_0_0_0_1px_rgb(0_0_0/.08)]',
           compact ? 'size-9' : 'size-12',
         )}
       >

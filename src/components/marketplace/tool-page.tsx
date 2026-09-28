@@ -121,13 +121,13 @@ export function ToolHeader({ tool }: { tool: Tool }) {
               </IntentLink>
             </nav>
             {ready && (
-              <div className="-mr-2 flex items-center gap-0.5 sm:hidden">
+              <div className="-mr-2 flex items-center gap-0.5">
                 <PrivacyNote tool={tool} />
                 <ShareButton
                   title={`${tool.name} · Hyphy Tools`}
                   text={tool.tagline}
-                  label=""
-                  className="!size-9 !justify-center !gap-0 !bg-transparent !p-0 !text-muted !shadow-none hover:!bg-white/[.06]"
+                  compact
+                  className="!h-8 !bg-transparent !px-2.5 !text-[13px] !font-normal !text-muted !shadow-none hover:!bg-white/[.06] hover:!text-ink-2"
                 />
               </div>
             )}
@@ -156,17 +156,6 @@ export function ToolHeader({ tool }: { tool: Tool }) {
           </div>
           {ready && <Journey steps={world.journey} />}
           {ready && <PrivacyDetails tool={tool} />}
-          {ready && (
-            <div className="mt-3 -ml-2.5 hidden flex-wrap items-center gap-1 sm:flex">
-              <PrivacyNote tool={tool} />
-              <ShareButton
-                title={`${tool.name} · Hyphy Tools`}
-                text={tool.tagline}
-                label="Share"
-                className="!h-8 !bg-transparent !px-2.5 !text-[13px] !font-normal !text-muted !shadow-none hover:!bg-white/[.06] hover:!text-ink-2"
-              />
-            </div>
-          )}
         </div>
         {/* Desktop only: the tool's picture beside its name. */}
         {ready && (

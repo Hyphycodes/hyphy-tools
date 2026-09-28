@@ -1,6 +1,7 @@
 'use client';
 import Link from 'next/link';
 import {
+  useCallback,
   useEffect,
   useId,
   useImperativeHandle,
@@ -53,7 +54,7 @@ import {
 } from '@/lib/tools/convert';
 import { formatRange, parseRange } from '@/lib/tools/pdf';
 import type { PdfOpenError, RenderablePdf } from '@/lib/tools/pdf-render';
-import { FileDrop, Note, Surface } from './kit';
+import { FileDrop, MoreOptions, Note, Surface } from './kit';
 
 /*
  * Convert: photos and scans into one PDF, in the order you choose, or the pages of a PDF out as
@@ -84,14 +85,24 @@ function names(list: string[]) {
 
 export function ConvertTool() {
   const [mode, setMode] = useState<Mode>('images');
+  const [started, setStarted] = useState<Record<Mode, boolean>>({ images: false, pdf: false });
   const images = useRef<Intake>(null);
   const pdfs = useRef<Intake>(null);
+  const startedImages = useCallback(
+    (yes: boolean) => setStarted((current) => ({ ...current, images: yes })),
+    [],
+  );
+  const startedPdf = useCallback(
+    (yes: boolean) => setStarted((current) => ({ ...current, pdf: yes })),
+    [],
+  );
   return (
     <div className="grid grid-cols-1 gap-4">
-      <ModeSwitch value={mode} onChange={setMode} />
+      <ModeSwitch value={mode} onChange={setMode} compact={started[mode]} />
       <ImagesToPdf
         ref={images}
         hidden={mode !== 'images'}
+        onStarted={startedImages}
         onPdfs={(files) => {
           setMode('pdf');
           pdfs.current?.take(files);
@@ -100,6 +111,7 @@ export function ConvertTool() {
       <PdfToImages
         ref={pdfs}
         hidden={mode !== 'pdf'}
+        onStarted={startedPdf}
         onImages={(files) => {
           setMode('images');
           images.current?.take(files);
@@ -139,12 +151,89 @@ const MODES: { value: Mode; from: string; to: string; icon: IconName; hint: stri
   { value: 'pdf', from: 'PDF', to: 'images', icon: 'pdf', hint: 'Every page as a JPG or PNG' },
 ];
 
-function ModeSwitch({ value, onChange }: { value: Mode; onChange: (mode: Mode) => void }) {
+/** Photos and a page, drawn: which way the files go. */
+function DirectionArt({ mode }: { mode: Mode }) {
+  const photos = (x: number) =>
+    [0, 1, 2].map((index) => (
+      <g key={index} transform={`rotate(${[-9, 0, 9][index]} ${x + 13} 26)`}>
+        <rect
+          x={x + index * 7}
+          y={12 + index * 2}
+          width="22"
+          height="18"
+          rx="3"
+          fill={['#f6b77a', '#9fc3a8', '#8a6a4f'][index]}
+          className="stroke-[rgb(0_0_0/.18)]"
+        />
+        <path
+          d={`M${x + index * 7 + 3} ${27 + index * 2}l5-6 4 4 3-3 5 5`}
+          className="fill-none stroke-white/70"
+          strokeWidth="1.4"
+        />
+      </g>
+    ));
+  const sheet = (x: number) => (
+    <g>
+      <rect
+        x={x}
+        y="5"
+        width="28"
+        height="36"
+        rx="3.5"
+        className="fill-white stroke-[rgb(0_0_0/.14)]"
+      />
+      <rect x={x} y="5" width="28" height="5" rx="2" style={{ fill: 'var(--accent)' }} />
+      {[16, 21, 26, 31].map((y) => (
+        <rect key={y} x={x + 5} y={y} width={y === 31 ? 11 : 18} height="2" rx="1" fill="#d8d3c8" />
+      ))}
+    </g>
+  );
+  const arrow = (
+    <g className="stroke-[var(--accent)]" strokeWidth="2.4" strokeLinecap="round" fill="none">
+      <path d="M52 23h16" />
+      <path d="M63 18l5 5-5 5" strokeLinejoin="round" />
+    </g>
+  );
+  return (
+    <svg viewBox="0 0 112 46" aria-hidden="true" className="h-11 w-[108px] overflow-visible">
+      {mode === 'images' ? (
+        <>
+          {photos(4)}
+          {arrow}
+          {sheet(78)}
+        </>
+      ) : (
+        <>
+          {sheet(10)}
+          {arrow}
+          {photos(76)}
+        </>
+      )}
+    </svg>
+  );
+}
+
+/**
+ * Which way: two big picture cards to start, a slim switch once there are files. Each side keeps
+ * its own files, so switching back finds them where they were.
+ */
+function ModeSwitch({
+  value,
+  onChange,
+  compact,
+}: {
+  value: Mode;
+  onChange: (mode: Mode) => void;
+  compact: boolean;
+}) {
   return (
     <div
       role="radiogroup"
       aria-label="What to convert"
-      className="grid grid-cols-2 gap-1 rounded-[18px] bg-well p-1 sm:max-w-[620px]"
+      className={cn(
+        'grid grid-cols-2',
+        compact ? 'gap-1 rounded-[18px] bg-well p-1 sm:max-w-[620px]' : 'gap-2.5 sm:gap-3',
+      )}
     >
       {MODES.map((option, index) => {
         const on = option.value === value;
@@ -159,26 +248,50 @@ function ModeSwitch({ value, onChange }: { value: Mode; onChange: (mode: Mode) =
             onClick={() => onChange(option.value)}
             onKeyDown={(event) => arrowTo(event, MODES, index, (next) => onChange(next.value))}
             className={cn(
-              'flex min-h-14 items-center gap-2.5 rounded-[14px] px-2.5 text-left transition-colors sm:gap-3 sm:px-4',
-              on ? 'bg-surface text-ink shadow-card' : 'text-muted hover:text-ink',
+              'text-left transition-[background-color,box-shadow,color,transform]',
+              compact
+                ? cn(
+                    'flex min-h-14 items-center gap-2.5 rounded-[14px] px-2.5 sm:gap-3 sm:px-4',
+                    on ? 'bg-surface text-ink shadow-card' : 'text-muted hover:text-ink',
+                  )
+                : cn(
+                    'flex min-w-0 flex-col items-start gap-3 rounded-[22px] p-4 active:scale-[.98] sm:p-5',
+                    on
+                      ? 'bg-[color-mix(in_srgb,var(--accent)_14%,var(--color-surface))] text-ink shadow-[inset_0_0_0_2px_var(--accent)]'
+                      : 'bg-surface text-ink-2 shadow-card hover:text-ink',
+                  ),
             )}
           >
-            <span
-              className={cn(
-                'grid size-8 shrink-0 place-items-center rounded-[10px] transition-colors sm:size-9 sm:rounded-[11px]',
-                on ? 'text-[#12110d]' : 'bg-ink/5',
-              )}
-              style={on ? { background: 'var(--accent)' } : undefined}
-            >
-              <Icon name={option.icon} size={18} />
-            </span>
+            {compact ? (
+              <span
+                className={cn(
+                  'grid size-8 shrink-0 place-items-center rounded-[10px] transition-colors sm:size-9 sm:rounded-[11px]',
+                  on ? 'text-[#12110d]' : 'bg-ink/5',
+                )}
+                style={on ? { background: 'var(--accent)' } : undefined}
+              >
+                <Icon name={option.icon} size={18} />
+              </span>
+            ) : (
+              <DirectionArt mode={option.value} />
+            )}
             <span className="min-w-0">
-              <span className="flex items-center gap-1.5 text-[15px] font-semibold">
+              <span
+                className={cn(
+                  'flex items-center gap-1.5 font-semibold',
+                  compact ? 'text-[15px]' : 'text-[17px] sm:text-[19px]',
+                )}
+              >
                 {option.from}
-                <Icon name="arrow-right" size={14} className="text-muted" />
+                <Icon name="arrow-right" size={compact ? 14 : 16} className="text-muted" />
                 {option.to}
               </span>
-              <span className="hidden truncate text-[12.5px] text-muted sm:block">
+              <span
+                className={cn(
+                  'text-[12.5px] leading-snug text-muted',
+                  compact ? 'hidden truncate sm:block' : 'mt-0.5 block sm:text-[13.5px]',
+                )}
+              >
                 {option.hint}
               </span>
             </span>
@@ -716,13 +829,17 @@ function ImagesToPdf({
   ref,
   hidden,
   onPdfs,
+  onStarted,
 }: {
   ref: Ref<Intake>;
   hidden: boolean;
   onPdfs: (files: File[]) => void;
+  onStarted: (started: boolean) => void;
 }) {
   const id = useId();
   const [items, setItems] = useState<Picture[]>([]);
+  const started = items.length > 0;
+  useEffect(() => onStarted(started), [started, onStarted]);
   const [setup, setSetup] = useState<PageSetup>(DEFAULT_SETUP);
   const [smaller, setSmaller] = useState(false);
   const [job, setJob] = useState<{ done: number; total: number; label: string } | null>(null);
@@ -1200,35 +1317,40 @@ function ImagesToPdf({
             }
           />
           {paper && (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-1">
-              <Choice<PageSetup['orientation']>
-                label="Orientation"
-                value={setup.orientation}
-                disabled={busy}
-                onChange={(orientation) => setSetup({ ...setup, orientation })}
-                options={[
-                  { value: 'auto', label: 'Auto' },
-                  { value: 'portrait', label: 'Portrait' },
-                  { value: 'landscape', label: 'Landscape' },
-                ]}
-                hint={
-                  setup.orientation === 'auto'
-                    ? 'Each page turns to suit its picture.'
-                    : `Every page ${setup.orientation === 'portrait' ? 'upright' : 'on its side'}; pictures shrink to fit.`
-                }
-              />
-              <Choice<PageSetup['margin']>
-                label="Margin"
-                value={setup.margin}
-                disabled={busy}
-                onChange={(margin) => setSetup({ ...setup, margin })}
-                options={[
-                  { value: 'none', label: 'None' },
-                  { value: 'small', label: 'Small' },
-                  { value: 'normal', label: 'Normal' },
-                ]}
-              />
-            </div>
+            <MoreOptions
+              label="Orientation and margins"
+              summary={`${setup.orientation === 'auto' ? 'Auto' : setup.orientation === 'portrait' ? 'Portrait' : 'Landscape'} · ${setup.margin === 'none' ? 'no' : setup.margin} margin`}
+            >
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-1">
+                <Choice<PageSetup['orientation']>
+                  label="Orientation"
+                  value={setup.orientation}
+                  disabled={busy}
+                  onChange={(orientation) => setSetup({ ...setup, orientation })}
+                  options={[
+                    { value: 'auto', label: 'Auto' },
+                    { value: 'portrait', label: 'Portrait' },
+                    { value: 'landscape', label: 'Landscape' },
+                  ]}
+                  hint={
+                    setup.orientation === 'auto'
+                      ? 'Each page turns to suit its picture.'
+                      : `Every page ${setup.orientation === 'portrait' ? 'upright' : 'on its side'}; pictures shrink to fit.`
+                  }
+                />
+                <Choice<PageSetup['margin']>
+                  label="Margin"
+                  value={setup.margin}
+                  disabled={busy}
+                  onChange={(margin) => setSetup({ ...setup, margin })}
+                  options={[
+                    { value: 'none', label: 'None' },
+                    { value: 'small', label: 'Small' },
+                    { value: 'normal', label: 'Normal' },
+                  ]}
+                />
+              </div>
+            </MoreOptions>
           )}
           <label
             htmlFor={`${id}-smaller`}
@@ -1240,7 +1362,7 @@ function ImagesToPdf({
               checked={smaller}
               disabled={busy}
               onChange={(event) => setSmaller(event.target.checked)}
-              className="mt-0.5 size-5 shrink-0 accent-[var(--color-ink)]"
+              className="mt-0.5 size-5 shrink-0 accent-[var(--accent)]"
             />
             <span className="min-w-0">
               <span className="block text-[14px] font-medium text-ink">Make it smaller</span>
@@ -1253,7 +1375,7 @@ function ImagesToPdf({
             type="button"
             onClick={makePdf}
             disabled={busy || usable.length === 0}
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-[12px] bg-ink px-4 text-[15.5px] font-medium text-on-ink transition-colors hover:bg-ink-2 disabled:opacity-45 lg:h-11 lg:text-[14.5px]"
+            className="inline-flex h-14 items-center justify-center gap-2 rounded-[16px] bg-[var(--accent)] px-5 text-[16.5px] font-semibold text-[#12110d] shadow-[0_14px_32px_-16px_var(--accent)] transition-[transform,opacity] active:scale-[.985] disabled:opacity-40 disabled:shadow-none sm:h-13 sm:text-[16px]"
           >
             <Icon name="file-stack" size={17} />
             {stale
@@ -1346,7 +1468,7 @@ function ImagesToPdf({
               <a
                 href={made.url}
                 download={made.name}
-                className="mt-4 inline-flex h-12 w-full items-center justify-center gap-2 rounded-[12px] bg-ink px-4 text-[15.5px] font-medium text-on-ink transition-colors hover:bg-ink-2 lg:h-11 lg:text-[14.5px]"
+                className="mt-4 w-full inline-flex h-14 items-center justify-center gap-2 rounded-[16px] bg-[var(--accent)] px-5 text-[16.5px] font-semibold text-[#12110d] shadow-[0_14px_32px_-16px_var(--accent)] transition-[transform,opacity] active:scale-[.985] disabled:opacity-40 disabled:shadow-none sm:h-13 sm:text-[16px]"
               >
                 <Icon name="download" size={17} /> Download PDF
               </a>
@@ -1452,13 +1574,17 @@ function PdfToImages({
   ref,
   hidden,
   onImages,
+  onStarted,
 }: {
   ref: Ref<Intake>;
   hidden: boolean;
   onImages: (files: File[]) => void;
+  onStarted: (started: boolean) => void;
 }) {
   const id = useId();
   const [opened, setOpened] = useState<OpenedPdf | null>(null);
+  const started = opened !== null;
+  useEffect(() => onStarted(started), [started, onStarted]);
   const [opening, setOpening] = useState<string | null>(null);
   /** Page thumbnails: a data URL, `null` when a page can't be drawn, undefined until it is. */
   const [thumbs, setThumbs] = useState<(string | null | undefined)[]>([]);
@@ -1924,7 +2050,7 @@ function PdfToImages({
             type="button"
             onClick={makeImages}
             disabled={busy || !opened || picked.length === 0}
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-[12px] bg-ink px-4 text-[15.5px] font-medium text-on-ink transition-colors hover:bg-ink-2 disabled:opacity-45 lg:h-11 lg:text-[14.5px]"
+            className="inline-flex h-14 items-center justify-center gap-2 rounded-[16px] bg-[var(--accent)] px-5 text-[16.5px] font-semibold text-[#12110d] shadow-[0_14px_32px_-16px_var(--accent)] transition-[transform,opacity] active:scale-[.985] disabled:opacity-40 disabled:shadow-none sm:h-13 sm:text-[16px]"
           >
             <Icon name="file-image" size={17} />
             {picked.length ? `Make ${plural(picked.length, label)}` : `Make ${label}s`}
@@ -2039,7 +2165,7 @@ function PdfToImages({
                   type="button"
                   onClick={downloadAll}
                   disabled={zipping || busy}
-                  className="mt-4 inline-flex h-12 w-full items-center justify-center gap-2 rounded-[12px] bg-ink px-4 text-[15.5px] font-medium text-on-ink transition-colors hover:bg-ink-2 disabled:opacity-45 lg:h-11 lg:text-[14.5px]"
+                  className="mt-4 w-full inline-flex h-14 items-center justify-center gap-2 rounded-[16px] bg-[var(--accent)] px-5 text-[16.5px] font-semibold text-[#12110d] shadow-[0_14px_32px_-16px_var(--accent)] transition-[transform,opacity] active:scale-[.985] disabled:opacity-40 disabled:shadow-none sm:h-13 sm:text-[16px]"
                 >
                   <Icon name="download" size={17} />
                   {zipping
