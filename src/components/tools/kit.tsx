@@ -885,10 +885,7 @@ export function CountUp({
     return () => cancelAnimationFrame(frame);
   }, [value, duration, reduced]);
   return (
-    <span
-      className={cn(mono && 'mono-num', className)}
-      aria-label={format(value)}
-    >
+    <span className={cn(mono && 'mono-num', className)} aria-label={format(value)}>
       <span aria-hidden="true">{format(reduced ? value : shown)}</span>
     </span>
   );
@@ -943,6 +940,7 @@ export function DropObject({
   title,
   hint,
   cta,
+  icon,
   children,
   className,
 }: {
@@ -958,6 +956,8 @@ export function DropObject({
   hint?: ReactNode;
   /** The words on the button ("Choose a photo"). */
   cta?: ReactNode;
+  /** The button's icon (default: a camera for pictures, a plus for anything else). */
+  icon?: IconName;
   /** Under the object: a sample, "type it in instead". */
   children?: ReactNode;
   className?: string;
@@ -1048,7 +1048,7 @@ export function DropObject({
             className="inline-flex h-13 cursor-pointer items-center gap-2 rounded-full px-6 text-[16px] font-semibold text-[var(--on-accent,#12110d)] shadow-[0_14px_30px_-16px_var(--accent)] transition-transform active:scale-[.97]"
             style={{ background: ACCENT }}
           >
-            <Icon name={accept?.startsWith('image/') ? 'camera' : 'plus'} size={18} />
+            <Icon name={icon ?? (accept?.startsWith('image/') ? 'camera' : 'plus')} size={18} />
             {label}
           </label>
           {folder && (

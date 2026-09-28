@@ -321,10 +321,12 @@ test('PDFs show their pages, merge, and extract by tapping pages', async ({ page
   await page.getByRole('button', { name: 'Merge 2 PDFs' }).click();
   await expect(page.getByRole('link', { name: 'Download PDF' })).toBeVisible();
 
-  await page.getByRole('radio', { name: /Keep pages/ }).click();
+  // One PDF opens page by page; its jobs appear once it's open.
+  await page.getByRole('button', { name: 'Start over' }).click();
   await page
     .locator('input[type=file]')
     .setInputFiles([{ name: 'three.pdf', mimeType: 'application/pdf', buffer: await make(4) }]);
+  await page.getByRole('radio', { name: /Keep pages/ }).click();
   await page.getByRole('button', { name: 'Page 2', exact: true }).click();
   await page.getByRole('button', { name: 'Page 4', exact: true }).click();
   await expect(page.getByLabel(/Pages to keep/)).toHaveValue('2, 4');
@@ -339,8 +341,9 @@ test('PDF samples can be merged or split without a file of your own', async ({ p
   await page.getByRole('button', { name: 'Merge 3 PDFs' }).click();
   await expect(page.getByRole('link', { name: 'Download PDF' })).toBeVisible();
 
-  await page.getByRole('radio', { name: /Keep pages/ }).click();
+  await page.getByRole('button', { name: 'Start over' }).click();
   await page.getByRole('button', { name: /Try a 7-page sample/ }).click();
+  await page.getByRole('radio', { name: /Keep pages/ }).click();
   await page.getByRole('button', { name: 'Page 7', exact: true }).click();
   await expect(page.getByLabel(/Pages to keep/)).toHaveValue('7');
 });

@@ -635,10 +635,10 @@ export const tools: Tool[] = [
     id: 'convert',
     slug: 'convert',
     name: 'Convert',
-    kind: 'Images to PDF and back',
-    tagline: 'Photos into one PDF, or PDF pages into images.',
+    kind: 'File converter',
+    tagline: 'Photos into a PDF, PDF pages into images, PNG into WebP.',
     description:
-      'Turn photos and scans into a single PDF, in the order you choose, or turn the pages of a PDF into sharp JPG or PNG images.',
+      'Turn photos and scans into a single PDF, in the order you choose, turn the pages of a PDF into sharp JPG or PNG images, or change photos between JPG, PNG and WebP.',
     category: 'files',
     family: 'file-lab',
     status: 'available',

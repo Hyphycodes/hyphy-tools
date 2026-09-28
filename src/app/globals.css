@@ -477,6 +477,10 @@ html[data-modal] {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .tool-world,
+  .tool-world[data-motion] {
+    --motion-dur: 1ms;
+  }
   .fx-pop,
   .fx-rise,
   .fx-emerge,
