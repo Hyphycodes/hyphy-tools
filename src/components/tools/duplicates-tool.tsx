@@ -268,7 +268,7 @@ export function DuplicatesTool() {
               icon="copy"
               accent={ACCENT}
               title="Choose a folder, or a pile of files"
-              hint="Or drop files here. Duplicates compares what’s inside them, whatever their names."
+              hint="Finds files that are exactly the same, even under different names. Nothing gets deleted."
             />
             <button
               type="button"
@@ -314,7 +314,6 @@ export function DuplicatesTool() {
               }
               icon="plus"
               title="Add another folder or more files"
-              hint="Copies are found across everything you add."
             />
           </>
         )}
@@ -323,15 +322,14 @@ export function DuplicatesTool() {
             {note}
           </p>
         )}
-        <Note icon="lock">
-          Duplicates only sees the files or folder you choose: it can’t scan your whole computer.
-          Files are read on this device, never uploaded, and nothing is moved or deleted.
-        </Note>
       </Surface>
 
       <aside
         aria-label="Summary"
-        className="grid min-w-0 grid-cols-1 gap-4 lg:sticky lg:top-24 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:self-start"
+        className={cn(
+          'min-w-0 grid-cols-1 gap-4 lg:sticky lg:top-24 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:grid lg:self-start',
+          phase === 'idle' ? 'hidden' : 'grid',
+        )}
       >
         <Surface className="grid grid-cols-1 gap-4">
           {phase === 'idle' && (
@@ -339,9 +337,9 @@ export function DuplicatesTool() {
               <p className="label">How it finds copies</p>
               <ol className="grid gap-3.5">
                 {[
-                  'Files are compared by size first. A file whose size nobody else shares can’t have a copy, so it’s never read.',
-                  'Files that share a size are read one at a time and fingerprinted (SHA-256) on this device.',
-                  'Same fingerprint, same contents: an exact copy, even under a different name.',
+                  'Choose a folder, or a pile of files.',
+                  'Each file’s contents are compared, so a copy is found even under another name.',
+                  'You get a list of copies, with the one to keep already suggested.',
                 ].map((step, index) => (
                   <li key={step} className="flex gap-3 text-[14px] leading-snug text-ink-2">
                     <span
@@ -363,12 +361,11 @@ export function DuplicatesTool() {
 
           {phase === 'running' && (
             <div className="grid grid-cols-1 gap-3" aria-live="polite">
-              <p className="label">Checking what’s inside</p>
+              <p className="label">Looking for copies</p>
               <p className="text-[13.5px] leading-relaxed text-ink-2">
-                {plural(entries.length, 'file')} compared by size. Only files that share a size with
-                another need reading: {sizes.candidates.length.toLocaleString('en-US')} here.
+                Checking {plural(entries.length, 'file')}.
                 {sizes.skipped.length > 0 &&
-                  ` ${plural(sizes.skipped.length, 'more is', 'more are')} too big to read (over 2 GB).`}
+                  ` ${plural(sizes.skipped.length, 'is', 'are')} too big to check here (over 2 GB).`}
               </p>
               <div
                 role="progressbar"
@@ -444,13 +441,8 @@ export function DuplicatesTool() {
                   </>
                 )}
                 <p className="mt-2 text-[12.5px] leading-relaxed text-muted">
-                  {total.groups ? `In ${plural(total.groups, 'group')}. ` : ''}
-                  Compared {plural(entries.length, 'file')} ({formatSize(totalBytes)}) by size.{' '}
-                  {!sizes.candidates.length
-                    ? 'None share a size, so none needed reading.'
-                    : sizes.candidates.length === entries.length
-                      ? 'Every one shares a size with another, so each needed reading.'
-                      : `Only the ${sizes.candidates.length.toLocaleString('en-US')} that share a size needed reading.`}
+                  {total.groups ? `In ${plural(total.groups, 'group')}, among ` : 'Checked '}
+                  {plural(entries.length, 'file')} ({formatSize(totalBytes)}).
                 </p>
               </div>
 
@@ -459,7 +451,8 @@ export function DuplicatesTool() {
                   <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
                     <span>
                       Stopped early, with {read.toLocaleString('en-US')} of{' '}
-                      {plural(sizes.candidates.length, 'file')} read. The results cover only those.
+                      {plural(sizes.candidates.length, 'file')} checked. The results cover only
+                      those.
                     </span>
                     <button
                       type="button"
@@ -504,7 +497,7 @@ export function DuplicatesTool() {
                   <div className="grid gap-2 border-t border-line pt-4">
                     <p className="text-[14px] font-semibold text-ink">What to do next</p>
                     <ol className="grid list-decimal gap-1.5 pl-5 text-[13.5px] leading-relaxed text-ink-2 marker:text-muted">
-                      <li>Nothing has been moved or deleted. Duplicates can only read.</li>
+                      <li>Nothing has been moved or deleted.</li>
                       <li>Download the report, so you have every path in one list.</li>
                       <li>
                         {onlyNames
@@ -704,8 +697,7 @@ function GroupCard({
           {plural(group.files.length, 'copy', 'copies')} · {formatSize(group.size)} each
         </p>
         <p className="mono-num text-[12px] text-muted">
-          <span className="text-ink-2">{formatSize(group.wasted)}</span> extra ·{' '}
-          <span title={`SHA-256 fingerprint: ${group.hash}`}>{group.hash.slice(0, 8)}</span>
+          <span className="text-ink-2">{formatSize(group.wasted)}</span> extra
         </p>
       </div>
       <fieldset className="mt-2 grid gap-1">

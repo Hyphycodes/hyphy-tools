@@ -20,7 +20,13 @@ import { formatBytes } from '@/lib/platform/format';
 
 const MAX_FILES = 20;
 const MAX_BYTES = 40 * 1024 * 1024;
-const PRESETS = [800, 1200, 1920];
+/** Everyday sizes, by the width they're kept to. Large is the default: sharp on any screen. */
+const PRESETS = [
+  { width: '800', label: 'Small' },
+  { width: '1200', label: 'Medium' },
+  { width: '1920', label: 'Large' },
+  { width: '', label: 'Original' },
+];
 const FORMATS = [
   { value: 'original', label: 'Same as original' },
   { value: 'image/webp', label: 'WebP' },
@@ -34,8 +40,14 @@ const OUTPUTS: Record<string, { extension: string; name: string }> = {
   'image/webp': { extension: 'webp', name: 'WebP' },
 };
 const READABLE = /\.(jpe?g|png|webp|gif|avif|hei[cf])$/i;
+/**
+ * Any image: on an iPhone this offers the photo library and the camera, and hands over HEIC photos
+ * as JPEGs.
+ */
+const ACCEPT = 'image/*';
 
 type Format = (typeof FORMATS)[number]['value'];
+type Settings = { maxWidth: string; format: Format; quality: number };
 type Size = { width: number; height: number };
 type Result = Size & {
   size: number;
@@ -191,7 +203,8 @@ export function ImageTool({ slug = '', canSave = false }: { slug?: string; canSa
   const [over, setOver] = useState(false);
   const [message, setMessage] = useState('');
   const [applied, setApplied] = useState('');
-  const settings = `${maxWidth}|${format}|${quality}`;
+  const settingsOf = (value: Settings) => `${value.maxWidth}|${value.format}|${value.quality}`;
+  const settings = settingsOf({ maxWidth, format, quality });
   const nextId = useRef(0);
   const run = useRef(0);
   const urls = useRef(new Set<string>());
@@ -217,11 +230,12 @@ export function ImageTool({ slug = '', canSave = false }: { slug?: string; canSa
       current.map((item) => (item.id === itemId ? { ...item, ...changes } : item)),
     );
 
-  async function convertAll(queue: Item[] = items) {
+  /** Converts the queue with the settings on screen, or with ones just chosen. */
+  async function convertAll(queue: Item[] = items, use: Settings = { maxWidth, format, quality }) {
     setSavedIds(null);
     const token = ++run.current;
-    setApplied(settings);
-    const parsed = Number.parseInt(maxWidth, 10);
+    setApplied(settingsOf(use));
+    const parsed = Number.parseInt(use.maxWidth, 10);
     const limit = parsed > 0 ? parsed : null;
     queue.forEach((item) => item.result?.url !== item.preview && release(item.result?.url));
     setItems((current) =>
@@ -237,9 +251,9 @@ export function ImageTool({ slug = '', canSave = false }: { slug?: string; canSa
     for (const [index, item] of queue.entries()) {
       setMessage(`Working on ${index + 1} of ${queue.length}: ${item.file.name}`);
       patch(item.id, { state: 'working' });
-      const type = outputType(format, item.file);
+      const type = outputType(use.format, item.file);
       try {
-        const output = await convert(item.file, limit, type, quality);
+        const output = await convert(item.file, limit, type, use.quality);
         if (run.current !== token) return;
         if (output.blob.type !== type) fallbacks.add(OUTPUTS[type].name);
         // Same size and format, but heavier? Hand back the original rather than a worse file.
@@ -418,9 +432,24 @@ export function ImageTool({ slug = '', canSave = false }: { slug?: string; canSa
   };
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-      <div className="grid content-start gap-5 rounded-[20px] bg-surface p-5 shadow-card">
-        <div
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+      <div className="grid min-w-0 grid-cols-1 content-start gap-5 rounded-[20px] bg-surface p-4 shadow-card sm:p-5">
+        <input
+          ref={input}
+          id={`${id}-files`}
+          type="file"
+          accept={ACCEPT}
+          multiple
+          disabled={busy}
+          className="sr-only"
+          onChange={(event) => {
+            add(event.target.files);
+            event.target.value = '';
+          }}
+        />
+        {/* The whole area is the button: tap anywhere to choose, or drop photos on it. */}
+        <label
+          htmlFor={`${id}-files`}
           data-over={over || undefined}
           onDragEnter={(event) => {
             if (!hasFiles(event) || busy) return;
@@ -441,167 +470,206 @@ export function ImageTool({ slug = '', canSave = false }: { slug?: string; canSa
             add(event.dataTransfer.files);
           }}
           className={cn(
-            'flex flex-col items-center gap-2 rounded-[18px] border-[1.5px] border-dashed px-4 py-8 text-center transition-colors',
-            over ? 'border-signal bg-signal-soft' : 'border-line-strong bg-subtle',
+            'flex cursor-pointer items-center rounded-[18px] border-[1.5px] border-dashed text-center transition-colors',
+            items.length
+              ? 'min-h-14 justify-center gap-2.5 px-4 py-3'
+              : 'flex-col justify-center gap-3 px-4 py-9',
+            over ? 'border-signal bg-signal-soft' : 'border-line-strong bg-subtle hover:bg-well/60',
+            busy && 'pointer-events-none opacity-60',
           )}
         >
-          <span className="grid size-12 place-items-center rounded-full bg-tool-image text-ink shadow-[inset_0_0_0_1px_rgb(0_0_0/.08)]">
-            <Icon name="image" size={22} />
-          </span>
-          <p className="text-[15px] font-semibold">
-            {over ? 'Release to add' : 'Drop images here'}
-          </p>
-          <input
-            ref={input}
-            id={`${id}-files`}
-            type="file"
-            accept="image/jpeg,image/png,image/webp,image/gif,image/avif"
-            multiple
-            disabled={busy}
-            className="sr-only"
-            onChange={(event) => {
-              add(event.target.files);
-              event.target.value = '';
-            }}
-          />
-          <label
-            htmlFor={`${id}-files`}
-            className="inline-flex h-10 items-center rounded-[10px] bg-surface px-4 text-[14px] font-medium shadow-card hover:bg-subtle lg:h-9 lg:text-[13.5px]"
+          <span
+            className={cn(
+              'grid shrink-0 place-items-center rounded-full bg-tool-image text-ink shadow-[inset_0_0_0_1px_rgb(0_0_0/.08)]',
+              items.length ? 'size-8' : 'size-12',
+            )}
           >
-            Choose images
-          </label>
-          <p className="text-[12.5px] text-muted">
-            JPG, PNG, WebP, GIF or AVIF · up to 20 · 40 MB each
-          </p>
-        </div>
-
-        <Field
-          label="Max width"
-          htmlFor={`${id}-width`}
-          hint="Leave blank to keep the original size. Images are never enlarged."
-        >
-          <div className="relative">
-            <Input
-              id={`${id}-width`}
-              type="number"
-              inputMode="numeric"
-              min={1}
-              max={20000}
-              step={1}
-              placeholder="Original"
-              value={maxWidth}
-              onChange={(event) => setMaxWidth(event.target.value)}
-              className="num pr-10"
-            />
-            <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-[13px] text-muted">
-              px
+            <Icon name={items.length ? 'plus' : 'image'} size={items.length ? 16 : 22} />
+          </span>
+          {items.length ? (
+            <span className="text-[15px] font-semibold">
+              {over ? 'Drop to add' : 'Add more photos'}
             </span>
-          </div>
-          <div className="mt-1 flex flex-wrap gap-1.5" role="group" aria-label="Width presets">
-            {[...PRESETS.map(String), ''].map((width) => (
-              <button
-                key={width || 'original'}
-                type="button"
-                aria-pressed={maxWidth === width}
-                onClick={() => setMaxWidth(width)}
-                className={cn(
-                  'h-9 rounded-full px-3 text-[13px] transition-colors lg:h-8',
-                  maxWidth === width ? 'bg-ink text-on-ink' : 'bg-well text-ink-2 hover:bg-ink/10',
-                )}
-              >
-                {width || 'Original'}
-              </button>
-            ))}
-          </div>
-        </Field>
-
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Format" htmlFor={`${id}-format`}>
-            <Select
-              id={`${id}-format`}
-              value={format}
-              onChange={(event) => setFormat(event.target.value as Format)}
-            >
-              {FORMATS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          {format !== 'image/png' && (
-            <Field
-              label={
-                <span className="flex w-full justify-between">
-                  Quality{' '}
-                  <span className="mono-num text-[11px] font-normal text-faint">{quality}</span>
-                </span>
-              }
-              htmlFor={`${id}-quality`}
-              hint={format === 'original' ? 'Used for JPEG and WebP files.' : undefined}
-            >
-              <input
-                id={`${id}-quality`}
-                type="range"
-                min={40}
-                max={100}
-                step={1}
-                value={quality}
-                onChange={(event) => setQuality(Number(event.target.value))}
-                className="mt-3 w-full"
-              />
-            </Field>
-          )}
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          {finished.length > 0 && !stale && !busy ? (
-            <Button variant="primary" onClick={downloadAll}>
-              <Icon name="download" size={16} />
-              {finished.length === 1 ? 'Download' : `Download all ${finished.length}`}
-            </Button>
           ) : (
-            <Button
-              variant="primary"
-              disabled={busy || items.length === 0}
-              onClick={() => convertAll()}
-            >
-              {busy
-                ? `Converting ${Math.max(working, 0) + 1} of ${items.length}…`
-                : stale && finished.length
-                  ? `Apply to ${items.length === 1 ? 'the image' : `all ${items.length}`}`
-                  : 'Resize & convert'}
-            </Button>
+            <>
+              <span className="inline-flex h-12 items-center rounded-[13px] bg-ink px-6 text-[16px] font-semibold text-on-ink shadow-card">
+                {over ? 'Drop to add' : 'Choose photos'}
+              </span>
+              <span className="text-[13px] text-muted">
+                They shrink right away · up to {MAX_FILES} at a time
+              </span>
+            </>
           )}
-          {items.length > 0 && (
-            <Button variant="ghost" onClick={clear}>
-              Clear
-            </Button>
-          )}
-        </div>
-        <p role="status" className="min-h-5 text-[13px] text-muted">
+        </label>
+
+        {items.length > 0 && (
+          <>
+            <div className="grid gap-2">
+              <span id={`${id}-size`} className="text-[13.5px] font-medium text-ink-2">
+                Size
+              </span>
+              <div
+                role="group"
+                aria-labelledby={`${id}-size`}
+                className="grid grid-cols-4 gap-1 rounded-[14px] bg-well p-1"
+              >
+                {PRESETS.map((preset) => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    aria-pressed={maxWidth === preset.width}
+                    onClick={() => {
+                      setMaxWidth(preset.width);
+                      // A new size applies at once: there's nothing else to press.
+                      if (preset.width !== applied.split('|')[0])
+                        void convertAll(items, { maxWidth: preset.width, format, quality });
+                    }}
+                    className={cn(
+                      'grid min-h-12 place-content-center rounded-[10px] px-1 text-[14px] leading-tight font-medium transition-colors lg:min-h-11',
+                      maxWidth === preset.width
+                        ? 'bg-surface text-ink shadow-card'
+                        : 'text-muted hover:text-ink',
+                    )}
+                  >
+                    {preset.label}
+                    <span className="mono-num block text-[11px] font-normal text-muted">
+                      {preset.width ? `${preset.width} px` : 'Full size'}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <details className="group rounded-[14px] bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)]">
+              <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 px-3.5 text-[14px] font-medium text-ink-2 [&::-webkit-details-marker]:hidden">
+                <Icon name="sliders" size={15} className="shrink-0 text-muted" />
+                <span className="shrink-0">More options</span>
+                <span className="min-w-0 truncate text-[12.5px] font-normal text-muted">
+                  {FORMATS.find((option) => option.value === format)?.label}
+                  {format !== 'image/png' && ` · quality ${quality}`}
+                </span>
+                <Icon
+                  name="chevron-down"
+                  size={16}
+                  className="ml-auto shrink-0 text-muted transition-transform group-open:rotate-180"
+                />
+              </summary>
+              <div className="grid gap-4 px-3.5 pt-1 pb-4">
+                <Field
+                  label="Exact width"
+                  htmlFor={`${id}-width`}
+                  hint="Leave blank to keep the original size. Photos are never made bigger."
+                >
+                  <div className="relative">
+                    <Input
+                      id={`${id}-width`}
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      max={20000}
+                      step={1}
+                      placeholder="Original"
+                      value={maxWidth}
+                      onChange={(event) => setMaxWidth(event.target.value)}
+                      className="num pr-10"
+                    />
+                    <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-[13px] text-muted">
+                      px
+                    </span>
+                  </div>
+                </Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Save as" htmlFor={`${id}-format`}>
+                    <Select
+                      id={`${id}-format`}
+                      value={format}
+                      onChange={(event) => setFormat(event.target.value as Format)}
+                    >
+                      {FORMATS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  {format !== 'image/png' && (
+                    <Field
+                      label={
+                        <span className="flex w-full justify-between">
+                          Quality{' '}
+                          <span className="mono-num text-[11px] font-normal text-faint">
+                            {quality}
+                          </span>
+                        </span>
+                      }
+                      htmlFor={`${id}-quality`}
+                      hint="Lower makes lighter files."
+                    >
+                      <input
+                        id={`${id}-quality`}
+                        type="range"
+                        min={40}
+                        max={100}
+                        step={1}
+                        value={quality}
+                        onChange={(event) => setQuality(Number(event.target.value))}
+                        className="mt-3 w-full"
+                      />
+                    </Field>
+                  )}
+                </div>
+              </div>
+            </details>
+
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+              {finished.length > 0 && !stale && !busy ? (
+                <Button variant="primary" onClick={downloadAll} className="!h-12 !text-[15.5px]">
+                  <Icon name="download" size={17} />
+                  {finished.length === 1 ? 'Download' : `Download all ${finished.length}`}
+                </Button>
+              ) : (
+                <Button
+                  variant="primary"
+                  disabled={busy}
+                  onClick={() => convertAll()}
+                  className="!h-12 !text-[15.5px]"
+                >
+                  {busy
+                    ? `Shrinking ${Math.max(working, 0) + 1} of ${items.length}…`
+                    : `Apply to ${items.length === 1 ? 'the photo' : `all ${items.length}`}`}
+                </Button>
+              )}
+              <Button variant="ghost" onClick={clear} className="!h-12">
+                Clear
+              </Button>
+            </div>
+          </>
+        )}
+        <p role="status" className={cn('text-[13px] text-muted', !message && 'sr-only')}>
           {message}
         </p>
       </div>
 
-      <div className="rounded-[20px] bg-surface shadow-card">
-        <div className="flex items-center justify-between gap-3 px-4 pt-4 pb-2">
-          <h2 className="text-[14px] font-semibold">
-            Images{' '}
-            <span className="mono-num ml-1 text-[12px] font-normal text-faint">
-              {items.length}/{MAX_FILES}
-            </span>
-          </h2>
-          {finished.length > 0 && (
-            <span className="rounded-full bg-positive-soft px-2.5 py-1 text-[12.5px] font-medium text-positive">
-              {formatBytes(totalBefore)} → {formatBytes(totalAfter)} ·{' '}
-              {change(totalBefore, totalAfter)}
-            </span>
-          )}
-        </div>
+      <div className="min-w-0 rounded-[20px] bg-surface shadow-card">
+        {items.length > 0 && (
+          <div className="flex items-center justify-between gap-3 px-4 pt-4 pb-2">
+            <h2 className="text-[14px] font-semibold">
+              Your photos{' '}
+              <span className="mono-num ml-1 text-[12px] font-normal text-faint">
+                {items.length}/{MAX_FILES}
+              </span>
+            </h2>
+            {finished.length > 0 && (
+              <span className="rounded-full bg-positive-soft px-2.5 py-1 text-[12.5px] font-medium text-positive">
+                {formatBytes(totalBefore)} → {formatBytes(totalAfter)} ·{' '}
+                {change(totalBefore, totalAfter)}
+              </span>
+            )}
+          </div>
+        )}
         {items.length === 0 ? (
           // Before and after, drawn: what this tool does, at a glance.
-          <div className="px-4 pt-3 pb-6">
+          <div className="px-4 pt-4 pb-6">
             <div className="flex items-end justify-center gap-5 rounded-[16px] bg-tool-image/20 px-4 pt-8 pb-6">
               <figure className="w-[46%] max-w-[210px]">
                 <span
@@ -647,9 +715,9 @@ export function ImageTool({ slug = '', canSave = false }: { slug?: string; canSa
                   className="block max-h-[260px] w-full object-cover"
                 />
                 <figcaption className="absolute inset-x-3 bottom-3 flex flex-wrap items-center gap-1.5 text-[12px]">
-                  <span className="rounded-full bg-white/90 px-2.5 py-1 text-muted backdrop-blur">
+                  <span className="rounded-full bg-black/55 px-2.5 py-1 text-white/70 backdrop-blur">
                     Before{' '}
-                    <span className="mono-num text-ink">
+                    <span className="mono-num text-white">
                       {latest.source.width}×{latest.source.height}
                     </span>{' '}
                     · {formatBytes(latest.file.size)}
@@ -672,7 +740,7 @@ export function ImageTool({ slug = '', canSave = false }: { slug?: string; canSa
                 return (
                   <li
                     key={item.id}
-                    className="flex items-center gap-3 px-4 py-2.5"
+                    className="flex items-center gap-2 px-4 py-2.5 sm:gap-3"
                     data-state={item.state}
                   >
                     <span className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-[10px] bg-well text-[10px] font-medium text-muted uppercase">
@@ -722,7 +790,7 @@ export function ImageTool({ slug = '', canSave = false }: { slug?: string; canSa
                         href={result.url}
                         download={result.name}
                         aria-label={`Download ${result.name}`}
-                        className="grid size-9 place-items-center rounded-[9px] text-ink-2 hover:bg-ink/5"
+                        className="grid size-11 shrink-0 place-items-center rounded-[9px] lg:size-9 text-ink-2 hover:bg-ink/5"
                       >
                         <Icon name="download" size={17} />
                       </a>
@@ -736,7 +804,7 @@ export function ImageTool({ slug = '', canSave = false }: { slug?: string; canSa
                         release(item.preview);
                         setItems((current) => current.filter((entry) => entry.id !== item.id));
                       }}
-                      className="grid size-9 place-items-center rounded-[9px] text-muted hover:bg-ink/5"
+                      className="grid size-11 shrink-0 place-items-center rounded-[9px] lg:size-9 text-muted hover:bg-ink/5"
                     >
                       <Icon name="x" size={16} />
                     </button>
@@ -769,9 +837,11 @@ export function ImageTool({ slug = '', canSave = false }: { slug?: string; canSa
             )}
           </div>
         )}
-        <p className="px-4 pb-4 text-[12px] text-faint">
-          Processed in your browser. Saved copies leave out camera and location data.
-        </p>
+        {items.length > 0 && (
+          <p className="px-4 pb-4 text-[12px] text-faint">
+            Copies leave out where the photo was taken and camera details.
+          </p>
+        )}
       </div>
     </div>
   );

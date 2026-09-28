@@ -147,6 +147,7 @@ function PdfCombine({
   const nextId = useRef(0);
   const resultUrl = useRef<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const resultCard = useRef<HTMLDivElement>(null);
   const open = useRef<PdfPreview | null>(null);
   const generation = useRef(0);
 
@@ -157,6 +158,13 @@ function PdfCombine({
     },
     [],
   );
+
+  // On a phone the new PDF lands below the pages: bring its Download button into view.
+  useEffect(() => {
+    if (!result || !window.matchMedia('(max-width: 1023px)').matches) return;
+    const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    resultCard.current?.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'end' });
+  }, [result]);
 
   function clearResult() {
     if (resultUrl.current) URL.revokeObjectURL(resultUrl.current);
@@ -408,7 +416,7 @@ function PdfCombine({
                 type="button"
                 onClick={trySamples}
                 disabled={busy}
-                className="mx-auto mt-3 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[13.5px] font-medium text-signal-ink transition-colors hover:bg-signal-soft disabled:opacity-50"
+                className="mx-auto mt-2 flex min-h-11 items-center gap-1.5 rounded-full px-4 text-[14px] font-medium text-signal-ink transition-colors hover:bg-signal-soft disabled:opacity-50"
               >
                 <Icon name="sparkles" size={15} />
                 {mode === 'merge' ? 'No PDFs handy? Try three samples' : 'Try a 7-page sample'}
@@ -476,7 +484,7 @@ function PdfCombine({
                         disabled={busy || index === 0}
                         aria-label={`Move ${entry.file.name} earlier`}
                         onClick={() => reorder(index, index - 1)}
-                        className="grid size-8 place-items-center rounded-[8px] text-muted hover:bg-ink/5 hover:text-ink disabled:opacity-30"
+                        className="grid size-10 place-items-center rounded-[8px] text-muted hover:bg-ink/5 hover:text-ink disabled:opacity-30 lg:size-8"
                       >
                         <Icon name="arrow-left" size={15} />
                       </button>
@@ -485,7 +493,7 @@ function PdfCombine({
                         disabled={busy || index === files.length - 1}
                         aria-label={`Move ${entry.file.name} later`}
                         onClick={() => reorder(index, index + 1)}
-                        className="grid size-8 place-items-center rounded-[8px] text-muted hover:bg-ink/5 hover:text-ink disabled:opacity-30"
+                        className="grid size-10 place-items-center rounded-[8px] text-muted hover:bg-ink/5 hover:text-ink disabled:opacity-30 lg:size-8"
                       >
                         <Icon name="arrow-right" size={15} />
                       </button>
@@ -497,7 +505,7 @@ function PdfCombine({
                           clearResult();
                           setFiles(files.filter((item) => item.id !== entry.id));
                         }}
-                        className="ml-auto grid size-8 place-items-center rounded-[8px] text-muted hover:bg-critical-soft hover:text-critical"
+                        className="ml-auto grid size-10 place-items-center rounded-[8px] text-muted hover:bg-critical-soft hover:text-critical lg:size-8"
                       >
                         <Icon name="x" size={15} />
                       </button>
@@ -534,7 +542,7 @@ function PdfCombine({
                 </span>
                 <label
                   htmlFor={`${id}-files`}
-                  className="rounded-[9px] px-2.5 py-1.5 text-[13px] font-medium text-ink-2 hover:bg-ink/5"
+                  className="inline-flex min-h-11 cursor-pointer items-center rounded-[9px] px-3 text-[14px] font-medium text-ink-2 hover:bg-ink/5 lg:min-h-9 lg:text-[13px]"
                 >
                   Change
                 </label>
@@ -628,64 +636,76 @@ function PdfCombine({
           )}
         </div>
 
-        <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-line pt-4">
-          <Button variant="primary" onClick={run} disabled={!ready || busy}>
-            {busy ? (
-              <>
-                <span
-                  className="size-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white"
-                  aria-hidden="true"
-                />
-                Working…
-              </>
-            ) : mode === 'merge' ? (
-              `Merge ${files.length >= 2 ? `${files.length} PDFs` : 'PDFs'}`
-            ) : (
-              `Extract ${keep.length ? plural(keep.length, 'page') : 'pages'}`
-            )}
-          </Button>
-          {files.length > 0 && (
+        {files.length > 0 && (
+          <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-line pt-4">
             <Button
-              variant="ghost"
-              disabled={busy}
-              onClick={() => {
-                generation.current += 1;
-                clearResult();
-                setFiles([]);
-                setThumbs([]);
-                setKeep([]);
-                setRange('');
-              }}
+              variant="primary"
+              onClick={run}
+              disabled={!ready || busy}
+              className="max-lg:!h-12 max-lg:!text-[15.5px]"
             >
-              Start over
+              {busy ? (
+                <>
+                  <span
+                    className="size-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white"
+                    aria-hidden="true"
+                  />
+                  Working…
+                </>
+              ) : mode === 'merge' ? (
+                `Merge ${files.length >= 2 ? `${files.length} PDFs` : 'PDFs'}`
+              ) : (
+                `Extract ${keep.length ? plural(keep.length, 'page') : 'pages'}`
+              )}
             </Button>
-          )}
-          {mode === 'merge' && totalPages > 0 && (
-            <span className="ml-auto text-[12.5px] text-muted">
-              {plural(totalPages, 'page')} in total
-            </span>
-          )}
-        </div>
-        <p role="status" className="mt-2 min-h-5 text-[13px] text-muted">
+            {files.length > 0 && (
+              <Button
+                variant="ghost"
+                disabled={busy}
+                onClick={() => {
+                  generation.current += 1;
+                  clearResult();
+                  setFiles([]);
+                  setThumbs([]);
+                  setKeep([]);
+                  setRange('');
+                }}
+              >
+                Start over
+              </Button>
+            )}
+            {mode === 'merge' && totalPages > 0 && (
+              <span className="ml-auto text-[12.5px] text-muted">
+                {plural(totalPages, 'page')} in total
+              </span>
+            )}
+          </div>
+        )}
+        <p
+          role="status"
+          className={cn('mt-2 text-[13px] text-muted', files.length ? 'min-h-5' : 'text-center')}
+        >
           {message ||
             (mode === 'merge'
               ? files.length === 1
                 ? 'Add one more PDF to merge.'
-                : files.length
-                  ? ''
-                  : 'Choose at least two PDFs to begin.'
-              : files.length
-                ? keep.length
-                  ? ''
-                  : 'Tap the pages you want to keep.'
-                : 'Choose a PDF, then the pages to keep.')}
+                : ''
+              : files.length && !keep.length
+                ? 'Tap the pages you want to keep.'
+                : '')}
         </p>
       </div>
 
-      <div className="grid content-start gap-4 lg:sticky lg:top-6 lg:self-start">
+      <div
+        className={cn(
+          'content-start gap-4 lg:sticky lg:top-6 lg:grid lg:self-start',
+          result ? 'grid' : 'hidden',
+        )}
+      >
         <div
+          ref={resultCard}
           className={cn(
-            'rounded-[24px] p-6 transition-colors duration-300',
+            'scroll-mt-24 scroll-mb-4 rounded-[24px] p-6 transition-colors duration-300',
             result ? 'bg-tool-pdf/25' : 'bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)]',
           )}
         >
@@ -754,15 +774,17 @@ function PdfCombine({
               </div>
               <p className="mt-5 text-[14px] font-medium">Your new PDF appears here</p>
               <p className="mt-1 text-[13px] text-muted">
-                Download it, or save it to Files so it’s with the rest of your work.
+                {savable ? 'Download it, or save it to Files.' : 'Ready to download in a moment.'}
               </p>
             </div>
           )}
         </div>
-        <p className="px-1 text-[12.5px] leading-relaxed text-muted">
-          Pages are copied as they are. Form fields, bookmarks and signatures may not carry over, so
-          keep your originals.
-        </p>
+        {result && (
+          <p className="px-1 text-[12.5px] leading-relaxed text-muted">
+            Pages are copied as they are. Form fields, bookmarks and signatures may not carry over,
+            so keep your originals.
+          </p>
+        )}
       </div>
     </div>
   );
@@ -802,8 +824,8 @@ function DropZone({
         onFiles(event.dataTransfer.files);
       }}
       className={cn(
-        'flex flex-col items-center justify-center gap-2 rounded-[18px] border-[1.5px] border-dashed text-center transition-colors',
-        compact ? 'aspect-[8.5/11] px-2' : 'px-4 py-10',
+        'flex cursor-pointer flex-col items-center justify-center gap-2 rounded-[18px] border-[1.5px] border-dashed text-center transition-colors',
+        compact ? 'aspect-[8.5/11] px-2' : 'px-4 py-9',
         over ? 'border-signal bg-signal-soft' : 'border-line-strong bg-subtle hover:bg-well/60',
       )}
     >
@@ -815,19 +837,26 @@ function DropZone({
       >
         <Icon name={compact ? 'plus' : 'pdf'} size={compact ? 18 : 22} />
       </span>
-      <span className={cn('font-semibold', compact ? 'text-[13px]' : 'text-[15px]')}>
+      <span
+        className={cn(
+          'font-semibold',
+          compact
+            ? 'text-[13px]'
+            : 'mt-1 inline-flex h-12 items-center rounded-[13px] bg-ink px-6 text-[16px] text-on-ink shadow-card',
+        )}
+      >
         {over
           ? 'Drop to add'
           : compact
             ? 'Add PDFs'
             : mode === 'merge'
               ? 'Choose PDFs to merge'
-              : 'Choose one PDF'}
+              : 'Choose a PDF'}
       </span>
       {!compact && (
         <span className="text-[13px] text-muted">
           {mode === 'merge'
-            ? 'Or drop them here · up to 20 files, 50 MB, 500 pages'
+            ? 'Two or more, in any order: you can rearrange them next'
             : 'Then tap the pages you want to keep'}
         </span>
       )}

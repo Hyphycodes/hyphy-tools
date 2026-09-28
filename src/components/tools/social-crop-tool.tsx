@@ -56,8 +56,11 @@ const MAX_BYTES = 40 * 1024 * 1024;
 /** The gallery and the soft backdrop draw from this lighter copy. */
 const PREVIEW_SIDE = 1280;
 const MAX_CUSTOM = 6;
-const ACCEPT =
-  'image/jpeg,image/png,image/webp,image/gif,image/avif,image/heic,image/heif,.heic,.heif';
+/**
+ * Any image: on an iPhone this offers the photo library and the camera, and hands over HEIC photos
+ * as JPEGs, which every browser opens.
+ */
+const ACCEPT = 'image/*';
 const READABLE = /\.(jpe?g|png|webp|gif|avif|hei[cf])$/i;
 const HEIC_NOTE =
   'iPhone HEIC photos open only in Safari. Open this page in Safari, or share the photo as a JPG first.';
@@ -891,14 +894,9 @@ export function SocialCropTool() {
               multiple={false}
               icon="crop"
               accent="#ff9e7a"
-              title="Add one photo"
+              title="Choose a photo"
               disabled={busy}
-              hint={
-                <>
-                  JPG, PNG, WebP, GIF or AVIF, up to 40 MB. You can also paste one. iPhone HEIC
-                  photos open only in Safari.
-                </>
-              }
+              hint="It’s framed for Instagram, TikTok, YouTube and more, ready to download."
               className="sm:!py-14"
             />
             <button
@@ -921,19 +919,7 @@ export function SocialCropTool() {
         )}
       </div>
 
-      <div className="grid min-w-0 gap-5">
-        <Surface>
-          <SizePicker
-            selected={selected}
-            customs={customs}
-            onToggle={toggle}
-            onAdd={addCustom}
-            onRemove={removeCustom}
-            onAll={() => setSelected(formats.map((format) => format.id))}
-            onNone={() => setSelected([])}
-          />
-        </Surface>
-
+      <div className={cn('min-w-0 gap-5 lg:grid', photo ? 'grid' : 'hidden')}>
         <Surface className="grid gap-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <Label>Your frames · {frames.length}</Label>
@@ -943,7 +929,7 @@ export function SocialCropTool() {
           </div>
           {frames.length === 0 ? (
             <p className="rounded-[14px] bg-subtle px-4 py-8 text-center text-[13.5px] text-muted">
-              No sizes chosen yet. Pick one or more above.
+              No sizes chosen yet. Pick some under Change sizes.
             </p>
           ) : (
             <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -1025,10 +1011,35 @@ export function SocialCropTool() {
             </button>
             <p className="text-[12px] leading-relaxed text-faint">
               Every frame at its exact size
-              {type === 'jpg' ? ', JPG at 90% quality' : ', PNG keeps transparency'}. Made on this
-              device; your photo is never uploaded.
+              {type === 'png' && ', with see-through parts kept'}.
             </p>
           </div>
+        </Surface>
+
+        <Surface className="!p-0">
+          <details open={!photo} className="group">
+            <summary className="flex min-h-14 cursor-pointer list-none items-center gap-2.5 px-4 text-[14.5px] font-medium text-ink sm:px-5 [&::-webkit-details-marker]:hidden">
+              <Icon name="crop" size={16} className="shrink-0 text-muted" />
+              Change sizes
+              <span className="text-[13px] font-normal text-muted">{selected.length} chosen</span>
+              <Icon
+                name="chevron-down"
+                size={16}
+                className="ml-auto shrink-0 text-muted transition-transform group-open:rotate-180"
+              />
+            </summary>
+            <div className="px-4 pb-4 sm:px-5 sm:pb-5">
+              <SizePicker
+                selected={selected}
+                customs={customs}
+                onToggle={toggle}
+                onAdd={addCustom}
+                onRemove={removeCustom}
+                onAll={() => setSelected(formats.map((format) => format.id))}
+                onNone={() => setSelected([])}
+              />
+            </div>
+          </details>
         </Surface>
       </div>
     </div>
@@ -1466,14 +1477,6 @@ function Composer({
           </label>
         </div>
       )}
-
-      <p className="flex items-center gap-2 text-[12.5px] text-muted">
-        <Icon name="sparkles" size={14} className="shrink-0" />
-        <span>
-          AI Expand — grow the photo to fit instead of cropping.{' '}
-          <span className="whitespace-nowrap text-faint">Coming later · Pro</span>
-        </span>
-      </p>
 
       {format.covered && (
         <div className="grid gap-1.5">

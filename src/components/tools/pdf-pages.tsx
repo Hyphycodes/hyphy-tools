@@ -141,11 +141,13 @@ function Start({
   reading,
   error,
   verb,
+  hint,
 }: {
   onFile: (file: File) => void;
   reading: boolean;
   error: string;
   verb: string;
+  hint: string;
 }) {
   const [sampling, setSampling] = useState(false);
   return (
@@ -156,7 +158,7 @@ function Start({
         icon="pdf"
         accent="#ff6a3d"
         title={reading ? 'Reading…' : `Choose a PDF to ${verb}`}
-        hint="Up to 50 MB and 500 pages. It stays on your device."
+        hint={hint}
         disabled={reading}
         onFiles={([file]) => file && onFile(file)}
       />
@@ -173,7 +175,7 @@ function Start({
             setSampling(false);
           }
         }}
-        className="mx-auto flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[13.5px] font-medium text-signal-ink transition-colors hover:bg-signal-soft disabled:opacity-50"
+        className="mx-auto flex min-h-11 items-center gap-1.5 rounded-full px-4 text-[14px] font-medium text-signal-ink transition-colors hover:bg-signal-soft disabled:opacity-50"
       >
         <Icon name="sparkles" size={15} /> Try a 7-page sample
       </button>
@@ -360,7 +362,15 @@ export function PdfOrganize() {
   };
 
   if (!pdf.loaded)
-    return <Start onFile={pdf.load} reading={pdf.reading} error={pdf.error} verb="organize" />;
+    return (
+      <Start
+        onFile={pdf.load}
+        reading={pdf.reading}
+        error={pdf.error}
+        verb="organize"
+        hint="Then reorder, turn or remove its pages."
+      />
+    );
 
   return (
     <div className="grid gap-4">
@@ -382,7 +392,7 @@ export function PdfOrganize() {
             setPages([]);
             replace([]);
           }}
-          className="rounded-[9px] px-2.5 py-1.5 text-[13px] font-medium text-ink-2 hover:bg-ink/5"
+          className="inline-flex min-h-11 items-center rounded-[9px] px-3 text-[14px] font-medium text-ink-2 hover:bg-ink/5 lg:min-h-9 lg:text-[13px]"
         >
           Change
         </button>
@@ -576,7 +586,15 @@ export function PdfSplit() {
   };
 
   if (!pdf.loaded)
-    return <Start onFile={pdf.load} reading={pdf.reading} error={pdf.error} verb="split" />;
+    return (
+      <Start
+        onFile={pdf.load}
+        reading={pdf.reading}
+        error={pdf.error}
+        verb="split"
+        hint="Then choose where to cut it into separate files."
+      />
+    );
 
   return (
     <div className="grid gap-4">
@@ -596,7 +614,7 @@ export function PdfSplit() {
             pdf.clear();
             replace([]);
           }}
-          className="rounded-[9px] px-2.5 py-1.5 text-[13px] font-medium text-ink-2 hover:bg-ink/5"
+          className="inline-flex min-h-11 items-center rounded-[9px] px-3 text-[14px] font-medium text-ink-2 hover:bg-ink/5 lg:min-h-9 lg:text-[13px]"
         >
           Change
         </button>
@@ -663,7 +681,7 @@ export function PdfSplit() {
                     replace([]);
                   }}
                   className={cn(
-                    'h-9 rounded-full px-3 text-[13px] transition-colors',
+                    'h-11 rounded-full px-3.5 text-[13.5px] transition-colors lg:h-9 lg:px-3 lg:text-[13px]',
                     size === option ? 'bg-ink text-on-ink' : 'bg-well text-ink-2 hover:bg-ink/10',
                   )}
                 >

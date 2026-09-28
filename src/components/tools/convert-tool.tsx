@@ -295,6 +295,17 @@ function Progress({
   );
 }
 
+/** On a phone a result lands below the settings: bring it into view once it's there. */
+function useShowOnPhone(ready: boolean) {
+  const target = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!ready || !window.matchMedia('(max-width: 1023px)').matches) return;
+    const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    target.current?.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'nearest' });
+  }, [ready]);
+  return target;
+}
+
 function SampleButton({
   onClick,
   disabled,
@@ -959,6 +970,7 @@ function ImagesToPdf({
   /** Page numbers skip pictures that can't be opened: they're left out of the PDF. */
   const pageOf = new Map(usable.map((item, index) => [item.id, index + 1]));
   const change = made && sizeChange(made.before, made.bytes);
+  const madeCard = useShowOnPhone(made !== null && !stale);
 
   return (
     <section
@@ -975,7 +987,7 @@ function ImagesToPdf({
               icon="file-image"
               accent="var(--accent)"
               title="Choose photos or scans"
-              hint={`JPG, PNG, WebP or GIF, up to ${MAX_IMAGES}. Each one becomes a page, in the order you set.`}
+              hint={`Each one becomes a page, in the order you set. Up to ${MAX_IMAGES}.`}
               disabled={busy || drawing}
             />
             <SampleButton onClick={trySamples} disabled={drawing}>
@@ -1161,12 +1173,16 @@ function ImagesToPdf({
         </p>
       </Surface>
 
+      {/* Settings wait for pictures: there's nothing to decide before then. */}
       <aside
         aria-label="Page setup and your PDF"
-        className="grid min-w-0 grid-cols-1 gap-4 lg:sticky lg:top-24"
+        className={cn(
+          'min-w-0 grid-cols-1 gap-4 lg:sticky lg:top-24 lg:grid',
+          items.length ? 'grid' : 'hidden',
+        )}
       >
-        <Surface className="grid grid-cols-1 gap-4">
-          <h2 className="label">Page setup</h2>
+        <Surface className={cn('grid-cols-1 gap-4', items.length ? 'grid' : 'hidden')}>
+          <h2 className="label">Pages</h2>
           <Choice<PageSetup['size']>
             label="Page size"
             value={setup.size}
@@ -1229,9 +1245,7 @@ function ImagesToPdf({
             <span className="min-w-0">
               <span className="block text-[14px] font-medium text-ink">Make it smaller</span>
               <span className="block text-[12.5px] leading-snug text-muted">
-                Photos are kept to {SMALLER.longSide.toLocaleString('en-US')} px on their long side
-                and saved as JPEG at {Math.round(SMALLER.quality * 100)}% quality: easy to email,
-                still sharp on screen.
+                Easier to email, still sharp on screen.
               </span>
             </span>
           </label>
@@ -1271,9 +1285,12 @@ function ImagesToPdf({
         </Surface>
 
         <div
+          ref={madeCard}
           className={cn(
-            'rounded-[24px] p-5 transition-colors duration-300 sm:p-6',
-            made ? ACCENT_TINT : 'bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)]',
+            'scroll-mb-4 rounded-[24px] p-5 transition-colors duration-300 sm:p-6',
+            made
+              ? ACCENT_TINT
+              : 'hidden bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)] lg:block',
           )}
         >
           {made ? (
@@ -1360,10 +1377,11 @@ function ImagesToPdf({
             </div>
           )}
         </div>
-        <p className="px-1 text-[12.5px] leading-relaxed text-muted">
-          Made in your browser; nothing is uploaded. Camera details and location aren’t copied into
-          the PDF.
-        </p>
+        {made && (
+          <p className="px-1 text-[12.5px] leading-relaxed text-muted">
+            Camera details and where a photo was taken aren’t copied into the PDF.
+          </p>
+        )}
       </aside>
     </section>
   );
@@ -1474,7 +1492,6 @@ function PdfToImages({
   const from = JSON.stringify([opened?.id, picked, format, resolution]);
   const stale = rendered !== null && rendered.from !== from;
   const dpi = RESOLUTIONS[resolution].dpi;
-  const first = opened ? pagePixels(opened.first, dpi) : null;
   const label = format === 'png' ? 'PNG' : 'JPG';
 
   async function open(file: File) {
@@ -1684,6 +1701,7 @@ function PdfToImages({
 
   const rangeInvalid = opened !== null && range.trim() !== '' && picked.length === 0;
   const weight = rendered?.images.reduce((sum, image) => sum + image.blob.size, 0) ?? 0;
+  const imagesCard = useShowOnPhone(rendered !== null && !busy && rendered.images.length > 0);
 
   return (
     <section
@@ -1701,7 +1719,7 @@ function PdfToImages({
               icon="pdf"
               accent="var(--accent)"
               title={opening ? `Opening ${opening}…` : 'Choose a PDF'}
-              hint={`Up to ${MAX_PDF_PAGES} pages and 50 MB. Each page you pick becomes a JPG or PNG.`}
+              hint="Each page becomes a picture you can save or share."
               disabled={opening !== null}
             />
             <SampleButton onClick={trySample} disabled={opening !== null}>
@@ -1866,11 +1884,15 @@ function PdfToImages({
         </div>
       </Surface>
 
+      {/* Settings wait for a PDF: there's nothing to decide before then. */}
       <aside
         aria-label="Image settings and your images"
-        className="grid min-w-0 grid-cols-1 gap-4 lg:sticky lg:top-24"
+        className={cn(
+          'min-w-0 grid-cols-1 gap-4 lg:sticky lg:top-24 lg:grid',
+          opened ? 'grid' : 'hidden',
+        )}
       >
-        <Surface className="grid grid-cols-1 gap-4">
+        <Surface className={cn('grid-cols-1 gap-4', opened ? 'grid' : 'hidden')}>
           <h2 className="label">Images</h2>
           <Choice<'jpeg' | 'png'>
             label="Format"
@@ -1883,32 +1905,16 @@ function PdfToImages({
             ]}
           />
           <Choice<Resolution>
-            label="Resolution"
+            label="Quality"
             value={resolution}
             disabled={busy}
             onChange={setResolution}
             options={(Object.keys(RESOLUTIONS) as Resolution[]).map((value) => ({
               value,
               label: RESOLUTIONS[value].label,
-              detail: `${RESOLUTIONS[value].dpi} dpi`,
             }))}
             hint={RESOLUTIONS[resolution].use}
           />
-          {first && (
-            <p className="rounded-[12px] bg-subtle px-3.5 py-2.5 text-[13px] text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line)]">
-              Page 1 comes out at{' '}
-              <span className="mono-num font-medium text-ink">
-                {first.width.toLocaleString('en-US')} × {first.height.toLocaleString('en-US')} px
-              </span>
-              {first.capped && (
-                <span className="text-muted">
-                  {' '}
-                  ({first.dpi} dpi: the most every browser can draw for a page this big)
-                </span>
-              )}
-              .
-            </p>
-          )}
           {format === 'png' && resolution === 'print' && (
             <p className="-mt-1 text-[12.5px] text-muted">
               Print-size PNGs are big files. JPG is a fraction of the size.
@@ -1948,11 +1954,14 @@ function PdfToImages({
         </Surface>
 
         <div
+          ref={imagesCard}
           className={cn(
-            'rounded-[24px] p-5 transition-colors duration-300 sm:p-6',
+            'scroll-mb-4 rounded-[24px] p-5 transition-colors duration-300 sm:p-6',
             rendered?.images.length
               ? ACCENT_TINT
-              : 'bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)]',
+              : rendered && busy
+                ? 'bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)]'
+                : 'hidden bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)] lg:block',
           )}
         >
           {rendered && (rendered.images.length > 0 || busy) ? (
@@ -1972,7 +1981,7 @@ function PdfToImages({
                   </p>
                 </div>
                 <p className="mono-num text-right text-[12px] leading-relaxed text-muted">
-                  {rendered.format === 'png' ? 'PNG' : 'JPG'} · {rendered.dpi} dpi
+                  {rendered.format === 'png' ? 'PNG' : 'JPG'}
                   <br />
                   {formatBytes(weight)}
                 </p>
@@ -2055,8 +2064,8 @@ function PdfToImages({
               {rendered.capped > 0 && (
                 <p className="mt-3 text-[12.5px] text-muted">
                   {plural(rendered.capped, 'page')} {rendered.capped === 1 ? 'was' : 'were'} too big
-                  for {rendered.dpi} dpi, so {rendered.capped === 1 ? 'it was' : 'they were'} drawn
-                  at the most every browser can handle.
+                  for that quality, so {rendered.capped === 1 ? 'it was' : 'they were'} made as
+                  large as a browser can draw.
                 </p>
               )}
             </div>
@@ -2085,10 +2094,11 @@ function PdfToImages({
             </div>
           )}
         </div>
-        <p className="px-1 text-[12.5px] leading-relaxed text-muted">
-          Drawn in your browser; nothing is uploaded. Links, forms and text you can select don’t
-          carry over into images.
-        </p>
+        {rendered && rendered.images.length > 0 && (
+          <p className="px-1 text-[12.5px] leading-relaxed text-muted">
+            Links, forms and text you can select don’t carry over into images.
+          </p>
+        )}
       </aside>
     </section>
   );

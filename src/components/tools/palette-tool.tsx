@@ -53,8 +53,11 @@ const SAMPLE_SIDE = 200;
 const VIEW_SIDE = 1600;
 const PICK_SIDE = 4096;
 const MAX_ADDED = 6;
-const ACCEPT =
-  'image/jpeg,image/png,image/webp,image/gif,image/avif,image/svg+xml,image/heic,image/heif,.heic,.heif';
+/**
+ * Any image: on an iPhone this offers the photo library and the camera, and hands over HEIC photos
+ * as JPEGs, which every browser opens.
+ */
+const ACCEPT = 'image/*';
 const READABLE = /\.(jpe?g|png|webp|gif|avif|svg|hei[cf])$/i;
 const HEIC_NOTE =
   'iPhone HEIC photos open only in Safari. Open this page in Safari, or share the photo as a JPG first.';
@@ -502,14 +505,9 @@ export function PaletteTool() {
               multiple={false}
               icon="palette"
               accent="#a78bfa"
-              title="Drop in a photo or a logo"
+              title="Choose a photo or a logo"
               disabled={opening}
-              hint={
-                <>
-                  JPG, PNG, WebP, GIF, AVIF or SVG, up to 40 MB. You can also paste one. See-through
-                  pixels don’t count. iPhone HEIC photos open only in Safari.
-                </>
-              }
+              hint="Its main colors appear right away, ready to copy."
               className="sm:!py-14"
             />
             <div className="flex flex-wrap items-center justify-center gap-1">
@@ -538,7 +536,7 @@ export function PaletteTool() {
         )}
       </div>
 
-      <div className="grid min-w-0 gap-5">
+      <div className={cn('min-w-0 gap-5 lg:grid', image ? 'grid' : 'hidden')}>
         <Surface className="grid gap-5 !p-5 sm:!p-6" aria-labelledby={`${id}-colors`}>
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
@@ -553,7 +551,7 @@ export function PaletteTool() {
                   : 'Colors'}
               </p>
             </div>
-            <Stepper count={count} onChange={setCount} />
+            {image && <Stepper count={count} onChange={setCount} />}
           </div>
 
           {image ? (
@@ -618,13 +616,14 @@ export function PaletteTool() {
             <Example />
           )}
 
-          <AddColor
-            disabled={!image}
-            onAdd={(color) =>
-              image &&
-              add({ ...color, share: shareNear(image.sample, color.rgb), at: null, typed: true })
-            }
-          />
+          {image && (
+            <AddColor
+              disabled={false}
+              onAdd={(color) =>
+                add({ ...color, share: shareNear(image.sample, color.rgb), at: null, typed: true })
+              }
+            />
+          )}
         </Surface>
 
         {image && palette.length > 0 && (
@@ -1046,8 +1045,7 @@ function Example() {
         ))}
       </div>
       <p className="text-[14px] text-ink-2">
-        An example. Add an image and its own colors appear here, strongest first, with HEX, RGB and
-        HSL, the text color that reads on each, and CSS ready to paste.
+        An example. Your image’s own colors appear here, biggest first, each ready to copy.
       </p>
     </div>
   );
@@ -1061,9 +1059,7 @@ function Pairs({ palette, pairs }: { palette: Entry[]; pairs: ReturnType<typeof 
     <Surface className="grid gap-4" aria-labelledby={`${id}-pairs`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Label id={`${id}-pairs`}>Readable pairs · {pairs.length}</Label>
-        <span className="text-[12px] text-muted">
-          Text and background at 4.5:1 or more (WCAG AA)
-        </span>
+        <span className="text-[12px] text-muted">Colors that stay easy to read on each other</span>
       </div>
       {pairs.length === 0 ? (
         <p className="rounded-[14px] bg-subtle px-4 py-5 text-[13.5px] text-muted">
@@ -1219,9 +1215,6 @@ function Exports({ palette, stem }: { palette: Entry[]; stem: string }) {
           <Icon name="download" size={15} /> Swatches SVG
         </button>
       </div>
-      <p className="text-[12px] text-faint">
-        Measured in your browser. Your image is never uploaded.
-      </p>
     </Surface>
   );
 }

@@ -398,89 +398,74 @@ export function CleanTool() {
   }
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:items-start">
-      <div className="grid min-w-0 grid-cols-1 gap-5">
-        <Surface className="grid grid-cols-1 gap-4">
-          {items.length === 0 ? (
-            <>
-              <FileDrop
-                folder
-                onFiles={add}
-                disabled={busy}
-                icon="replace"
-                accent={ACCENT}
-                title="Choose the files to rename"
-                hint="Or drop them here. Up to 1,000 files and 1 GB. Choose a folder to keep its structure."
-              />
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:items-start">
+      <Surface className="grid grid-cols-1 gap-4 lg:col-start-1 lg:row-start-1">
+        {items.length === 0 ? (
+          <>
+            <FileDrop
+              folder
+              onFiles={add}
+              disabled={busy}
+              icon="replace"
+              accent={ACCENT}
+              title="Choose the files to rename"
+              hint="You get renamed copies to download. Your originals stay as they are."
+            />
+            <button
+              type="button"
+              onClick={trySample}
+              disabled={busy}
+              className="mx-auto flex min-h-11 items-center gap-1.5 rounded-full px-3.5 text-[13.5px] font-medium text-signal-ink transition-colors hover:bg-signal-soft disabled:opacity-50"
+            >
+              <Icon name="sparkles" size={15} /> No files handy? Try a messy sample
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center gap-3">
+              <span
+                className="grid size-11 shrink-0 place-items-center rounded-[12px] text-[#12110d]"
+                style={{ background: ACCENT }}
+              >
+                <Icon name="files" size={20} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[15px] font-semibold text-ink">
+                  {plural(items.length, 'file')} · {formatBytes(totalBytes)}
+                </p>
+                <p className="truncate text-[13px] text-muted">
+                  {folders.size
+                    ? `${topFolder ? `From “${topFolder}”` : 'From several folders'} · ${plural(folders.size, 'folder')}`
+                    : 'Chosen one by one'}
+                </p>
+              </div>
               <button
                 type="button"
-                onClick={trySample}
                 disabled={busy}
-                className="mx-auto flex min-h-11 items-center gap-1.5 rounded-full px-3.5 text-[13.5px] font-medium text-signal-ink transition-colors hover:bg-signal-soft disabled:opacity-50"
+                onClick={() => {
+                  setItems([]);
+                  setNote('');
+                  setStatus('');
+                }}
+                className="h-11 shrink-0 rounded-[11px] px-3.5 text-[14px] font-medium text-ink-2 hover:bg-ink/5 hover:text-ink disabled:opacity-45 lg:h-9 lg:text-[13.5px]"
               >
-                <Icon name="sparkles" size={15} /> No files handy? Try a messy sample
+                Start over
               </button>
-            </>
-          ) : (
-            <>
-              <div className="flex items-center gap-3">
-                <span
-                  className="grid size-11 shrink-0 place-items-center rounded-[12px] text-[#12110d]"
-                  style={{ background: ACCENT }}
-                >
-                  <Icon name="files" size={20} />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-[15px] font-semibold text-ink">
-                    {plural(items.length, 'file')} · {formatBytes(totalBytes)}
-                  </p>
-                  <p className="truncate text-[13px] text-muted">
-                    {folders.size
-                      ? `${topFolder ? `From “${topFolder}”` : 'From several folders'} · ${plural(folders.size, 'folder')}`
-                      : 'Chosen one by one'}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => {
-                    setItems([]);
-                    setNote('');
-                    setStatus('');
-                  }}
-                  className="h-11 shrink-0 rounded-[11px] px-3.5 text-[14px] font-medium text-ink-2 hover:bg-ink/5 hover:text-ink disabled:opacity-45 lg:h-9 lg:text-[13.5px]"
-                >
-                  Start over
-                </button>
-              </div>
-              {items.length < MAX_FILES && (
-                <FileDrop
-                  folder
-                  compact
-                  onFiles={add}
-                  disabled={busy}
-                  icon="plus"
-                  title="Add more"
-                  hint={`Room for ${plural(MAX_FILES - items.length, 'more file')}, up to 1 GB in all.`}
-                />
-              )}
-            </>
-          )}
-          {note && (
-            <p role="status" className="text-[13px] leading-relaxed text-ink-2">
-              {note}
-            </p>
-          )}
-          <Note icon="lock">
-            Clean only sees the files you choose, and reads them on this device. It can’t look
-            through the rest of your computer, and it can’t rename or delete anything where it sits.
-          </Note>
-        </Surface>
-
-        <Surface className="grid grid-cols-1 gap-6">
+            </div>
+            {items.length < MAX_FILES && (
+              <FileDrop folder compact onFiles={add} disabled={busy} icon="plus" title="Add more" />
+            )}
+          </>
+        )}
+        {note && (
+          <p role="status" className="text-[13px] leading-relaxed text-ink-2">
+            {note}
+          </p>
+        )}
+        {items.length > 0 && (
           <section aria-labelledby={`${id}-presets`} className="grid grid-cols-1 gap-2.5">
             <div className="flex min-h-6 items-center justify-between gap-3">
-              <Label id={`${id}-presets`}>Start from a common job</Label>
+              <Label id={`${id}-presets`}>Pick a quick fix</Label>
               {undo && (
                 <button
                   type="button"
@@ -508,21 +493,14 @@ export function CleanTool() {
               ))}
             </div>
           </section>
+        )}
+      </Surface>
 
+      {items.length > 0 && (
+        <Surface className="grid grid-cols-1 gap-6 max-lg:order-last lg:col-start-1 lg:row-start-2">
           <section aria-labelledby={`${id}-rules`} className="grid grid-cols-1 gap-3">
             <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-              <Label id={`${id}-rules`}>Rules · applied top to bottom</Label>
-              {items.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    document.getElementById(`${id}-preview`)?.scrollIntoView({ block: 'start' })
-                  }
-                  className="min-h-11 text-[12.5px] text-muted underline-offset-2 hover:text-ink hover:underline lg:hidden"
-                >
-                  {plan.changed} of {plural(items.length, 'name')} change · See them
-                </button>
-              )}
+              <Label id={`${id}-rules`}>Fine-tune · rules run top to bottom</Label>
             </div>
             {rules.length > 0 ? (
               <ol className="grid grid-cols-1 gap-2">
@@ -576,12 +554,15 @@ export function CleanTool() {
             </p>
           </section>
         </Surface>
-      </div>
+      )}
 
       <aside
         id={`${id}-preview`}
         aria-label="New names"
-        className="grid min-w-0 scroll-mt-24 gap-4 lg:sticky lg:top-24"
+        className={cn(
+          'min-w-0 scroll-mt-24 gap-4 lg:sticky lg:top-24 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:grid',
+          items.length ? 'grid' : 'hidden',
+        )}
       >
         <Surface className="grid grid-cols-1 gap-4">
           {items.length === 0 ? (
@@ -753,8 +734,8 @@ export function CleanTool() {
                   {status}
                 </p>
                 <p className="text-[12.5px] leading-relaxed text-muted">
-                  Browsers can’t rename files where they sit, so you get renamed copies in a zip.
-                  Your originals stay exactly as they are. The list has every old and new name.
+                  You get renamed copies in one zip; your originals stay exactly as they are. The
+                  list has every old and new name.
                 </p>
               </div>
             </>
