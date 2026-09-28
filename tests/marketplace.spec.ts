@@ -82,11 +82,11 @@ test('open several tools in a row, and back always lands on the marketplace', as
     await expect(page.locator('#tool [aria-busy="true"]')).toHaveCount(0);
     await page.goBack();
     await expect(page).toHaveURL(/\/tools$/);
-    await expect(page.getByRole('heading', { level: 1, name: 'Tools' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'What do you want to do?' })).toBeVisible();
   }
   // Tool to tool, then back through both.
   await page
-    .getByRole('link', { name: /^Split a check/ })
+    .getByRole('link', { name: /^Split dinner/ })
     .first()
     .click();
   await expect(page.getByRole('heading', { level: 1, name: 'Split' })).toBeVisible();
@@ -99,7 +99,7 @@ test('open several tools in a row, and back always lands on the marketplace', as
   await page.goBack();
   await expect(page.getByRole('heading', { level: 1, name: 'Split' })).toBeVisible();
   await page.goBack();
-  await expect(page.getByRole('heading', { level: 1, name: 'Tools' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'What do you want to do?' })).toBeVisible();
 });
 
 test('a category is a filter with an address, and back undoes nothing unexpected', async ({
@@ -118,12 +118,12 @@ test('a category is a filter with an address, and back undoes nothing unexpected
 
 test('a tool page opens straight into the tool, with privacy one tap away', async ({ page }) => {
   await visit(page, '/tools/resize');
-  await expect(page.getByText('Processed on your device').first()).toBeVisible();
-  await page.getByRole('button', { name: 'Processed on your device' }).click();
-  await expect(page.locator('#privacy-details')).toBeVisible();
-  await expect(page.locator('#privacy-details')).toContainText('never uploaded');
-  await page.getByRole('button', { name: 'Got it' }).click();
-  await expect(page.locator('#privacy-details')).toBeHidden();
+  await expect(page.getByText('Stays on your device').first()).toBeVisible();
+  await page.getByRole('button', { name: /Stays on your device/ }).click();
+  await expect(page.locator('#tool-info')).toBeVisible();
+  await expect(page.locator('#tool-info')).toContainText('never uploaded');
+  await page.locator('#tool-info').getByRole('button', { name: 'Close' }).click();
+  await expect(page.locator('#tool-info')).toBeHidden();
 });
 
 test.describe('on a phone', () => {
@@ -136,7 +136,7 @@ test.describe('on a phone', () => {
     const search = await page.getByRole('combobox').first().boundingBox();
     expect(search!.y + search!.height).toBeLessThan(844);
     await page
-      .getByRole('link', { name: /^Split a check/ })
+      .getByRole('link', { name: /^Split dinner/ })
       .first()
       .tap();
     await expect(page.getByRole('heading', { level: 1, name: 'Split' })).toBeVisible();
@@ -144,7 +144,9 @@ test.describe('on a phone', () => {
     // The camera button is on the first screen, no scrolling.
     expect(camera!.y + camera!.height).toBeLessThan(844);
     await page.goBack();
-    await expect(page.getByRole('heading', { level: 1, name: 'Tools' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'What do you want to do?' }),
+    ).toBeVisible();
   });
 
   test('a phone screen of the index shows many tools at once', async ({ page }) => {

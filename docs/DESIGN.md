@@ -73,7 +73,15 @@ Plain and specific: People, Spaces, Projects, Files, Tools, Needs attention, "Wh
 this?". Never tenant, RBAC, schema or workflow. Demo content is fictional and labeled; the
 preview says so where it matters ("In this preview, Hyphy keeps a file's details, not the file").
 
-## After dark: the public Tools world
+## The public Tools world
+
+The marketplace is Hyphy at night; every tool page is its own lit room. The Tool Experience
+System (docs/EXPERIENCE.md) gives each tool a world — surface, room, paper, ink, pattern, main
+object, motion personality and payoff — and re-lights the tokens for it, so Split is cream
+receipt paper and lime, When? a sunrise, QR Studio a bright studio, PDF a desk of warm paper.
+The notes below describe the night marketplace; tool pages follow EXPERIENCE.md.
+
+## After dark: the marketplace
 
 The marketplace and tool pages (`src/app/(public)`, `world.css`) are Hyphy at night — the same
 typefaces and tool colors, re-lit on Hyphy Studio's night surface (`#0b0b0a`).

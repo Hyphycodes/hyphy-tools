@@ -16,7 +16,7 @@ Everything below is about the public side.
 | ------------------------------- | ----------------------------------------------------------------------- |
 | `/`                             | Redirects to `/tools`                                                   |
 | `/tools`                        | The marketplace: search, filters (`?c=money`), featured, everyday, rows |
-| `/tools/{slug}`                 | One tool: a slim header, the tool itself, how it works, privacy, next   |
+| `/tools/{slug}`                 | One tool, in its own world: a slim line, the tool, an info drawer, next |
 | `/tools/{slug}/opengraph-image` | The share card for that tool                                            |
 | `/p#…`                          | A published Signal Page (the page rides inside the link)                |
 | `/spaces`                       | Opens Hyphy Spaces (your last Space)                                    |
@@ -64,10 +64,11 @@ really does its work in the browser.
 
 1. Add its id to `TOOL_IDS` (`ids.ts`) and an entry to `tools.ts` — copy, category, family,
    privacy facts, keywords in people's words, aliases (other products people know), related tools.
-2. Give it artwork in `src/components/marketplace/art.tsx` — TypeScript asks for it (every id
-   needs a composition).
-3. Give it a world in `src/components/marketplace/worlds.ts` (second color, backdrop pattern,
-   mood, the words of its path) — also required by TypeScript.
+2. Give it artwork in `src/components/marketplace/art.tsx` and, once it's open, a miniature in
+   `src/components/marketplace/minis.tsx` — TypeScript asks for both.
+3. Give it a world in `src/components/marketplace/worlds.ts` (surface, room, paper, ink, second
+   and third colors, pattern, main object, motion, payoff, action, path) — also required by
+   TypeScript. See docs/EXPERIENCE.md.
 4. Give it an interface: `src/components/tools/{name}-tool.tsx` (no props), and register it in
    `src/components/marketplace/tool-runtime.tsx` — also required by TypeScript. A Coming soon tool
    registers `null`; a tool marked Available without an interface fails the build.
@@ -103,17 +104,18 @@ result says so ("Signal Pages · for “linktree”"). The examples the user gav
 
 ## The marketplace and tool pages
 
-The marketplace answers "I need to do something": search first (with job chips), two featured
-tools (`FEATURED` in `components/marketplace/sections.tsx`, each with the job on its button),
-three mood shelves (“Make it look good” posters, “Plans with people” wide cards, “Everyday
-helpers” tiles), then every open tool as an app-style row under what it helps with, a one-line
-privacy note and what's on the way. Card shapes (`cards.tsx`): feature, poster, wash, tile,
-card (filtered views) and row. No counts, staff picks or badges on the way in; only Beta and Soon are ever tagged.
+The marketplace opens on “What do you want to do?”: quick actions for the common jobs (each a
+tiny version of its tool), then search, then two featured tools, three mood shelves (“Make it
+look good” prints, “Plans with people” wide cards, “Everyday helpers” tiles), every open tool as
+an app-style row under what it helps with, a one-line privacy note and what's on the way. Every
+card is its tool's world with a miniature of the tool in it (`minis.tsx`): a receipt with who had
+what, a lit week, a real QR code, “4.8 MB → 380 KB”. No counts, staff picks or badges; only Beta
+and Soon are ever tagged.
 
-A tool page is its tool's world (see docs/DESIGN.md) with a slim header (mark, name, tagline,
-the few numbered words of its path, one quiet "Processed on your device" line that opens the
-privacy details in a native popover, Share), then the tool, then how it works,
-where data goes, honest limits and "Open next". On a phone the tool starts on the first screen.
+A tool page is its tool's world (docs/EXPERIENCE.md): one slim line (back, mark, name,
+“Stays on your device ⓘ”, Share), then the tool itself. How it works, where data goes, honest
+limits and what's coming live in the info drawer (`#tool-info`, a native popover) and a quiet
+line under the workspace, followed by “Open next”. On a phone the tool starts on the first screen.
 
 ## Performance rules
 

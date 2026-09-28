@@ -22,7 +22,7 @@ async function noHorizontalScroll(page: Page) {
 test('the front door is the marketplace, not a dashboard', async ({ page }) => {
   await visit(page, '');
   await expect(page).toHaveURL(/\/platform\/tools$/);
-  await expect(page.getByRole('heading', { level: 1, name: 'Tools' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'What do you want to do?' })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Demo Mode' })).toHaveCount(0);
   await expect(page.getByRole('link', { name: /Spaces/ })).toHaveCount(0);
 });
@@ -70,8 +70,13 @@ test('every tool has a page with its name, its privacy and a way back', async ({
   for (const tool of listedTools) {
     await visit(page, `/tools/${tool.slug}`);
     await expect(page.getByRole('heading', { level: 1 }), tool.id).toHaveText(tool.name);
-    await expect(page.getByRole('heading', { name: 'Where your data goes' })).toBeVisible();
     await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toBeVisible();
+    // The details are in the drawer, one tap away, not in front of the tool.
+    await expect(page.getByRole('heading', { name: 'Where your data goes' })).toBeHidden();
+    if (tool.status !== 'soon') {
+      await page.locator('button[popovertarget="tool-info"]').first().click();
+      await expect(page.getByRole('heading', { name: 'Where your data goes' })).toBeVisible();
+    }
   }
   await visit(page, '/tools/not-a-tool');
   await expect(page.getByRole('heading', { name: /no tool at this address/ })).toBeVisible();
