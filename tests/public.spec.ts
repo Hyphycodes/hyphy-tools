@@ -29,7 +29,7 @@ test('the front door is the marketplace, not a dashboard', async ({ page }) => {
 
 test('search understands what people mean', async ({ page }) => {
   await visit(page, '/tools');
-  const box = page.getByRole('combobox', { name: 'What are you trying to do?' });
+  const box = page.getByRole('combobox', { name: 'What do you need to do?' });
   await box.fill('linktree');
   await expect(page.getByRole('option').first()).toContainText('Signal Pages');
   await expect(page.getByRole('option').first()).toContainText('linktree');
@@ -83,39 +83,115 @@ test('Spaces are still there, just not in the public world', async ({ page, cont
   await expect(page).toHaveURL(/\/platform\/(hyphy|personal)$/);
 });
 
-test('Split: a shared plate, tax and tip, and a link that shows everyone’s total', async ({
-  page,
-  browser,
-}) => {
+/** A bill in Split, typed in: the way that works without a camera. */
+async function typeBill(page: Page) {
   await visit(page, '/tools/split');
-  await page.getByLabel('Person 1’s name').fill('Ana');
-  await page.getByLabel('Person 2’s name').fill('Ben');
+  await page.getByRole('button', { name: 'Type it in instead' }).click();
+  await expect(page).toHaveURL(/\?step=receipt$/);
   await page.getByLabel('New item', { exact: true }).fill('Pizza');
   await page.getByLabel('New item’s price').fill('20');
   await page.getByRole('button', { name: 'Add', exact: true }).click();
   await page.getByLabel('New item', { exact: true }).fill('Salad');
   await page.getByLabel('New item’s price').fill('10');
   await page.getByLabel('New item’s price').press('Enter');
+  await page.getByRole('button', { name: /Who’s splitting/ }).click();
+  await page.getByLabel('Person 1’s name').fill('Ana');
+  await page.getByLabel('Add a name').fill('Ben');
+  await page.getByLabel('Add a name').press('Enter');
+  await page.getByRole('button', { name: /Who had what/ }).click();
   await page
     .getByRole('group', { name: 'Who had Salad' })
     .getByRole('button', { name: 'Ben' })
     .click();
+  await page.getByRole('button', { name: /Tax and tip/ }).click();
   await page.getByRole('button', { name: '20%' }).click();
-  const totals = page.getByRole('complementary', { name: 'Totals' });
+  await page.getByRole('button', { name: /See the split/ }).click();
+}
+
+test('Split, typed in: a shared plate, tax and tip, and a link with everyone’s total', async ({
+  page,
+  browser,
+}) => {
+  await typeBill(page);
+  const totals = page.getByRole('region', { name: 'Totals' });
   await expect(totals).toContainText('$36.00');
   await expect(totals.getByRole('button', { name: /Ana/ })).toContainText('$12.00');
   await expect(totals.getByRole('button', { name: /Ben/ })).toContainText('$24.00');
+  // How it was worked out is one tap away.
+  await totals.getByRole('button', { name: /Ben/ }).click();
+  await expect(totals).toContainText('Salad');
 
+  await page.getByRole('button', { name: 'More ways to share' }).click();
   await page.getByRole('button', { name: 'Share the bill as a link' }).click();
-  const link = await totals.locator('span.mono-num').filter({ hasText: '#' }).first().textContent();
+  const link = await page.locator('span.mono-num').filter({ hasText: '#' }).first().textContent();
   expect(link).toContain('/platform/tools/split#');
   const other = await browser.newPage();
   await other.goto(link!, { waitUntil: 'networkidle' });
   await expect(other.getByText('A bill someone shared with you')).toBeVisible();
   await expect(
-    other.getByRole('complementary', { name: 'Totals' }).getByRole('button', { name: /Ben/ }),
+    other.getByRole('region', { name: 'Totals' }).getByRole('button', { name: /Ben/ }),
   ).toContainText('$24.00');
   await other.close();
+});
+
+test('Split steps are pages: back steps back, a reload keeps the bill', async ({ page }) => {
+  await typeBill(page);
+  await expect(page).toHaveURL(/\?step=done$/);
+  await page.goBack();
+  await expect(page).toHaveURL(/\?step=tip$/);
+  await expect(page.getByRole('heading', { name: 'Tax and tip' })).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole('heading', { name: 'Who had what?' })).toBeVisible();
+  await page.reload({ waitUntil: 'networkidle' });
+  await expect(page.getByRole('heading', { name: 'Who had what?' })).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Who had Pizza' })).toBeVisible();
+});
+
+test('Split reads a receipt photo on the device, and every value can be fixed', async ({
+  page,
+}) => {
+  const outside: string[] = [];
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (url.protocol.startsWith('http') && !['localhost', '127.0.0.1'].includes(url.hostname))
+      outside.push(request.url());
+    // The photo is never sent anywhere: only the reader's own files are fetched.
+    if (request.method() === 'POST') outside.push(`POST ${request.url()}`);
+  });
+  await visit(page, '/tools/split');
+  await page.getByLabel('Upload a photo').setInputFiles('tests/fixtures/receipt.jpg');
+  await expect(page.getByRole('heading', { name: 'Check the receipt' })).toBeVisible({
+    timeout: 60_000,
+  });
+  const items = page.getByRole('list', { name: 'Items' });
+  await expect(items.getByRole('listitem')).toHaveCount(5);
+  await expect(page.getByLabel('Item 2', { exact: true })).toHaveValue('Burger');
+  await expect(page.getByLabel('Item 2’s price')).toHaveValue('22.50');
+  await expect(page.getByLabel('Where was this?')).toHaveValue(/Rosa.s Kitchen/);
+  await expect(page.getByLabel('Tax', { exact: true })).toHaveValue('5.69');
+  // Fix a line and remove one: it's the person's call, not the reader's.
+  await page.getByLabel('Item 3’s price').fill('10');
+  await page.getByRole('button', { name: 'Remove Lemonade' }).click();
+  await expect(items.getByRole('listitem')).toHaveCount(4);
+  await page.getByRole('button', { name: /Who’s splitting/ }).click();
+  await page.getByLabel('Add a name').fill('Ana');
+  await page.getByLabel('Add a name').press('Enter');
+  await page.getByRole('button', { name: /Who had what/ }).click();
+  await page.getByRole('button', { name: /Tax and tip/ }).click();
+  await page.getByRole('button', { name: 'No tip' }).click();
+  await page.getByRole('button', { name: /See the split/ }).click();
+  // 14 + 22.50 + 10 + 11.50 = 58.00, plus 5.69 tax, between two.
+  await expect(page.getByRole('region', { name: 'Totals' })).toContainText('$63.69');
+  expect(outside).toEqual([]);
+});
+
+test('Split evenly is a shortcut, not a detour', async ({ page }) => {
+  await visit(page, '/tools/split');
+  await page.getByRole('button', { name: 'Split evenly instead' }).click();
+  await page.getByLabel('Bill total').fill('90');
+  await page.getByRole('button', { name: 'One more person' }).click();
+  await expect(page.getByText('Each person pays')).toBeVisible();
+  await expect(page.locator('[aria-live="polite"]').filter({ hasText: '$' })).toHaveText('$30.00');
 });
 
 test('QR Studio draws as you type and hands over a PNG', async ({ page }) => {

@@ -93,7 +93,7 @@ type Block = { paragraphs?: { lines?: Line[] }[] };
 const deviceReader: ReceiptReader = {
   id: 'device',
   where: 'device',
-  privacy: 'Read on your phone. The photo never leaves it.',
+  privacy: 'Read right here on your device. The photo never leaves it.',
   async read(photo, { onProgress, signal } = {}) {
     const abort = () => {
       if (signal?.aborted) throw new DOMException('Stopped', 'AbortError');

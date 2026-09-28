@@ -143,6 +143,18 @@ export function FileDrop({
     const files = Array.from(list ?? []);
     if (files.length) onFiles(multiple ? files : files.slice(0, 1));
   };
+  // Say what it takes: phones then offer Photos and the camera for pictures.
+  const kind = accept?.startsWith('image/')
+    ? multiple
+      ? 'Choose photos'
+      : 'Choose a photo'
+    : /pdf/.test(accept ?? '')
+      ? multiple
+        ? 'Choose PDFs'
+        : 'Choose a PDF'
+      : multiple
+        ? 'Choose files'
+        : 'Choose a file';
   return (
     <div
       onDragEnter={(event) => {
@@ -171,15 +183,25 @@ export function FileDrop({
         className,
       )}
     >
+      {/* The whole area is the button: a thumb anywhere on it opens the picker. */}
+      <label
+        htmlFor={id}
+        aria-hidden="true"
+        className={cn('absolute inset-0 rounded-[18px]', disabled ? '' : 'cursor-pointer')}
+      />
       <span
-        className="grid size-12 place-items-center rounded-full text-[#12110d] shadow-[inset_0_0_0_1px_rgb(0_0_0/.08)]"
+        className="pointer-events-none relative grid size-12 place-items-center rounded-full text-[#12110d] shadow-[inset_0_0_0_1px_rgb(0_0_0/.08)]"
         style={{ background: accent ?? 'var(--color-well)' }}
       >
         <Icon name={icon} size={22} />
       </span>
-      <p className="text-[15.5px] font-semibold text-ink">{over ? 'Drop to add' : title}</p>
-      {hint && <p className="max-w-sm text-[13px] text-muted">{hint}</p>}
-      <div className="mt-2 flex flex-wrap justify-center gap-2">
+      <p className="pointer-events-none relative text-[15.5px] font-semibold text-ink">
+        {over ? 'Drop to add' : title}
+      </p>
+      {hint && (
+        <p className="pointer-events-none relative max-w-sm text-[13px] text-muted">{hint}</p>
+      )}
+      <div className="relative mt-2 flex flex-wrap justify-center gap-2">
         <label
           htmlFor={id}
           className={cn(
@@ -187,7 +209,7 @@ export function FileDrop({
             disabled && 'pointer-events-none opacity-45',
           )}
         >
-          <Icon name="plus" size={16} /> {multiple ? 'Choose files' : 'Choose a file'}
+          <Icon name="plus" size={16} /> {kind}
         </label>
         {folder && (
           <button
