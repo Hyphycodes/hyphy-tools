@@ -369,7 +369,7 @@ html[data-filtering] [data-editorial] {
     linear-gradient(90deg, var(--color-canvas) 0 6px, transparent 6px) 0 0 / 58px 58px,
     linear-gradient(180deg, var(--color-canvas) 0 6px, transparent 6px) 0 0 / 58px 58px,
     linear-gradient(var(--ink-1), var(--ink-1));
-  opacity: 0.7;
+  opacity: 0.4;
 }
 /* A picnic cloth. */
 .world-night [data-pattern='gingham']::after {
