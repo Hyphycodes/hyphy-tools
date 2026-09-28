@@ -3,10 +3,12 @@ import { Suspense } from 'react';
 import { FilterBar, FilteredTools, LiveFilterBar } from '@/components/marketplace/browse';
 import {
   AllTools,
+  Creative,
   Everyday,
   Featured,
   Hero,
   OnTheWay,
+  People,
   PrivateByDesign,
 } from '@/components/marketplace/sections';
 
@@ -35,6 +37,8 @@ export default function Marketplace() {
         </Suspense>
         <div data-editorial>
           <Featured />
+          <Creative />
+          <People />
           <Everyday />
           <AllTools />
           <PrivateByDesign />

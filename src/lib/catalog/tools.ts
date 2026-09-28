@@ -94,7 +94,7 @@ export const tools: Tool[] = [
       storage: ['browser'],
       note: 'Your list is saved in this browser only. Export it any time; clearing your browser data deletes it.',
     },
-    accent: '#7ce0c3',
+    accent: '#7fb6ff',
     accentInk: 'dark',
     icon: 'repeat',
     keywords: [
@@ -196,7 +196,7 @@ export const tools: Tool[] = [
       storage: ['account'],
       note: 'Trips are kept with your account so they add up across your devices. Hyphy doesn’t sell your data.',
     },
-    accent: '#7fd4ff',
+    accent: '#5ec8e5',
     accentInk: 'dark',
     icon: 'route',
     keywords: [
@@ -300,7 +300,7 @@ export const tools: Tool[] = [
       storage: ['link', 'browser'],
       note: 'The list and its claims travel inside the link. Hyphy’s servers never receive them.',
     },
-    accent: '#ffd166',
+    accent: '#8ee0a0',
     accentInk: 'dark',
     icon: 'basket',
     keywords: [
@@ -433,7 +433,7 @@ export const tools: Tool[] = [
       storage: ['none'],
       note: 'Codes are drawn on your device. No tracking redirect is ever put inside your code.',
     },
-    accent: '#20d392',
+    accent: '#3ee0d0',
     accentInk: 'dark',
     icon: 'qr',
     keywords: [
@@ -543,7 +543,7 @@ export const tools: Tool[] = [
       storage: ['browser'],
       note: 'Links are built on your device. The link you’re making and your recent links are remembered in this browser only.',
     },
-    accent: '#8f9bff',
+    accent: '#f2d7a6',
     accentInk: 'dark',
     icon: 'link-2',
     keywords: [
@@ -857,7 +857,7 @@ export const tools: Tool[] = [
       storage: ['none'],
       note: 'Your photo is framed and exported in your browser. It’s never uploaded.',
     },
-    accent: '#ff9e7a',
+    accent: '#9b86ff',
     accentInk: 'dark',
     icon: 'crop',
     keywords: [
@@ -916,7 +916,7 @@ export const tools: Tool[] = [
       storage: ['none'],
       note: 'Colors are measured in your browser. Your image is never uploaded.',
     },
-    accent: '#a78bfa',
+    accent: '#ff7ab6',
     accentInk: 'dark',
     icon: 'palette',
     keywords: [

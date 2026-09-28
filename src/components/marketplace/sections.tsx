@@ -11,7 +11,7 @@ import {
   type ToolId,
 } from '@/lib/catalog';
 import { ToolArt } from './art';
-import { FeatureCard, ToolCard, ToolRow } from './cards';
+import { FeatureCard, PosterCard, TileCard, ToolRow, WashCard } from './cards';
 import { HeroSearch } from './hero-search';
 import { IntentLink } from './intent-link';
 
@@ -29,8 +29,20 @@ const FEATURED: { id: ToolId; action: string; kicker: string }[] = [
   { id: 'when', action: 'Find a time', kicker: 'For the group chat' },
 ];
 
-/** What people reach for most days. */
-const EVERYDAY: ToolId[] = ['qr', 'pdf', 'social-crop', 'resize', 'bring', 'subscriptions'];
+/** Three shelves with three moods: made to look good, made for people, made to get it done. */
+const CREATIVE: ToolId[] = ['social-crop', 'palette', 'qr', 'signal-pages', 'resize'];
+const PEOPLE: { id: ToolId; action: string }[] = [
+  { id: 'bring', action: 'Start a list' },
+  { id: 'wishlist', action: 'Make a wish list' },
+];
+const EVERYDAY: ToolId[] = [
+  'subscriptions',
+  'pdf',
+  'signal-links',
+  'convert',
+  'clean',
+  'duplicates',
+];
 
 function SectionHead({
   id,
@@ -155,6 +167,55 @@ export function Featured() {
   );
 }
 
+/* ---------------- make it look good ---------------- */
+
+export function Creative() {
+  const tools = CREATIVE.map(getTool).filter(isReady);
+  return (
+    <section aria-labelledby="creative" className="pt-12 sm:pt-16">
+      <div className={cn(wrap, 'px-4 sm:px-6 lg:px-8')}>
+        <SectionHead
+          id="creative"
+          title="Make it look good"
+          lead="Photos, colors, codes and pages that look like you."
+        />
+      </div>
+      {/* Phones: a row of prints to swipe through. */}
+      <div
+        className={cn(
+          wrap,
+          'scroller mt-5 flex scroll-px-4 gap-3 overflow-x-auto px-4 pb-2 sm:mt-7 sm:grid sm:grid-cols-3 sm:gap-5 sm:overflow-visible sm:px-6 lg:grid-cols-5 lg:px-8',
+        )}
+      >
+        {tools.map((tool) => (
+          <PosterCard key={tool.id} tool={tool} className="w-[58%] shrink-0 sm:w-auto" />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/* ---------------- plans with people ---------------- */
+
+export function People() {
+  return (
+    <section aria-labelledby="people" className="px-4 pt-12 sm:px-6 sm:pt-16 lg:px-8">
+      <div className={wrap}>
+        <SectionHead
+          id="people"
+          title="Plans with people"
+          lead="One link for the group chat. Nobody needs an account."
+        />
+        <div className="mt-5 grid gap-3 sm:mt-7 sm:grid-cols-2 sm:gap-5">
+          {PEOPLE.map(({ id, action }) => (
+            <WashCard key={id} tool={getTool(id)} action={action} />
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /* ---------------- everyday ---------------- */
 
 export function Everyday() {
@@ -162,10 +223,14 @@ export function Everyday() {
   return (
     <section aria-labelledby="everyday" className="px-4 pt-12 sm:px-6 sm:pt-16 lg:px-8">
       <div className={wrap}>
-        <SectionHead id="everyday" title="Everyday" />
-        <div className="mt-5 grid grid-cols-2 gap-x-3 gap-y-6 sm:mt-7 sm:grid-cols-3 sm:gap-x-5 sm:gap-y-9">
+        <SectionHead
+          id="everyday"
+          title="Everyday helpers"
+          lead="The small chores, done in a minute."
+        />
+        <div className="mt-5 grid grid-cols-2 gap-3 sm:mt-7 sm:grid-cols-3 sm:gap-5 xl:grid-cols-6">
           {tools.map((tool) => (
-            <ToolCard key={tool.id} tool={tool} />
+            <TileCard key={tool.id} tool={tool} />
           ))}
         </div>
       </div>

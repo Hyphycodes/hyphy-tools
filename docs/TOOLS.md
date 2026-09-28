@@ -66,11 +66,13 @@ really does its work in the browser.
    privacy facts, keywords in people's words, aliases (other products people know), related tools.
 2. Give it artwork in `src/components/marketplace/art.tsx` — TypeScript asks for it (every id
    needs a composition).
-3. Give it an interface: `src/components/tools/{name}-tool.tsx` (no props), and register it in
+3. Give it a world in `src/components/marketplace/worlds.ts` (second color, backdrop pattern,
+   mood, the words of its path) — also required by TypeScript.
+4. Give it an interface: `src/components/tools/{name}-tool.tsx` (no props), and register it in
    `src/components/marketplace/tool-runtime.tsx` — also required by TypeScript. A Coming soon tool
    registers `null`; a tool marked Available without an interface fails the build.
-4. Put its logic in `src/lib/tools/{name}.ts` with tests in `tests/lib-{name}.spec.ts`.
-5. `npm run test:unit` (the registry, search and tool logic) and `npm run verify`.
+5. Put its logic in `src/lib/tools/{name}.ts` with tests in `tests/lib-{name}.spec.ts`.
+6. `npm run test:unit` (the registry, search and tool logic) and `npm run verify`.
 
 It then appears in the marketplace, its category, its family, search and related tools, with its
 own static page and share card.
@@ -102,13 +104,15 @@ result says so ("Signal Pages · for “linktree”"). The examples the user gav
 ## The marketplace and tool pages
 
 The marketplace answers "I need to do something": search first (with job chips), two featured
-tools (`FEATURED` in `components/marketplace/sections.tsx`, each with the job on its button), an
-Everyday grid of compact cards, then every open tool as an app-style row under what it helps
-with, a one-line privacy note and what's on the way. Three card sizes (`cards.tsx`): feature,
-card, row. No counts, staff picks or badges on the way in; only Beta and Soon are ever tagged.
+tools (`FEATURED` in `components/marketplace/sections.tsx`, each with the job on its button),
+three mood shelves (“Make it look good” posters, “Plans with people” wide cards, “Everyday
+helpers” tiles), then every open tool as an app-style row under what it helps with, a one-line
+privacy note and what's on the way. Card shapes (`cards.tsx`): feature, poster, wash, tile,
+card (filtered views) and row. No counts, staff picks or badges on the way in; only Beta and Soon are ever tagged.
 
-A tool page is a slim header (mark, name, tagline, one quiet "Processed on your device" line
-that opens the privacy details in a native popover, Share), then the tool, then how it works,
+A tool page is its tool's world (see docs/DESIGN.md) with a slim header (mark, name, tagline,
+the few numbered words of its path, one quiet "Processed on your device" line that opens the
+privacy details in a native popover, Share), then the tool, then how it works,
 where data goes, honest limits and "Open next". On a phone the tool starts on the first screen.
 
 ## Performance rules

@@ -88,11 +88,23 @@ typefaces and tool colors, re-lit on Hyphy Studio's night surface (`#0b0b0a`).
 - **Tools bring the light.** Each tool has an accent and its own artwork
   (`components/marketplace/art.tsx`): a composition of what it makes, on a charcoal stage lit in
   its color. Families rhyme (Gather is warm, Signal electric, Image Lab sunlit, File Lab paper).
+- **Every tool is its own world.** `components/marketplace/worlds.ts` gives each tool a second
+  light (`--glow`), a backdrop pattern drawn from what it's about (receipt paper for Split, a
+  calendar for When?, a picnic cloth for Bring, code modules for QR, crop frames for Social Crop,
+  paint for Palette, column rules for Signal, a ledger for Subscriptions), a mood and the few
+  words of its path ("Snap the receipt → Who had what → Everyone's total"). On a tool page
+  (`.tool-world`) the night surfaces, lines, selection and focus take on a breath of the tool's
+  accent, so no two tools feel like the same black screen. Patterns are CSS gradients only.
+- **Guided, not forms.** Tools open on a warm start screen (`StartPanel`) with a picture of the
+  result, one obvious way in and a sample; choices are tapped (`Choices`, `ChoiceCards`) rather
+  than typed; the next action is one big button in the tool's color (`ActionButton`, kept under
+  the thumb on phones by `ActionBar`); anything not needed yet waits under `MoreOptions`; tools
+  with steps show where you are (`Journey`). All in `components/tools/kit.tsx`.
 - **Beauty that reduces friction.** People come to do something; the marketplace should let
-  them find it in seconds. Two featured moments at most, then compact cards and rows: a phone
-  screen shows eight or more tools. Three presentations: a feature (the artwork is the stage),
-  a card (artwork and a line, two across on a phone) and a row (the tool's mark and a line, like
-  an app listing). No counts, staff picks or stacks of badges.
+  them find it in seconds. Two featured moments, then three shelves with three moods, each in
+  its own shape: “Make it look good” as posters wearing each tool's color (a swipeable row on a
+  phone), “Plans with people” as wide cards washed in the tool's color, “Everyday helpers” as lit
+  tiles; then every tool as a row. No counts, staff picks or stacks of badges.
 - **Search is the centerpiece.** “What do you need to do?” with a rotating example, job chips,
   results as you type, the reason a tool matched, and ⌘K everywhere.
 - **Plain words first, details second.** A tool page opens into the tool; privacy is one quiet

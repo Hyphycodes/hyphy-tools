@@ -289,3 +289,156 @@ html[data-filtering] [data-editorial] {
 .world-night .skip-link:focus {
   top: 12px;
 }
+
+/* ---------- tool worlds ---------- */
+
+/*
+  Each tool page is its own small world (components/marketplace/worlds.ts): the night surfaces
+  take on a breath of the tool's accent, selection and focus wear its color, and a quiet
+  backdrop — two lights and a pattern drawn from what the tool is about — sits behind the header
+  and the start of the tool. Gradients only: nothing moves, nothing blurs.
+*/
+.world-night .tool-world {
+  --glow: var(--accent);
+  --color-surface: color-mix(in oklab, var(--accent) 7%, #141412);
+  --color-subtle: color-mix(in oklab, var(--accent) 5%, #0f0f0d);
+  --color-well: color-mix(in oklab, var(--accent) 10%, #1d1d1a);
+  --color-line: color-mix(in srgb, var(--accent) 13%, rgb(236 232 223 / 0.05));
+  --color-line-strong: color-mix(in srgb, var(--accent) 26%, rgb(236 232 223 / 0.08));
+  --color-signal: var(--accent);
+  --color-signal-hover: color-mix(in oklab, var(--accent), white 14%);
+  --color-signal-soft: color-mix(in srgb, var(--accent) 17%, transparent);
+  --color-signal-ink: color-mix(in oklab, var(--accent) 72%, white);
+  --world-edge:
+    inset 0 1px 0 rgb(255 255 255 / 0.05),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 14%, rgb(255 255 255 / 0.05));
+  position: relative;
+  isolation: isolate;
+}
+.world-night .tool-world .shadow-card {
+  --tw-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.045),
+    0 0 0 1px color-mix(in srgb, var(--accent) 15%, rgb(255 255 255 / 0.05));
+}
+.world-night .tool-world ::selection {
+  background: color-mix(in srgb, var(--accent) 38%, transparent);
+}
+.world-night .tool-world input[type='range'] {
+  accent-color: var(--accent);
+}
+
+/* The backdrop: two lights, then the world's pattern, fading out as the tool begins. */
+.world-night .world-backdrop {
+  position: absolute;
+  inset: 0 0 auto;
+  height: min(1100px, 150vh);
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+  background:
+    radial-gradient(
+      55% 60% at 88% 0%,
+      color-mix(in srgb, var(--accent) 26%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      45% 45% at 0% 30%,
+      color-mix(in srgb, var(--glow) 13%, transparent),
+      transparent 70%
+    );
+}
+.world-night .world-backdrop::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0.75;
+  mask-image: linear-gradient(180deg, black 0%, rgb(0 0 0 / 0.45) 30%, transparent 70%);
+  -webkit-mask-image: linear-gradient(180deg, black 0%, rgb(0 0 0 / 0.45) 30%, transparent 70%);
+  --ink-1: color-mix(in srgb, var(--accent) 9%, transparent);
+  --ink-2: color-mix(in srgb, var(--glow) 8%, transparent);
+}
+/* Receipt paper: faint printed rows, dotted leaders. */
+.world-night [data-pattern='receipt']::after {
+  background:
+    radial-gradient(circle at 1px 1px, var(--ink-2) 1.2px, transparent 1.6px) 0 0 / 9px 30px,
+    repeating-linear-gradient(180deg, transparent 0 29px, var(--ink-1) 29px 30px);
+}
+/* A month on the wall: rounded day cells. */
+.world-night [data-pattern='calendar']::after {
+  background:
+    linear-gradient(90deg, var(--color-canvas) 0 6px, transparent 6px) 0 0 / 58px 58px,
+    linear-gradient(180deg, var(--color-canvas) 0 6px, transparent 6px) 0 0 / 58px 58px,
+    linear-gradient(var(--ink-1), var(--ink-1));
+  opacity: 0.7;
+}
+/* A picnic cloth. */
+.world-night [data-pattern='gingham']::after {
+  opacity: 0.5;
+  background:
+    repeating-linear-gradient(90deg, var(--ink-1) 0 22px, transparent 22px 44px),
+    repeating-linear-gradient(180deg, var(--ink-2) 0 22px, transparent 22px 44px);
+}
+/* Code modules: small squares, two sizes. */
+.world-night [data-pattern='pixels']::after {
+  background:
+    conic-gradient(var(--ink-1) 0 25%, transparent 0) 0 0 / 16px 16px,
+    conic-gradient(var(--ink-2) 0 25%, transparent 0) 8px 8px / 48px 48px;
+}
+/* A ledger: ruled lines and a margin. */
+.world-night [data-pattern='ledger']::after {
+  background:
+    linear-gradient(90deg, transparent 0 64px, var(--ink-2) 64px 65px, transparent 65px) 0 0 / 100%
+      100%,
+    repeating-linear-gradient(180deg, transparent 0 33px, var(--ink-1) 33px 34px);
+}
+/* Crop frames: thirds and corner marks. */
+.world-night [data-pattern='frames']::after {
+  background:
+    linear-gradient(90deg, var(--ink-1) 0 1px, transparent 1px) 0 0 / 120px 120px,
+    linear-gradient(180deg, var(--ink-1) 0 1px, transparent 1px) 0 0 / 120px 120px,
+    radial-gradient(circle at 60px 60px, var(--ink-2) 2px, transparent 2.5px) 0 0 / 120px 120px;
+}
+/* Paint: soft swatches of color everywhere. */
+.world-night [data-pattern='confetti']::after {
+  background:
+    radial-gradient(18px 18px at 12% 22%, rgb(255 122 182 / 0.16), transparent 70%),
+    radial-gradient(22px 22px at 32% 8%, rgb(255 209 102 / 0.16), transparent 70%),
+    radial-gradient(16px 16px at 58% 26%, rgb(62 224 208 / 0.15), transparent 70%),
+    radial-gradient(24px 24px at 78% 14%, rgb(155 134 255 / 0.16), transparent 70%),
+    radial-gradient(14px 14px at 90% 40%, rgb(255 106 61 / 0.16), transparent 70%),
+    radial-gradient(20px 20px at 6% 52%, rgb(143 155 255 / 0.14), transparent 70%),
+    radial-gradient(18px 18px at 44% 46%, rgb(184 243 90 / 0.12), transparent 70%),
+    radial-gradient(circle at 1px 1px, var(--ink-1) 1px, transparent 1.5px) 0 0 / 18px 18px;
+}
+/* Editorial: column rules and a heavy top rule. */
+.world-night [data-pattern='editorial']::after {
+  background:
+    linear-gradient(180deg, var(--ink-2) 0 3px, transparent 3px) 0 64px / 100% 100% no-repeat,
+    repeating-linear-gradient(90deg, transparent 0 159px, var(--ink-1) 159px 160px);
+}
+/* Paperwork: a loose stack of page outlines. */
+.world-night [data-pattern='pages']::after {
+  background:
+    linear-gradient(var(--ink-1) 0 0) 0 0 / 70px 1px,
+    linear-gradient(90deg, var(--ink-1) 0 1px, transparent 1px) 0 0 / 70px 92px,
+    linear-gradient(180deg, var(--ink-1) 0 1px, transparent 1px) 0 0 / 70px 92px;
+}
+/* Sunlight: rays from the top corner. */
+.world-night [data-pattern='sun']::after {
+  background: repeating-conic-gradient(
+    from 180deg at 90% -10%,
+    var(--ink-1) 0 2deg,
+    transparent 2deg 9deg
+  );
+}
+/* Snowfall. */
+.world-night [data-pattern='snow']::after {
+  background:
+    radial-gradient(circle at 10px 12px, rgb(255 255 255 / 0.12) 1.4px, transparent 2px) 0 0 / 46px
+      52px,
+    radial-gradient(circle at 30px 34px, var(--ink-2) 1.8px, transparent 2.4px) 0 0 / 60px 66px;
+}
+.world-night [data-pattern='dots']::after {
+  background: radial-gradient(circle at 1px 1px, var(--ink-1) 1.2px, transparent 1.7px) 0 0 / 16px
+    16px;
+}
