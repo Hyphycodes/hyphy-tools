@@ -850,6 +850,7 @@ export function CountUp({
   format = (n) => Math.round(n).toLocaleString(),
   duration = 650,
   from,
+  mono = true,
   className,
 }: {
   value: number;
@@ -857,6 +858,8 @@ export function CountUp({
   duration?: number;
   /** Where it starts the first time (default 0). */
   from?: number;
+  /** Tabular mono figures (columns, receipts); false keeps the surrounding type (headlines). */
+  mono?: boolean;
   className?: string;
 }) {
   const reduced = useReducedMotion();
@@ -882,7 +885,10 @@ export function CountUp({
     return () => cancelAnimationFrame(frame);
   }, [value, duration, reduced]);
   return (
-    <span className={cn('mono-num', className)} aria-label={format(value)}>
+    <span
+      className={cn(mono ? 'mono-num' : 'tabular-nums', className)}
+      aria-label={format(value)}
+    >
       <span aria-hidden="true">{format(reduced ? value : shown)}</span>
     </span>
   );

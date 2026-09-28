@@ -192,7 +192,7 @@ export function SignalPagesTool() {
           <p className="flex items-center justify-center gap-1.5 text-center text-[13px] text-muted">
             {step === 1 ? (
               <>
-                <Icon name="pencil" size={13} /> Tap your name or the line under it to edit
+                <Icon name="pencil" size={13} /> Tap the page to write on it
               </>
             ) : (
               'Live preview'
@@ -310,9 +310,6 @@ function PickLook({
         >
           Pick a look.
         </h2>
-        <p className="mt-1.5 text-[15px] leading-snug text-muted">
-          Eight designs, one tap each. You can change it any time.
-        </p>
       </div>
       <div
         role="radiogroup"
@@ -362,10 +359,11 @@ function DesignThumb({
     >
       <span
         className={cn(
-          'relative flex aspect-[10/16] w-full flex-col items-center overflow-hidden rounded-[18px] px-2.5 pt-4 transition-transform',
+          'fx-move relative flex aspect-[10/16] w-full flex-col items-center overflow-hidden rounded-[18px] px-2.5 pt-4',
+          on && '-translate-y-1 scale-[1.03]',
           on
             ? 'shadow-[0_0_0_2px_var(--color-surface),0_0_0_4px_var(--accent,var(--color-ink))]'
-            : 'shadow-[inset_0_0_0_1px_rgb(255_255_255/.1)] group-hover:-translate-y-1',
+            : 'shadow-[inset_0_0_0_1px_var(--color-line)] group-hover:-translate-y-1',
         )}
         style={{ background: design.background, color: design.fg }}
       >
@@ -413,7 +411,7 @@ function DesignThumb({
         {on && (
           <span
             aria-hidden="true"
-            className="absolute right-1.5 bottom-1.5 grid size-6 place-items-center rounded-full text-[#12110d] shadow-card"
+            className="fx-pop absolute right-1.5 bottom-1.5 grid size-6 place-items-center rounded-full text-[var(--on-accent,#12110d)] shadow-card"
             style={{ background: 'var(--accent, var(--color-ink))' }}
           >
             <Icon name="check" size={13} strokeWidth={3} />
@@ -440,6 +438,11 @@ function LinksEditor({
   update: (patch: Partial<SignalPage>) => void;
 }) {
   const [added, setAdded] = useState<string | null>(null);
+  const canPaste = useSyncExternalStore(
+    noop,
+    () => typeof navigator.clipboard?.readText === 'function',
+    () => false,
+  );
   const unusable = page.links.filter((link) => link.url.trim() && !safeHref(link.url));
 
   const setLink = (linkId: string, patch: { label?: string; url?: string }) =>
@@ -468,6 +471,28 @@ function LinksEditor({
     update({ links: [...page.links, { id: linkId, label: '', url: '' }] });
   };
 
+  /** One tap: what's on the clipboard becomes a button, named from where it goes. */
+  const pasteLink = async () => {
+    let text = '';
+    try {
+      text = (await navigator.clipboard.readText()).trim().slice(0, 800);
+    } catch {
+      // Not allowed here: an empty row takes a long-press paste instead.
+    }
+    if (!text) return addLink();
+    const slot = page.links.find((item) => !item.url.trim() && !item.label.trim());
+    if (slot) {
+      setAdded(null);
+      return update({
+        links: page.links.map((item) =>
+          item.id === slot.id ? { ...item, url: text, label: guess(text).title } : item,
+        ),
+      });
+    }
+    if (page.links.length >= 12) return;
+    update({ links: [...page.links, { id: newId(6), label: guess(text).title, url: text }] });
+  };
+
   return (
     <Surface className="grid gap-4 sm:!p-6">
       <div className="flex items-baseline justify-between gap-3">
@@ -475,12 +500,19 @@ function LinksEditor({
           <h2 className="font-display text-[22px] leading-tight font-bold tracking-[-0.025em] text-ink">
             Your links
           </h2>
-          <p className="mt-1 text-[14px] text-muted">
-            Paste a link. We’ll name the button; change it if you like.
-          </p>
         </div>
         <span className="mono-num shrink-0 text-[12px] text-faint">{page.links.length}/12</span>
       </div>
+      {canPaste && page.links.length < 12 && (
+        <button
+          type="button"
+          onClick={pasteLink}
+          className="flex min-h-14 items-center justify-center gap-2 rounded-[18px] text-[16px] font-semibold text-[var(--on-accent,#12110d)] shadow-[0_14px_30px_-18px_var(--accent)] transition-transform active:scale-[.97]"
+          style={{ background: 'var(--accent, var(--color-ink))' }}
+        >
+          <Icon name="clipboard" size={18} /> Paste a link
+        </button>
+      )}
 
       <ol className="grid gap-2.5">
         {page.links.map((link, index) => {
@@ -497,10 +529,13 @@ function LinksEditor({
             >
               <div className="flex items-center gap-1.5">
                 <span
+                  key={`${icon}-${Boolean(safeHref(link.url))}`}
                   aria-hidden="true"
                   className={cn(
                     'grid size-11 shrink-0 place-items-center rounded-[13px] transition-colors',
-                    safeHref(link.url) ? 'text-[#12110d]' : 'bg-well text-muted',
+                    safeHref(link.url)
+                      ? 'fx-pop text-[var(--on-accent,#12110d)]'
+                      : 'bg-well text-muted',
                   )}
                   style={
                     safeHref(link.url)
@@ -624,10 +659,8 @@ function SocialsEditor({
     <Surface className="grid gap-3.5 sm:!p-6">
       <div>
         <h2 className="font-display text-[19px] leading-tight font-bold tracking-[-0.02em] text-ink">
-          Your socials{' '}
-          <span className="font-sans text-[14px] font-normal text-faint">optional</span>
+          Socials <span className="font-sans text-[14px] font-normal text-faint">optional</span>
         </h2>
-        <p className="mt-1 text-[14px] text-muted">Little icons under your name. Tap to add.</p>
       </div>
       {page.socials.length > 0 && (
         <ul className="grid gap-2">
@@ -763,15 +796,17 @@ function ShareStep({
         }}
       />
       <div className="text-center">
-        <p className="label !text-ink-2">Your page is ready</p>
+        <p className="fx-pop inline-flex items-center gap-2 rounded-full bg-ink/[.06] px-3.5 py-1.5 text-[14px] font-semibold text-ink">
+          <Icon name="check" size={15} className="text-[var(--accent-ink)]" /> Your page is ready
+        </p>
         <h2
-          className="mt-2 font-display text-[30px] leading-[1] font-bold tracking-[-0.035em] text-balance text-ink sm:text-[38px]"
+          className="fx-stamp mt-4 font-display text-[34px] leading-[1] font-bold tracking-[-0.035em] text-balance text-ink sm:text-[44px]"
           style={{ fontVariationSettings: "'wdth' 110" }}
         >
           {first ? `Go on, ${first}. Share it.` : 'Go on. Share it.'}
         </h2>
         <p className="mx-auto mt-2 max-w-[36ch] text-[15px] leading-snug text-muted">
-          Put it in your bio, send it to a friend, or print the code by the till.
+          Your bio, a message, a table card.
         </p>
       </div>
 
@@ -819,9 +854,6 @@ function ShareStep({
           </div>
           <div className="text-center sm:text-left">
             <p className="text-[16px] font-semibold text-ink">Scan to open</p>
-            <p className="mt-1 text-[13.5px] leading-snug text-muted">
-              For a table card, a flyer or a slide. Want it in your colors?
-            </p>
             <button
               type="button"
               onClick={() => router.push(`/tools/qr#link=${encodeURIComponent(url)}`)}
@@ -833,10 +865,7 @@ function ShareStep({
         </div>
       )}
 
-      <p className="text-center text-[13px] leading-relaxed text-muted">
-        Your page lives inside this link, so Hyphy never keeps it. Changed something? Share the new
-        link.
-      </p>
+      <p className="text-center text-[13px] text-muted">Changed something? Share the new link.</p>
       <div className="flex flex-wrap items-center justify-center gap-x-4">
         <button
           type="button"
