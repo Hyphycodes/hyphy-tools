@@ -7,7 +7,6 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
-  type CSSProperties,
   type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
@@ -16,11 +15,12 @@ import {
 } from 'react';
 import { cn } from '@/components/ui/cn';
 import { Field, Input, Segmented, Select } from '@/components/ui/form';
-import { Icon } from '@/components/ui/icon';
+import { Icon, type IconName } from '@/components/ui/icon';
 import { useToast } from '@/components/ui/toast';
 import { clearHash, decodeState, linkFor, newId, writeHash } from '@/lib/share/link-state';
 import { readLocal, writeLocal } from '@/lib/share/local';
 import {
+  addDays,
   bestTimes,
   bestTimesText,
   cellsOf,
@@ -68,8 +68,20 @@ import {
   type WhenPlan,
   type WhenSaved,
 } from '@/lib/tools/when';
-import { CopyButton, IconButton, Label, Note, Surface } from './kit';
-import { ShareLinkCard } from './share-link';
+import {
+  ActionBar,
+  ActionButton,
+  Choices,
+  CopyButton,
+  IconButton,
+  Journey,
+  Label,
+  MoreOptions,
+  Note,
+  Surface,
+  useCopy,
+} from './kit';
+import { LinkQr } from './share-link';
 
 /*
  * When?: pick the days and hours, share one link, and everyone paints when they're free. The plan
@@ -77,13 +89,24 @@ import { ShareLinkCard } from './share-link';
  * This device keeps a copy of each plan, so links that come back from different people combine.
  */
 
-const ACCENT = '#ffb35c';
-const ACCENT_RGB = '255 179 92';
+/** The tool's two lights, from its world: warm amber, and a sunset for the glow. */
+const ACCENT = 'var(--accent, #ffb35c)';
+const GLOW = 'var(--glow, #ff7e5f)';
+/** The accent (or another color) at a strength, for fills and washes. */
+const tint = (percent: number, color = ACCENT) =>
+  `color-mix(in srgb, ${color} ${percent}%, transparent)`;
 /** Dark ink for text on the accent. */
 const ON_ACCENT = '#12110d';
 const STORE = 'hyphy.when.v1.';
 /** Plans a device remembers; older ones still open from their links. */
 const KEEP = 20;
+
+/** The whole path, as the live step tracker names it. Picking the days is behind you on a plan. */
+const STEPS = ['Pick days', 'Share', 'Add times', 'Best time'];
+
+type View = 'share' | 'respond' | 'results';
+const STEP_OF: Record<View, number> = { share: 1, respond: 2, results: 3 };
+const VIEW_AT: View[] = ['share', 'share', 'respond', 'results'];
 
 /* ---------------- This device and the address bar ---------------- */
 
@@ -124,7 +147,7 @@ type Opened = { plan: WhenPlan; me: string | null; note: string | null };
 type Screen =
   | { kind: 'loading' }
   | { kind: 'start'; today: string; saved: WhenSaved[]; broken: boolean }
-  | ({ kind: 'plan'; today: string } & Opened);
+  | ({ kind: 'plan'; today: string; view?: View } & Opened);
 
 /**
  * A plan arriving from a link meets the copy this device kept: everyone from both is the plan.
@@ -196,6 +219,14 @@ const useCoarsePointer = () =>
     () => false,
   );
 
+/** Whether this browser can hand a link to the phone's share sheet. */
+const useCanShare = () =>
+  useSyncExternalStore(
+    never,
+    () => 'share' in navigator,
+    () => false,
+  );
+
 /** Scrolls an element into view when it's out of sight, gently unless motion is reduced. */
 function reveal(element: HTMLElement | null) {
   if (!element) return;
@@ -209,6 +240,28 @@ function reveal(element: HTMLElement | null) {
 const zoneCity = (zone: string) => zone.split('/').pop()?.replace(/_/g, ' ') ?? zone;
 
 const slotWords = (slot: SlotSize) => (slot === 60 ? '1-hour slots' : '30-minute slots');
+
+/** Parts of the day to choose from, instead of two clocks. `sun` is where it sits on the arc. */
+const HOURS = [
+  { id: 'mornings', label: 'Mornings', start: 8, end: 12, sun: 0.18 },
+  { id: 'afternoons', label: 'Afternoons', start: 12, end: 17, sun: 0.5 },
+  { id: 'evenings', label: 'Evenings', start: 17, end: 22, sun: 0.84 },
+  { id: 'all', label: 'All day', start: 9, end: 22, sun: null },
+] as const;
+
+const hoursOf = (plan: Pick<WhenPlan, 'start' | 'end'>) =>
+  HOURS.find((option) => option.start === plan.start && option.end === plan.end) ?? null;
+
+/** 'Evenings, 5–10 PM', or just the hours when they're custom. */
+const hoursWords = (plan: Pick<WhenPlan, 'start' | 'end'>) => {
+  const named = hoursOf(plan);
+  return named ? `${named.label}, ${planHours(plan)}` : planHours(plan);
+};
+
+/** Tap to name it, instead of typing. */
+const NAMES = ['Dinner', 'Game night', 'Drinks', 'Team call', 'Catch-up'];
+
+const initial = (name: string) => Array.from(name.trim())[0]?.toUpperCase() ?? '?';
 
 function freshPersonId(plan: WhenPlan) {
   let id = newId(6);
@@ -257,6 +310,93 @@ function focusCell(grid: HTMLElement | null, index: number) {
   grid?.querySelector<HTMLElement>(`[data-cell="${index}"]`)?.focus();
 }
 
+/* ---------------- Little pictures ---------------- */
+
+/** The sun on its arc over the horizon: where in the day these hours sit. */
+function SunArc({ at, on, evening }: { at: number | null; on: boolean; evening?: boolean }) {
+  const angle = Math.PI * (1 - (at ?? 0.5));
+  const x = 20 + 15 * Math.cos(angle);
+  const y = 21 - 15 * Math.sin(angle);
+  return (
+    <svg aria-hidden="true" viewBox="0 0 40 26" className="h-[26px] w-10 shrink-0">
+      <path
+        d="M5 21a15 15 0 0 1 30 0"
+        fill="none"
+        stroke={at === null && on ? ACCENT : 'currentColor'}
+        strokeOpacity={at === null && on ? 1 : 0.3}
+        strokeWidth="1.6"
+        strokeDasharray={at === null ? undefined : '2 2.6'}
+        strokeLinecap="round"
+      />
+      <path d="M2 21h36" stroke="currentColor" strokeOpacity=".45" strokeWidth="1.6" />
+      <circle cx={x} cy={y} r="4.2" fill={on ? (evening ? GLOW : ACCENT) : 'currentColor'} />
+    </svg>
+  );
+}
+
+/** A small, made-up heat map: what the answer looks like before anyone's been asked. */
+const PREVIEW = [
+  [0, 1, 0, 1, 2, 1, 0],
+  [1, 2, 1, 1, 4, 2, 1],
+  [1, 3, 2, 2, 5, 4, 2],
+  [0, 2, 3, 1, 5, 3, 1],
+  [0, 1, 1, 0, 2, 1, 0],
+];
+
+function PreviewArt({ quiet = false, className }: { quiet?: boolean; className?: string }) {
+  return (
+    <div
+      aria-hidden="true"
+      className={cn('grid grid-cols-7 gap-[3px]', quiet && 'opacity-40', className)}
+    >
+      {PREVIEW.flat().map((value, index) => (
+        <span
+          key={index}
+          className="h-3.5 rounded-[4px]"
+          style={{
+            background: value ? tint(14 + value * 17) : 'var(--color-well)',
+            boxShadow: value === 5 && !quiet ? `0 0 0 1.5px ${GLOW}` : undefined,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** A low sun with a few rays: the "that's the one" mark on the best time. */
+function SunsetArt({ className }: { className?: string }) {
+  const id = useId().replace(/[^\w-]/g, '');
+  return (
+    <svg aria-hidden="true" viewBox="0 0 88 60" className={className}>
+      <defs>
+        <linearGradient id={`${id}-sun`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#ffb35c" style={{ stopColor: ACCENT }} />
+          <stop offset="1" stopColor="#ff7e5f" style={{ stopColor: GLOW }} />
+        </linearGradient>
+      </defs>
+      {[-62, -31, 0, 31, 62].map((turn) => (
+        <path
+          key={turn}
+          d="M44 12V4"
+          stroke="currentColor"
+          strokeOpacity=".5"
+          strokeWidth="2.4"
+          strokeLinecap="round"
+          transform={`rotate(${turn} 44 44)`}
+        />
+      ))}
+      <path d="M20 44a24 24 0 0 1 48 0Z" fill={`url(#${id}-sun)`} />
+      <path
+        d="M8 44h72M22 51h44"
+        stroke="currentColor"
+        strokeOpacity=".35"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 /* ---------------- The tool ---------------- */
 
 export function WhenTool() {
@@ -281,7 +421,7 @@ export function WhenTool() {
   }, []);
 
   /** Every change to a plan is kept on this device, written into the address bar, and shown. */
-  const commit = useCallback((next: WhenPlan, me: string | null) => {
+  const commit = useCallback((next: WhenPlan, me: string | null, view?: View) => {
     // Another tab may have saved into this plan meanwhile: whoever it kept stays in.
     const kept = readLocal(STORE + next.id, whenSavedSchema);
     const merged = kept ? mergePlans(next, kept.plan) : null;
@@ -291,15 +431,17 @@ export function WhenTool() {
     setScreen((current) =>
       current.kind === 'loading'
         ? current
-        : { kind: 'plan', today: current.today, plan, me, note: null },
+        : { kind: 'plan', today: current.today, plan, me, note: null, view },
     );
   }, []);
 
-  const open = (incoming: WhenPlan) => {
+  const open = (incoming: WhenPlan, view?: View) => {
     const [opened] = combineWithDevice(incoming);
     showInAddress(opened.plan);
     setScreen((current) =>
-      current.kind === 'loading' ? current : { kind: 'plan', today: current.today, ...opened },
+      current.kind === 'loading'
+        ? current
+        : { kind: 'plan', today: current.today, ...opened, view },
     );
     requestAnimationFrame(() => reveal(top.current));
   };
@@ -316,7 +458,7 @@ export function WhenTool() {
   };
 
   return (
-    <div ref={top} className="scroll-mt-24" style={{ '--when': ACCENT } as CSSProperties}>
+    <div ref={top} className="scroll-mt-24">
       {screen.kind === 'loading' ? (
         <div aria-busy="true" className="grid gap-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,.9fr)]">
           <div className="skeleton h-[460px] !rounded-[22px]" />
@@ -328,7 +470,7 @@ export function WhenTool() {
           saved={screen.saved}
           broken={screen.broken}
           onCreate={(plan) => {
-            commit(plan, null);
+            commit(plan, null, 'share');
             requestAnimationFrame(() => reveal(top.current));
           }}
           onOpen={open}
@@ -340,6 +482,7 @@ export function WhenTool() {
           me={screen.me}
           note={screen.note}
           today={screen.today}
+          startOn={screen.view}
           onCommit={commit}
           onOpen={open}
           onStartOver={startOver}
@@ -350,6 +493,12 @@ export function WhenTool() {
 }
 
 /* ---------------- Making a plan ---------------- */
+
+const PICK_ICONS: Record<string, IconName> = {
+  week: 'calendar',
+  'this-weekend': 'sun',
+  'next-weekend': 'party',
+};
 
 function StartScreen({
   today,
@@ -362,7 +511,7 @@ function StartScreen({
   saved: WhenSaved[];
   broken: boolean;
   onCreate: (plan: WhenPlan) => void;
-  onOpen: (plan: WhenPlan) => void;
+  onOpen: (plan: WhenPlan, view?: View) => void;
 }) {
   const id = useId();
   const zone = useTimeZone();
@@ -374,6 +523,7 @@ function StartScreen({
   const [end, setEnd] = useState(22);
   const [slot, setSlot] = useState<SlotSize>(60);
   const [saved, setSaved] = useState(savedAtStart);
+  const hours = hoursOf({ start, end });
 
   const toggle = (day: string) =>
     setDays((current) =>
@@ -407,7 +557,12 @@ function StartScreen({
 
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,.9fr)] lg:items-start">
-      <Surface className="grid gap-6">
+      <Surface
+        className="grid gap-7 !pb-0 sm:!p-7"
+        style={{
+          backgroundImage: `radial-gradient(90% 38% at 50% 0%, ${tint(13)}, transparent 72%)`,
+        }}
+      >
         {broken && (
           <Note icon="alert" tone="caution">
             That link couldn’t be opened. It may have been cut off when it was copied: ask for it
@@ -415,16 +570,23 @@ function StartScreen({
           </Note>
         )}
         {/* The days are the one real question, so they come first; everything else has a default. */}
-        <section aria-labelledby={`${id}-days`} className="grid gap-3">
-          <h2
-            id={`${id}-days`}
-            className="font-display text-[21px] leading-tight font-bold tracking-[-0.02em] text-ink"
-          >
-            Which days could work?
-          </h2>
-          <div className="grid grid-cols-3 gap-2">
+        <section aria-labelledby={`${id}-days`} className="grid gap-4">
+          <div className="grid gap-1.5">
+            <h2
+              id={`${id}-days`}
+              className="font-display text-[26px] leading-[1.05] font-bold tracking-[-0.03em] text-ink sm:text-[30px]"
+              style={{ fontVariationSettings: "'wdth' 108" }}
+            >
+              Which days could work?
+            </h2>
+            <p className="text-[14.5px] leading-snug text-muted">
+              Tap a quick pick, or the days on the calendar.
+            </p>
+          </div>
+          <div className="grid grid-cols-3 gap-2 sm:gap-2.5">
             {picks.map((option) => {
               const on = option.days.join() === days.join();
+              const last = option.days[option.days.length - 1];
               return (
                 <button
                   key={option.id}
@@ -432,19 +594,30 @@ function StartScreen({
                   aria-pressed={on}
                   onClick={() => pick(option.days)}
                   className={cn(
-                    'grid min-h-14 content-center gap-0.5 rounded-[14px] px-2.5 py-2 text-left transition-colors',
+                    'flex min-h-[96px] min-w-0 flex-col items-start gap-2 rounded-[18px] p-3 text-left transition-[background-color,box-shadow,transform] active:scale-[.97]',
                     on
-                      ? 'bg-[rgb(255_179_92/.16)] shadow-[inset_0_0_0_1.5px_var(--when)]'
-                      : 'bg-well hover:bg-ink/10',
+                      ? 'bg-signal-soft shadow-[inset_0_0_0_2px_var(--accent,var(--color-ink))]'
+                      : 'bg-well shadow-[inset_0_0_0_1px_var(--color-line)] hover:bg-ink/[.09]',
                   )}
                 >
-                  <span className="text-[13.5px] leading-tight font-semibold text-ink">
-                    {option.label}
+                  <span
+                    className={cn(
+                      'grid size-8 place-items-center rounded-[10px]',
+                      !on && 'bg-white/[.06] text-ink-2',
+                    )}
+                    style={on ? { background: ACCENT, color: ON_ACCENT } : undefined}
+                  >
+                    <Icon name={PICK_ICONS[option.id] ?? 'calendar'} size={16} />
                   </span>
-                  <span className="text-[11.5px] leading-tight text-muted">
-                    {option.days.length > 1
-                      ? `${shortDay(option.days[0])} – ${shortDay(option.days[option.days.length - 1])}`
-                      : shortDay(option.days[0])}
+                  <span className="grid gap-0.5">
+                    <span className="text-[14.5px] leading-tight font-semibold text-ink">
+                      {option.label}
+                    </span>
+                    <span className="text-[12px] leading-tight text-muted">
+                      {option.days.length > 1
+                        ? `${shortDay(option.days[0])} – ${last.slice(5, 7) === option.days[0].slice(5, 7) ? Number(last.slice(8)) : shortDay(last)}`
+                        : shortDay(option.days[0])}
+                    </span>
                   </span>
                 </button>
               );
@@ -457,166 +630,203 @@ function StartScreen({
             onMonth={setMonth}
             onToggle={toggle}
           />
-          <div className="flex min-h-6 flex-wrap items-center justify-between gap-2 text-[13px]">
-            <span className={days.length ? 'text-ink-2' : 'text-muted'} aria-live="polite">
-              {days.length ? describeDays(days) : 'Tap the days you’re considering.'}
+          <div className="-mt-1 flex min-h-6 flex-wrap items-center justify-between gap-2 text-[13.5px]">
+            <span
+              className={cn('flex items-center gap-2', days.length ? 'text-ink-2' : 'text-muted')}
+              aria-live="polite"
+            >
+              {days.length > 0 && (
+                <span
+                  className="mono-num grid h-6 min-w-6 place-items-center rounded-full px-1.5 text-[12px] font-bold"
+                  style={{ background: ACCENT, color: ON_ACCENT }}
+                >
+                  {days.length}
+                </span>
+              )}
+              {days.length ? describeDays(days) : 'Tap as many days as you like.'}
             </span>
             {days.length > 0 && (
               <button
                 type="button"
                 onClick={() => setDays([])}
-                className="font-medium text-muted underline-offset-2 hover:text-ink hover:underline"
+                className="min-h-9 font-medium text-muted underline-offset-2 hover:text-ink hover:underline"
               >
-                Clear days
+                Clear
               </button>
             )}
           </div>
           {days.length >= MAX_DAYS && (
-            <p className="text-[12.5px] text-muted">
+            <p className="-mt-2 text-[12.5px] text-muted">
               {MAX_DAYS} days is the most one plan can hold.
             </p>
           )}
         </section>
 
-        <details className="group/hours -mt-2 border-t border-line pt-1">
-          <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2.5 text-[14px] text-ink-2 [&::-webkit-details-marker]:hidden">
-            <Icon name="clock" size={16} className="shrink-0 text-muted" />
-            <span className="min-w-0 flex-1">
-              {planHours({ start, end })} · {slotWords(slot)}
-            </span>
-            <span className="font-medium text-muted group-open/hours:hidden">Change</span>
-            <Icon
-              name="chevron-right"
-              size={15}
-              className="shrink-0 text-muted transition-transform group-open/hours:rotate-90"
-            />
-          </summary>
-          <div className="grid gap-3 pt-2 pb-1">
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-[1fr_1fr_1.1fr]">
-              <Field label="From" htmlFor={`${id}-from`}>
-                <Select
-                  id={`${id}-from`}
-                  value={start}
-                  onChange={(event) => {
-                    const value = Number(event.target.value);
-                    setStart(value);
-                    if (end <= value) setEnd(value + 1);
-                  }}
-                >
-                  {Array.from({ length: 24 }, (_, hour) => (
-                    <option key={hour} value={hour}>
-                      {formatTime(hour * 60)}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="To" htmlFor={`${id}-to`}>
-                <Select
-                  id={`${id}-to`}
-                  value={end}
-                  onChange={(event) => {
-                    const value = Number(event.target.value);
-                    setEnd(value);
-                    if (start >= value) setStart(value - 1);
-                  }}
-                >
-                  {Array.from({ length: 24 }, (_, index) => index + 1).map((hour) => (
-                    <option key={hour} value={hour}>
-                      {hour === 24 ? 'Midnight' : formatTime(hour * 60)}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <div
-                role="group"
-                aria-labelledby={`${id}-slot`}
-                className="col-span-2 flex flex-col gap-1.5 sm:col-span-1"
-              >
-                <span id={`${id}-slot`} className="text-[13.5px] font-medium text-ink-2">
-                  Slots
-                </span>
-                <Segmented
-                  name={`${id}-slot-size`}
-                  value={String(slot)}
-                  options={[
-                    { value: '60', label: '1 hour' },
-                    { value: '30', label: '30 min' },
-                  ]}
-                  onChange={(value) => setSlot(value === '30' ? 30 : 60)}
-                />
-              </div>
-            </div>
-            <p className="flex items-start gap-2 text-[13px] leading-relaxed text-muted">
-              <Icon name="globe" size={15} className="mt-[2px] shrink-0" />
-              <span>
-                Times are in {zone ? <span className="text-ink-2">{zoneCity(zone)}</span> : 'your'}{' '}
-                time, for everyone who opens the plan.
-              </span>
-            </p>
-          </div>
-        </details>
-
-        <Field label="What’s it for?" htmlFor={`${id}-title`} optional>
-          <Input
-            id={`${id}-title`}
-            aria-label="What’s the plan for?"
-            placeholder="Game night"
-            value={title}
-            maxLength={80}
-            enterKeyHint="done"
-            onChange={(event) => setTitle(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') event.currentTarget.blur();
-            }}
-          />
-        </Field>
-
-        {/* Once a day is picked, it stays in reach on a phone while the calendar scrolls by. */}
-        <div
-          className={cn(
-            '-mx-2 grid gap-2 rounded-[16px] p-2 lg:static lg:mx-0 lg:bg-transparent lg:p-0 lg:backdrop-blur-none',
-            days.length > 0 && 'sticky bottom-3 z-10 bg-surface/95 backdrop-blur',
-          )}
-        >
-          <button
-            type="button"
-            onClick={create}
-            disabled={!days.length}
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-[13px] bg-ink px-5 text-[15.5px] font-semibold text-on-ink transition-colors hover:bg-ink-2 disabled:opacity-40 lg:h-11 lg:text-[14.5px]"
+        <section aria-labelledby={`${id}-hours`} className="grid gap-3">
+          <h3 id={`${id}-hours`} className="text-[17px] font-semibold tracking-[-0.01em] text-ink">
+            What time of day?
+          </h3>
+          <div
+            role="radiogroup"
+            aria-labelledby={`${id}-hours`}
+            className="grid grid-cols-2 gap-2 sm:grid-cols-4"
           >
-            <Icon name="calendar-clock" size={17} /> Create the plan
-          </button>
-          <p className="text-center text-[12.5px] text-muted" aria-live="polite">
+            {HOURS.map((option) => {
+              const on = hours?.id === option.id;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  onClick={() => {
+                    setStart(option.start);
+                    setEnd(option.end);
+                  }}
+                  className={cn(
+                    'flex min-h-[60px] min-w-0 items-center gap-2.5 rounded-[16px] px-3 py-2 text-left transition-[background-color,box-shadow,transform] active:scale-[.97] sm:flex-col sm:items-start sm:gap-1.5 sm:py-3',
+                    on
+                      ? 'bg-signal-soft text-ink shadow-[inset_0_0_0_2px_var(--accent,var(--color-ink))]'
+                      : 'bg-well text-muted shadow-[inset_0_0_0_1px_var(--color-line)] hover:bg-ink/[.09]',
+                  )}
+                >
+                  <SunArc at={option.sun} on={on} evening={option.id === 'evenings'} />
+                  <span className="grid min-w-0 gap-0.5">
+                    <span className="text-[14.5px] leading-tight font-semibold text-ink">
+                      {option.label}
+                    </span>
+                    <span className="text-[12px] leading-tight whitespace-nowrap text-muted">
+                      {planHours(option)}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <MoreOptions
+            label="Exact hours"
+            summary={`${hours ? '' : `${planHours({ start, end })} · `}${slotWords(slot)}`}
+          >
+            <div className="grid gap-3 pb-1">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-[1fr_1fr_1.1fr]">
+                <Field label="From" htmlFor={`${id}-from`}>
+                  <Select
+                    id={`${id}-from`}
+                    value={start}
+                    onChange={(event) => {
+                      const value = Number(event.target.value);
+                      setStart(value);
+                      if (end <= value) setEnd(value + 1);
+                    }}
+                  >
+                    {Array.from({ length: 24 }, (_, hour) => (
+                      <option key={hour} value={hour}>
+                        {formatTime(hour * 60)}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="To" htmlFor={`${id}-to`}>
+                  <Select
+                    id={`${id}-to`}
+                    value={end}
+                    onChange={(event) => {
+                      const value = Number(event.target.value);
+                      setEnd(value);
+                      if (start >= value) setStart(value - 1);
+                    }}
+                  >
+                    {Array.from({ length: 24 }, (_, index) => index + 1).map((hour) => (
+                      <option key={hour} value={hour}>
+                        {hour === 24 ? 'Midnight' : formatTime(hour * 60)}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <div
+                  role="group"
+                  aria-labelledby={`${id}-slot`}
+                  className="col-span-2 flex flex-col gap-1.5 sm:col-span-1"
+                >
+                  <span id={`${id}-slot`} className="text-[13.5px] font-medium text-ink-2">
+                    Slots
+                  </span>
+                  <Segmented
+                    name={`${id}-slot-size`}
+                    value={String(slot)}
+                    options={[
+                      { value: '60', label: '1 hour' },
+                      { value: '30', label: '30 min' },
+                    ]}
+                    onChange={(value) => setSlot(value === '30' ? 30 : 60)}
+                  />
+                </div>
+              </div>
+              <p className="flex items-start gap-2 text-[13px] leading-relaxed text-muted">
+                <Icon name="globe" size={15} className="mt-[2px] shrink-0" />
+                <span>
+                  Times are in{' '}
+                  {zone ? <span className="text-ink-2">{zoneCity(zone)}</span> : 'your'} time, for
+                  everyone who opens the plan.
+                </span>
+              </p>
+            </div>
+          </MoreOptions>
+        </section>
+
+        <section className="grid gap-2.5">
+          <Field label="Name it" htmlFor={`${id}-title`} optional>
+            <Input
+              id={`${id}-title`}
+              aria-label="What’s the plan for?"
+              placeholder="Game night"
+              value={title}
+              maxLength={80}
+              autoComplete="off"
+              enterKeyHint="done"
+              onChange={(event) => setTitle(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') event.currentTarget.blur();
+              }}
+            />
+          </Field>
+          <Choices
+            label="Name ideas"
+            scroll
+            value={NAMES.includes(title) ? title : null}
+            options={NAMES.map((name) => ({ value: name, label: name }))}
+            onChange={setTitle}
+          />
+        </section>
+
+        {/* Stays under the thumb on a phone while the calendar scrolls by. */}
+        <ActionBar className={cn('!mt-0 rounded-b-[22px]', !days.length && '!static')}>
+          <ActionButton icon="send" onClick={create} disabled={!days.length}>
+            Next: share
+          </ActionButton>
+          <p className="mt-2 text-center text-[12.5px] text-muted" aria-live="polite">
             {days.length
-              ? `${days.length} ${days.length === 1 ? 'day' : 'days'}, ${planHours({ start, end })}, in ${slotWords(slot)}.`
-              : 'Tap the days above to start.'}
+              ? `${days.length} ${days.length === 1 ? 'day' : 'days'} · ${hoursWords({ start, end })}`
+              : 'Pick at least one day to go on.'}
           </p>
-        </div>
+        </ActionBar>
       </Surface>
 
       <aside aria-label="Examples and saved plans" className="grid gap-4 lg:sticky lg:top-24">
         <Surface className="grid gap-4">
-          <div className="flex items-start gap-3.5">
-            <span
-              className="grid size-11 shrink-0 place-items-center rounded-[13px]"
-              style={{ background: ACCENT, color: ON_ACCENT }}
-            >
-              <Icon name="people" size={20} />
-            </span>
-            <div>
-              <p className="text-[15.5px] font-semibold text-ink">See it with a group first</p>
-              <p className="mt-1 text-[13.5px] leading-relaxed text-muted">
-                Open a made-up game night with five friends’ times already in, and see which evening
-                wins.
-              </p>
-            </div>
+          <PreviewArt />
+          <div>
+            <p className="text-[15.5px] font-semibold text-ink">See it with a group first</p>
+            <p className="mt-1 text-[13.5px] leading-relaxed text-muted">
+              A made-up game night with five friends’ times already in. See which evening wins.
+            </p>
           </div>
           <button
             type="button"
-            onClick={() => onOpen(samplePlan(today, currentTimeZone()))}
+            onClick={() => onOpen(samplePlan(today, currentTimeZone()), 'results')}
             className="inline-flex h-11 items-center justify-center gap-2 rounded-[12px] bg-well px-4 text-[14.5px] font-medium text-ink-2 transition-colors hover:bg-ink/10 hover:text-ink lg:h-10 lg:text-[14px]"
           >
-            <Icon name="eye" size={16} /> Open the example
+            <Icon name="sparkles" size={16} /> Open the example
           </button>
         </Surface>
 
@@ -660,6 +870,7 @@ function StartScreen({
   );
 }
 
+/** A month to tap days on: picked days glow, and runs of them join up like a range. */
 function MonthCalendar({
   month,
   today,
@@ -676,8 +887,14 @@ function MonthCalendar({
   const first = monthOf(today);
   const position = (value: Month) => value.year * 12 + value.month;
   const full = selected.length >= MAX_DAYS;
+  const picked = new Set(selected);
+  // Picked days out of sight in another month: say so, and lead there.
+  const key = `${month.year}-${String(month.month + 1).padStart(2, '0')}`;
+  const later = selected.filter((day) => day.slice(0, 7) > key);
+  const earlier = selected.filter((day) => day.slice(0, 7) < key);
+  const elsewhere = later.length ? later : earlier;
   return (
-    <div className="grid gap-2 rounded-[18px] bg-subtle p-2.5 shadow-[inset_0_0_0_1px_var(--color-line)] sm:p-3">
+    <div className="grid gap-1.5 rounded-[20px] bg-subtle px-2 pt-2 pb-2.5 shadow-[inset_0_0_0_1px_var(--color-line)] sm:px-3 sm:pb-3">
       <div className="flex items-center justify-between gap-2">
         <IconButton
           icon="chevron-left"
@@ -685,7 +902,7 @@ function MonthCalendar({
           disabled={position(month) <= position(first)}
           onClick={() => onMonth(shiftMonth(month, -1))}
         />
-        <p className="text-[14.5px] font-semibold text-ink" aria-live="polite">
+        <p className="text-[15px] font-semibold text-ink" aria-live="polite">
           {monthTitle(month)}
         </p>
         <IconButton
@@ -695,9 +912,9 @@ function MonthCalendar({
           onClick={() => onMonth(shiftMonth(month, 1))}
         />
       </div>
-      <div role="group" aria-label={monthTitle(month)} className="grid grid-cols-7 gap-1">
+      <div role="group" aria-label={monthTitle(month)} className="grid grid-cols-7 gap-y-1">
         {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((letter, column) => (
-          <span key={column} aria-hidden="true" className="label pb-1 text-center">
+          <span key={column} aria-hidden="true" className="label pb-1 text-center !text-[10.5px]">
             {letter}
           </span>
         ))}
@@ -705,28 +922,225 @@ function MonthCalendar({
           .flat()
           .map((day, cell) => {
             if (!day) return <span key={`blank-${cell}`} aria-hidden="true" />;
-            const on = selected.includes(day);
+            const column = cell % 7;
+            const on = picked.has(day);
+            // Runs join up within a week row, and never past the month's edge.
+            const joinBefore =
+              on && column > 0 && day.slice(8) !== '01' && picked.has(addDays(day, -1));
+            const next = addDays(day, 1);
+            const joinAfter =
+              on && column < 6 && next.slice(0, 7) === day.slice(0, 7) && picked.has(next);
             const past = day < today;
+            const isToday = day === today;
             return (
-              <button
-                key={day}
-                type="button"
-                aria-pressed={on}
-                aria-label={`${formatDay(day)}${day === today ? ', today' : ''}`}
-                disabled={past || (full && !on)}
-                onClick={() => onToggle(day)}
-                className={cn(
-                  'mono-num h-11 rounded-[11px] text-[14.5px] transition-colors disabled:cursor-default disabled:opacity-30 lg:h-10 lg:text-[13.5px]',
-                  on ? 'font-semibold' : 'text-ink-2 enabled:hover:bg-ink/[.08]',
-                  day === today && !on && 'shadow-[inset_0_0_0_1px_var(--color-line-strong)]',
+              <div key={day} className="relative grid place-items-center">
+                {joinBefore && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute inset-y-[3px] left-0 w-1/2"
+                    style={{ background: tint(24) }}
+                  />
                 )}
-                style={on ? { background: ACCENT, color: ON_ACCENT } : undefined}
-              >
-                {Number(day.slice(8))}
-              </button>
+                {joinAfter && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute inset-y-[3px] right-0 w-1/2"
+                    style={{ background: tint(24) }}
+                  />
+                )}
+                <button
+                  type="button"
+                  aria-pressed={on}
+                  aria-label={`${formatDay(day)}${isToday ? ', today' : ''}`}
+                  disabled={past || (full && !on)}
+                  onClick={() => onToggle(day)}
+                  className={cn(
+                    'mono-num relative grid aspect-square w-full max-w-11 place-items-center rounded-full text-[15px] transition-[background-color,transform] active:scale-90 disabled:cursor-default disabled:opacity-30 lg:max-w-10 lg:text-[14px]',
+                    on ? 'font-bold' : 'text-ink-2 enabled:hover:bg-ink/[.08]',
+                    isToday && !on && 'font-bold text-ink',
+                  )}
+                  style={
+                    on
+                      ? {
+                          background: ACCENT,
+                          color: ON_ACCENT,
+                          boxShadow: `0 6px 18px -7px ${GLOW}, inset 0 1px 0 rgb(255 255 255 / .35)`,
+                        }
+                      : isToday
+                        ? { boxShadow: `inset 0 0 0 1.5px ${tint(55)}` }
+                        : undefined
+                  }
+                >
+                  {Number(day.slice(8))}
+                  {isToday && (
+                    <span
+                      aria-hidden="true"
+                      className="absolute bottom-[5px] size-1 rounded-full"
+                      style={{ background: on ? ON_ACCENT : ACCENT }}
+                    />
+                  )}
+                </button>
+              </div>
             );
           })}
       </div>
+      {elsewhere.length > 0 && (
+        <button
+          type="button"
+          onClick={() => onMonth(monthOf(elsewhere[0]))}
+          className="mx-auto inline-flex min-h-10 items-center gap-1 rounded-full px-3.5 text-[13.5px] font-medium text-signal-ink transition-colors hover:bg-signal-soft"
+        >
+          {!later.length && <Icon name="chevron-left" size={15} />}
+          {elsewhere.length} more in {monthTitle(monthOf(elsewhere[0])).split(' ')[0]}
+          {later.length > 0 && <Icon name="chevron-right" size={15} />}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- Sharing ---------------- */
+
+/** What people will see when they open the link: a little invitation, days torn off a calendar. */
+function InviteCard({
+  plan,
+  today,
+  onRespond,
+}: {
+  plan: WhenPlan;
+  today: string;
+  onRespond: () => void;
+}) {
+  return (
+    <div
+      className="relative mx-auto w-full max-w-[420px] overflow-hidden rounded-[22px] bg-well p-5 pt-6 text-left shadow-[inset_0_0_0_1px_var(--color-line),0_24px_50px_-30px_var(--glow,transparent)] sm:-rotate-1"
+      role="group"
+      aria-label="The invite"
+    >
+      <span
+        aria-hidden="true"
+        className="absolute inset-x-0 top-0 h-1.5"
+        style={{ background: `linear-gradient(90deg, ${ACCENT}, ${GLOW})` }}
+      />
+      <p className="label flex items-center gap-1.5 !text-signal-ink">
+        <Icon name="calendar-clock" size={14} /> You’re invited
+      </p>
+      <p
+        className="mt-2 font-display text-[26px] leading-[1.05] font-bold tracking-[-0.03em] break-words text-ink"
+        style={{ fontVariationSettings: "'wdth' 108" }}
+      >
+        {plan.title || 'When works for you?'}
+      </p>
+      <p className="mt-1.5 flex items-center gap-1.5 text-[13.5px] text-ink-2">
+        <Icon name="clock" size={14} className="shrink-0 text-muted" />
+        {hoursWords(plan)}
+      </p>
+      <ul className="mt-4 flex flex-wrap gap-1.5" aria-label={describeDays(plan.days)}>
+        {plan.days.map((day) => (
+          <li
+            key={day}
+            className={cn(
+              'grid w-[42px] justify-items-center overflow-hidden rounded-[10px] bg-surface pb-1.5 shadow-[inset_0_0_0_1px_var(--color-line)]',
+              day < today && 'opacity-40',
+            )}
+          >
+            <span aria-hidden="true" className="h-[3px] w-full" style={{ background: ACCENT }} />
+            <span className="mt-1 text-[9.5px] font-semibold tracking-[0.06em] text-muted uppercase">
+              {weekdayName(day)}
+            </span>
+            <span className="mono-num text-[16px] leading-tight font-semibold text-ink">
+              {Number(day.slice(8))}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <button
+        type="button"
+        onClick={onRespond}
+        className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-[13px] text-[14.5px] font-semibold text-ink shadow-[inset_0_0_0_1.5px_var(--accent,var(--color-line-strong))] transition-transform active:scale-[.98]"
+        style={{ background: tint(16) }}
+      >
+        <Icon name="hand" size={16} /> Tap when you’re free
+      </button>
+    </div>
+  );
+}
+
+/** Hand the link out: the share sheet on a phone, a copy everywhere, a code to scan across a table. */
+function ShareActions({ plan, share: shareLabel }: { plan: WhenPlan; share: string }) {
+  const canShare = useCanShare();
+  const { copy, copied } = useCopy();
+  const [link, setLink] = useState<{ plan: WhenPlan; url: string } | null>(null);
+  const [showQr, setShowQr] = useState(false);
+  // Made ahead of the tap, so copying happens inside it (Safari needs that).
+  useEffect(() => {
+    let live = true;
+    void linkFor(plan).then((url) => {
+      if (live) setLink({ plan, url });
+    });
+    return () => {
+      live = false;
+    };
+  }, [plan]);
+  const url = link?.plan === plan ? link.url : null;
+  const done = !!url && copied === url;
+
+  const share = async () => {
+    if (!url) return;
+    try {
+      await navigator.share({
+        title: plan.title || 'When works for you?',
+        text: 'Tap the times you’re free:',
+        url,
+      });
+    } catch {
+      // Cancelled, or not allowed here: the copy button is right there.
+    }
+  };
+
+  const copyButton = (
+    <ActionButton
+      variant={canShare ? 'quiet' : 'accent'}
+      icon={done ? 'check' : 'copy'}
+      disabled={!url}
+      onClick={() => url && void copy(url, 'Link copied')}
+    >
+      {done ? 'Copied' : canShare ? 'Copy' : 'Copy the link'}
+    </ActionButton>
+  );
+
+  return (
+    <div className="grid gap-2.5">
+      {canShare ? (
+        <div className="grid grid-cols-[1.6fr_1fr] gap-2">
+          <ActionButton icon="share" disabled={!url} onClick={share}>
+            {shareLabel}
+          </ActionButton>
+          {copyButton}
+        </div>
+      ) : (
+        copyButton
+      )}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[12.5px] text-muted">
+        <span className="flex items-center gap-1.5">
+          <Icon name="lock" size={13} className="shrink-0" />
+          Everything’s inside the link. Nothing is uploaded.
+        </span>
+        {url && url.length <= 1600 && (
+          <button
+            type="button"
+            onClick={() => setShowQr((value) => !value)}
+            className="inline-flex min-h-9 items-center gap-1 font-medium text-ink-2 hover:text-ink"
+          >
+            <Icon name="qr" size={14} /> {showQr ? 'Hide code' : 'Show a code'}
+          </button>
+        )}
+      </div>
+      {showQr && url && (
+        <div className="mx-auto w-full max-w-[220px] animate-rise rounded-[16px] bg-white p-3">
+          <LinkQr url={url} />
+        </div>
+      )}
     </div>
   );
 }
@@ -738,6 +1152,7 @@ function PlanView({
   me,
   note,
   today,
+  startOn,
   onCommit,
   onOpen,
   onStartOver,
@@ -746,6 +1161,7 @@ function PlanView({
   me: string | null;
   note: string | null;
   today: string;
+  startOn?: View;
   onCommit: (plan: WhenPlan, me: string | null) => void;
   onOpen: (plan: WhenPlan) => void;
   onStartOver: () => void;
@@ -755,7 +1171,8 @@ function PlanView({
   const zone = useTimeZone();
   const coarse = useCoarsePointer();
   const mine = plan.people.find((person) => person.id === me) ?? null;
-  const [tab, setTab] = useState<'mine' | 'all'>(mine ? 'all' : 'mine');
+  // Straight from making it: hand it out. Opened from a link: add your times. Back again: results.
+  const [view, setView] = useState<View>(() => startOn ?? (mine ? 'results' : 'respond'));
   const [name, setName] = useState(mine?.name ?? '');
   const [cells, setCells] = useState(() => (mine ? cellsOf(plan, mine) : emptyCells(plan)));
   /** Someone already in the plan this visitor said they are (from another device). */
@@ -766,7 +1183,7 @@ function PlanView({
   const [nameMissing, setNameMissing] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const nameInput = useRef<HTMLInputElement>(null);
-  const editor = useRef<HTMLDivElement>(null);
+  const top = useRef<HTMLDivElement>(null);
 
   const tally = useMemo(() => tallyPlan(plan), [plan]);
   const best = useMemo(() => bestTimes(plan, 5, tally), [plan, tally]);
@@ -779,6 +1196,7 @@ function PlanView({
     packed !== (target?.times ?? packCells(emptyCells(plan)));
   const full = !target && plan.people.length >= MAX_PEOPLE;
   const passed = plan.days.every((day) => day < today);
+  const sendBack = justSaved && !dirty;
 
   // Unsaved times would be lost on leaving: the browser asks first.
   useEffect(() => {
@@ -787,6 +1205,11 @@ function PlanView({
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [dirty]);
+
+  const go = (next: View) => {
+    setView(next);
+    requestAnimationFrame(() => reveal(top.current));
+  };
 
   /** Typing a name that's already in the plan: maybe it's the same person on another device. */
   const matchName = () => {
@@ -820,12 +1243,8 @@ function PlanView({
     setClaimed(null);
     setClash(null);
     setJustSaved(true);
+    go('results');
     toast({ title: 'Your times are saved', description: 'Now send the updated link back.' });
-  };
-
-  const editMine = () => {
-    setTab('mine');
-    requestAnimationFrame(() => reveal(editor.current));
   };
 
   const startOver = () => {
@@ -835,352 +1254,419 @@ function PlanView({
   };
 
   const minutesFree = (person: WhenPerson) => countCells(cellsOf(plan, person)) * plan.slot;
-  const shareVersion = plan.people.map((person) => `${person.id}${person.updated}`).join('.');
+
+  const notes = (
+    <>
+      {zone && zone !== plan.tz && (
+        <Note icon="globe" tone="caution">
+          This plan’s times are in {plan.tz}, and you’re in {zone}. Mark when you’re free in{' '}
+          {zoneCity(plan.tz)} time: nothing here is converted.
+        </Note>
+      )}
+      {passed && (
+        <Note icon="calendar" tone="caution">
+          All of this plan’s days have passed. Start a new plan to pick new ones.
+        </Note>
+      )}
+      {note && (
+        <Note icon="check" tone="positive">
+          {note}
+        </Note>
+      )}
+    </>
+  );
+
+  const people = (
+    <Surface className="grid gap-3">
+      <div className="flex items-center justify-between gap-3">
+        <Label>Who’s answered · {plan.people.length}</Label>
+        <span className="text-[12px] text-muted">Up to {MAX_PEOPLE}</span>
+      </div>
+      {plan.people.length === 0 ? (
+        <p className="text-[13.5px] leading-relaxed text-muted">
+          No one yet. Everyone who saves their times shows up here.
+        </p>
+      ) : (
+        <ul className="grid gap-0.5">
+          {plan.people.map((person) => {
+            const you = person.id === me;
+            const minutes = minutesFree(person);
+            return (
+              <li key={person.id} className="flex items-center gap-3 py-1.5">
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    'grid size-9 shrink-0 place-items-center rounded-full text-[13px] font-semibold',
+                    !you && 'bg-well text-ink-2',
+                  )}
+                  style={you ? { background: ACCENT, color: ON_ACCENT } : undefined}
+                >
+                  {initial(person.name)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[14.5px] font-medium text-ink">
+                    {person.name}
+                    {you && <span className="font-normal text-muted"> (you)</span>}
+                  </p>
+                  <p className="text-[12.5px] text-muted">
+                    {minutes ? `${formatDuration(minutes)} free` : 'Not free at any of these times'}
+                  </p>
+                </div>
+                {you && (
+                  <button
+                    type="button"
+                    onClick={() => go('respond')}
+                    className="inline-flex h-10 items-center gap-1.5 rounded-[10px] px-3 text-[13.5px] font-medium text-ink-2 transition-colors hover:bg-ink/[.07] hover:text-ink lg:h-9"
+                  >
+                    <Icon name="pencil" size={14} /> Edit
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Surface>
+  );
 
   return (
     <div className="grid gap-5">
-      <Surface className="grid gap-4 !p-5 sm:!p-6">
-        <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
-          <div className="min-w-0">
-            <p className="label">
-              {total === 0
-                ? 'No one’s added times yet'
-                : `${total} ${total === 1 ? 'person has' : 'people have'} added times`}
-            </p>
-            <h2
-              className="mt-2 font-display text-[30px] leading-[1.02] font-extrabold tracking-[-0.035em] break-words text-ink sm:text-[38px]"
-              style={{ fontVariationSettings: "'wdth' 110" }}
-            >
-              {plan.title || 'When works for everyone?'}
-            </h2>
-            <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-[13.5px] text-ink-2">
-              <li className="flex items-center gap-1.5">
-                <Icon name="calendar" size={15} className="text-muted" />
-                {describeDays(plan.days)}
-              </li>
-              <li className="flex items-center gap-1.5">
-                <Icon name="clock" size={15} className="text-muted" />
-                {planHours(plan)} · {slotWords(plan.slot)}
-              </li>
-              <li className="flex items-center gap-1.5">
-                <Icon name="globe" size={15} className="text-muted" />
-                {zoneCity(plan.tz)} time
-              </li>
-            </ul>
-          </div>
-          <button
-            type="button"
-            onClick={startOver}
-            className="inline-flex h-11 shrink-0 items-center gap-2 rounded-[12px] bg-well px-4 text-[14px] font-medium text-ink-2 transition-colors hover:bg-ink/10 hover:text-ink lg:h-9 lg:text-[13.5px]"
+      <div ref={top} className="flex scroll-mt-24 items-start gap-3">
+        <Journey
+          steps={STEPS}
+          current={STEP_OF[view]}
+          onPick={(index) => index > 0 && go(VIEW_AT[index])}
+          reachable={(index) => index > 0}
+          className="flex-1"
+        />
+        <button
+          type="button"
+          onClick={startOver}
+          className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full bg-well px-3.5 text-[13.5px] font-medium text-ink-2 transition-colors hover:bg-ink/10 hover:text-ink"
+        >
+          <Icon name="plus" size={15} /> New plan
+        </button>
+      </div>
+
+      {view === 'share' ? (
+        <div className="mx-auto grid w-full max-w-[640px] gap-4">
+          {notes}
+          <Surface
+            className="grid gap-6 !p-5 sm:!p-8"
+            style={{
+              backgroundImage: `radial-gradient(80% 45% at 50% 0%, ${tint(15)}, transparent 72%), radial-gradient(60% 40% at 100% 100%, ${tint(12, GLOW)}, transparent 70%)`,
+            }}
           >
-            <Icon name="plus" size={15} /> Start a new plan
-          </button>
-        </div>
-        {zone && zone !== plan.tz && (
-          <Note icon="globe" tone="caution">
-            This plan’s times are in {plan.tz}, and you’re in {zone}. Mark when you’re free in{' '}
-            {zoneCity(plan.tz)} time: nothing here is converted.
-          </Note>
-        )}
-        {passed && (
-          <Note icon="calendar" tone="caution">
-            All of this plan’s days have passed. Start a new plan to pick new ones.
-          </Note>
-        )}
-        {note && (
-          <Note icon="check" tone="positive">
-            {note}
-          </Note>
-        )}
-        {best[0] && total > 1 && (
-          <p className="flex items-start gap-2.5 rounded-[12px] bg-[rgb(255_179_92/.1)] px-3.5 py-2.5 text-[13.5px] text-ink-2 lg:hidden">
-            <Icon name="star" size={15} className="mt-[2px] shrink-0 text-[var(--when)]" />
-            <span>
-              Best so far: <strong className="text-ink">{windowWhen(plan, best[0])}</strong>,{' '}
-              {best[0].count === total ? 'everyone’s free' : `${best[0].count} of ${total} free`}
-            </span>
-          </p>
-        )}
-      </Surface>
-
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,.85fr)] lg:items-start">
-        <div className="grid min-w-0 gap-5">
-          <Surface className="grid gap-4 !p-3 sm:!p-5">
-            <div
-              ref={editor}
-              role="tablist"
-              aria-label="Whose times"
-              className="grid scroll-mt-24 grid-cols-2 gap-1 rounded-[13px] bg-well p-1"
-            >
-              {(['mine', 'all'] as const).map((value) => (
-                <button
-                  key={value}
-                  id={`${id}-tab-${value}`}
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === value}
-                  aria-controls={`${id}-panel`}
-                  tabIndex={tab === value ? 0 : -1}
-                  onClick={() => setTab(value)}
-                  onKeyDown={(event) => {
-                    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-                    event.preventDefault();
-                    const next = tab === 'mine' ? 'all' : 'mine';
-                    setTab(next);
-                    document.getElementById(`${id}-tab-${next}`)?.focus();
-                  }}
-                  className={cn(
-                    'flex h-11 items-center justify-center gap-2 rounded-[10px] px-3 text-[14.5px] font-medium transition-colors lg:h-9 lg:text-[13.5px]',
-                    tab === value ? 'bg-surface text-ink shadow-card' : 'text-muted hover:text-ink',
-                  )}
-                >
-                  {value === 'mine' ? (
-                    <>
-                      <Icon name="pencil" size={15} /> {mine ? 'Your times' : 'Add your times'}
-                    </>
-                  ) : (
-                    <>
-                      <Icon name="people" size={15} /> Everyone
-                      <span className="mono-num text-[12px] text-muted">{total}</span>
-                    </>
-                  )}
-                </button>
-              ))}
+            <div className="text-center">
+              <h2
+                className="font-display text-[28px] leading-[1.02] font-bold tracking-[-0.035em] text-balance text-ink sm:text-[36px]"
+                style={{ fontVariationSettings: "'wdth' 110" }}
+              >
+                {total ? 'Send the latest link' : 'Your invite is ready'}
+              </h2>
+              <p className="mx-auto mt-2 max-w-[38ch] text-[15px] leading-snug text-pretty text-muted">
+                {total
+                  ? 'It holds everyone’s times so far. Whoever opens it adds theirs and sends it back.'
+                  : 'Send it to the group chat. Everyone taps when they’re free, then sends the link back.'}
+              </p>
             </div>
-
-            <div
-              role="tabpanel"
-              id={`${id}-panel`}
-              aria-labelledby={`${id}-tab-${tab}`}
-              className="grid min-w-0 gap-4 px-1 sm:px-0"
-            >
-              {tab === 'mine' ? (
-                <>
-                  <Field
-                    label="Your name"
-                    htmlFor={`${id}-name`}
-                    error={
-                      nameMissing && !name.trim()
-                        ? 'Add your name, so the group knows whose times these are.'
-                        : undefined
-                    }
-                  >
-                    <Input
-                      ref={nameInput}
-                      id={`${id}-name`}
-                      value={name}
-                      maxLength={40}
-                      autoComplete="given-name"
-                      enterKeyHint="done"
-                      placeholder="Your first name"
-                      onChange={(event) => {
-                        setName(event.target.value);
-                        setClash(null);
-                      }}
-                      onBlur={() => setClash(matchName())}
-                    />
-                  </Field>
-                  {clash && (
-                    <div
-                      role="alert"
-                      className="grid gap-3 rounded-[14px] bg-caution-soft p-3.5 text-[13.5px] text-caution"
-                    >
-                      <p>
-                        Someone called <strong>{clash.name}</strong> has already added times. Is
-                        that you?
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setClaimed(clash);
-                            setName(clash.name);
-                            // Nothing painted yet: start from the times they saved before.
-                            if (!marked) setCells(cellsOf(plan, clash));
-                            setClash(null);
-                          }}
-                          className="h-10 rounded-[10px] bg-ink px-3.5 text-[13.5px] font-semibold text-on-ink hover:bg-ink-2"
-                        >
-                          Yes, edit {clash.name}’s times
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setNotMe((current) => [...current, clash.id]);
-                            setClash(null);
-                          }}
-                          className="h-10 rounded-[10px] bg-well px-3.5 text-[13.5px] font-medium text-ink-2 hover:bg-ink/10 hover:text-ink"
-                        >
-                          No, I’m someone else
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  {claimed && !mine && (
-                    <Note icon="pencil" tone="positive">
-                      Editing the times {claimed.name} saved before. Saving replaces them.
-                    </Note>
-                  )}
-                  <p className="text-[13px] leading-relaxed text-muted">
-                    Tap or drag across the times you’re free. Tap a day to fill all of it.
-                    {coarse && ' To scroll past the grid, drag the times on the left.'}
-                  </p>
-                  <PaintGrid plan={plan} cells={cells} today={today} onChange={setCells} />
-                  <div className="flex flex-wrap items-center justify-end gap-2">
-                    <p className="mr-auto text-[13px] text-muted" aria-live="polite">
-                      {marked
-                        ? `${formatDuration(marked * plan.slot)} marked`
-                        : 'Nothing marked yet'}
-                      {target && dirty && ' · not saved yet'}
-                    </p>
-                    {marked > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setCells(emptyCells(plan))}
-                        className="h-11 rounded-[11px] px-3 text-[14px] font-medium text-muted transition-colors hover:bg-ink/[.07] hover:text-ink lg:h-10 lg:text-[13.5px]"
-                      >
-                        Clear
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={save}
-                      disabled={full || (!!mine && !dirty)}
-                      className="inline-flex h-11 items-center gap-2 rounded-[12px] bg-ink px-5 text-[15px] font-semibold text-on-ink transition-colors hover:bg-ink-2 disabled:opacity-40 lg:h-10 lg:text-[14px]"
-                    >
-                      <Icon name="check" size={16} />
-                      {mine && !dirty ? 'Saved' : target ? 'Save changes' : 'Save my times'}
-                    </button>
-                  </div>
-                  {!marked && !full && (
-                    <p className="-mt-2 text-right text-[12.5px] text-muted">
-                      Saving with nothing marked tells everyone none of these times work.
-                    </p>
-                  )}
-                  {full && (
-                    <Note icon="people" tone="caution">
-                      This plan already has {MAX_PEOPLE} people, the most one plan can hold.
-                    </Note>
-                  )}
-                </>
-              ) : (
-                <Everyone plan={plan} tally={tally} best={best} today={today} coarse={coarse} />
+            <InviteCard plan={plan} today={today} onRespond={() => go('respond')} />
+            <ShareActions plan={plan} share="Share the invite" />
+            <div className="-mt-1 flex flex-wrap justify-center gap-2 border-t border-line pt-4">
+              <button
+                type="button"
+                onClick={() => go('respond')}
+                className="inline-flex h-11 items-center gap-2 rounded-full bg-well px-4 text-[14px] font-medium text-ink-2 transition-colors hover:bg-ink/10 hover:text-ink"
+              >
+                <Icon name="pencil" size={15} /> {mine ? 'Edit your times' : 'Add your own times'}
+              </button>
+              {total > 0 && (
+                <button
+                  type="button"
+                  onClick={() => go('results')}
+                  className="inline-flex h-11 items-center gap-2 rounded-full bg-well px-4 text-[14px] font-medium text-ink-2 transition-colors hover:bg-ink/10 hover:text-ink"
+                >
+                  <Icon name="star" size={15} /> See the best time
+                </button>
               )}
             </div>
           </Surface>
-
-          <Surface
-            className={cn(
-              'grid gap-4',
-              justSaved &&
-                !dirty &&
-                'outline outline-[1.5px] outline-offset-[-1.5px] outline-[rgb(255_179_92/.55)]',
-            )}
-          >
-            <div className="flex items-start gap-3.5">
-              <span
-                className="grid size-11 shrink-0 place-items-center rounded-[13px]"
-                style={{ background: ACCENT, color: ON_ACCENT }}
-              >
-                <Icon name={justSaved && !dirty ? 'check' : 'send'} size={19} />
-              </span>
-              <div className="min-w-0">
-                <p className="text-[16px] font-semibold text-ink">
-                  {justSaved && !dirty
-                    ? 'Saved. Now send the updated link back'
-                    : total
-                      ? 'Share the latest link'
-                      : 'Share the plan'}
-                </p>
-                <p className="mt-1 text-[13.5px] leading-relaxed text-muted">
-                  {justSaved && !dirty
-                    ? 'The plan lives in the link: each person adds their times and passes the new link on. Send it to the group chat, or back to whoever sent it to you.'
-                    : total
-                      ? 'This link holds everyone’s times so far. Whoever opens it can add theirs, then sends the updated link back.'
-                      : 'Send this link to everyone you’re asking. Each person adds their times, then sends the updated link back.'}
-                </p>
-              </div>
-            </div>
-            <ShareLinkCard
-              key={shareVersion}
-              title={plan.title || 'When works for you?'}
-              cta={justSaved && !dirty ? 'Get the updated link' : 'Get the link'}
-              build={() => linkFor(plan)}
-            />
-          </Surface>
         </div>
-
-        <aside aria-label="Best times and people" className="grid gap-4 lg:sticky lg:top-24">
-          <BestTimes plan={plan} best={best} total={total} />
-
-          <Surface className="grid gap-3">
-            <div className="flex items-center justify-between gap-3">
-              <Label>People · {plan.people.length}</Label>
-              <span className="text-[12px] text-muted">Up to {MAX_PEOPLE}</span>
-            </div>
-            {plan.people.length === 0 ? (
-              <p className="text-[13.5px] leading-relaxed text-muted">
-                No one yet. Everyone who saves their times shows up here.
+      ) : view === 'respond' ? (
+        <div
+          className={cn(
+            'grid gap-5',
+            total > 0
+              ? 'lg:grid-cols-[minmax(0,1.3fr)_minmax(0,.8fr)] lg:items-start'
+              : 'mx-auto w-full max-w-[760px]',
+          )}
+        >
+          <Surface className="grid gap-4 !pb-0 sm:!p-6">
+            <div className="grid gap-1">
+              <p className="label flex min-w-0 items-center gap-1.5 !text-signal-ink">
+                <Icon name="calendar-clock" size={14} className="shrink-0" />
+                <span className="truncate">{plan.title || 'When works for you?'}</span>
               </p>
-            ) : (
-              <ul className="grid gap-0.5">
-                {plan.people.map((person) => {
-                  const you = person.id === me;
-                  const minutes = minutesFree(person);
-                  return (
-                    <li key={person.id} className="flex items-center gap-3 py-1.5">
-                      <span
-                        aria-hidden="true"
-                        className={cn(
-                          'grid size-9 shrink-0 place-items-center rounded-full text-[13px] font-semibold',
-                          !you && 'bg-well text-ink-2',
-                        )}
-                        style={you ? { background: ACCENT, color: ON_ACCENT } : undefined}
-                      >
-                        {Array.from(person.name.trim())[0]?.toUpperCase()}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-[14.5px] font-medium text-ink">
-                          {person.name}
-                          {you && <span className="font-normal text-muted"> (you)</span>}
-                        </p>
-                        <p className="text-[12.5px] text-muted">
-                          {minutes
-                            ? `${formatDuration(minutes)} free`
-                            : 'Not free at any of these times'}
-                        </p>
-                      </div>
-                      {you && (
-                        <button
-                          type="button"
-                          onClick={editMine}
-                          className="inline-flex h-10 items-center gap-1.5 rounded-[10px] px-3 text-[13.5px] font-medium text-ink-2 transition-colors hover:bg-ink/[.07] hover:text-ink lg:h-9"
-                        >
-                          <Icon name="pencil" size={14} /> Edit
-                        </button>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
+              <h2
+                className="mt-1 font-display text-[28px] leading-[1.02] font-bold tracking-[-0.035em] text-ink sm:text-[34px]"
+                style={{ fontVariationSettings: "'wdth' 110" }}
+              >
+                {mine ? 'Your free times' : 'Paint when you’re free'}
+              </h2>
+              <p className="text-[14px] text-muted">
+                {describeDays(plan.days)} · {planHours(plan)}
+              </p>
+            </div>
+            {notes}
+            <p className="flex items-start gap-2.5 rounded-[14px] bg-signal-soft px-3.5 py-2.5 text-[13.5px] leading-snug text-ink-2">
+              <Icon name="hand" size={16} className="mt-px shrink-0 text-signal-ink" />
+              <span>
+                Tap or drag across the times that work. Tap a day to fill all of it.
+                {coarse && ' Drag the times on the left to scroll.'}
+              </span>
+            </p>
+            <PaintGrid plan={plan} cells={cells} today={today} onChange={setCells} />
+            <div className="-mt-1 flex min-h-10 flex-wrap items-center justify-between gap-2">
+              <p className="flex items-center gap-2 text-[13.5px] text-ink-2" aria-live="polite">
+                <span
+                  aria-hidden="true"
+                  className="size-3.5 rounded-[4px]"
+                  style={{ background: marked ? ACCENT : 'var(--color-well)' }}
+                />
+                {marked ? `${formatDuration(marked * plan.slot)} free` : 'Nothing marked yet'}
+                {target && dirty && <span className="text-muted">· not saved yet</span>}
+              </p>
+              {marked > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setCells(emptyCells(plan))}
+                  className="h-10 rounded-[11px] px-3 text-[14px] font-medium text-muted transition-colors hover:bg-ink/[.07] hover:text-ink"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <Field
+              label="Your name"
+              htmlFor={`${id}-name`}
+              error={
+                nameMissing && !name.trim()
+                  ? 'Add your name, so the group knows whose times these are.'
+                  : undefined
+              }
+            >
+              <Input
+                ref={nameInput}
+                id={`${id}-name`}
+                value={name}
+                maxLength={40}
+                autoComplete="given-name"
+                autoCapitalize="words"
+                enterKeyHint="done"
+                placeholder="Your first name"
+                onChange={(event) => {
+                  setName(event.target.value);
+                  setClash(null);
+                }}
+                onBlur={() => setClash(matchName())}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') event.currentTarget.blur();
+                }}
+              />
+            </Field>
+            {clash && (
+              <div
+                role="alert"
+                className="grid gap-3 rounded-[14px] bg-caution-soft p-3.5 text-[13.5px] text-caution"
+              >
+                <p>
+                  Someone called <strong>{clash.name}</strong> has already added times. Is that you?
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setClaimed(clash);
+                      setName(clash.name);
+                      // Nothing painted yet: start from the times they saved before.
+                      if (!marked) setCells(cellsOf(plan, clash));
+                      setClash(null);
+                    }}
+                    className="h-10 rounded-[10px] bg-ink px-3.5 text-[13.5px] font-semibold text-on-ink hover:bg-ink-2"
+                  >
+                    Yes, edit {clash.name}’s times
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNotMe((current) => [...current, clash.id]);
+                      setClash(null);
+                    }}
+                    className="h-10 rounded-[10px] bg-well px-3.5 text-[13.5px] font-medium text-ink-2 hover:bg-ink/10 hover:text-ink"
+                  >
+                    No, I’m someone else
+                  </button>
+                </div>
+              </div>
             )}
+            {claimed && !mine && (
+              <Note icon="pencil" tone="positive">
+                Editing the times {claimed.name} saved before. Saving replaces them.
+              </Note>
+            )}
+            {full && (
+              <Note icon="people" tone="caution">
+                This plan already has {MAX_PEOPLE} people, the most one plan can hold.
+              </Note>
+            )}
+            <ActionBar className="!mt-0 rounded-b-[22px]">
+              <ActionButton icon="check" onClick={save} disabled={full || (!!mine && !dirty)}>
+                {mine && !dirty ? 'Saved' : target ? 'Save changes' : 'Save my times'}
+              </ActionButton>
+              {!marked && !full && (
+                <p className="mt-2 text-center text-[12.5px] text-muted">
+                  Saving with nothing marked tells everyone none of these times work.
+                </p>
+              )}
+            </ActionBar>
           </Surface>
 
-          <CombineLinks
-            plan={plan}
-            onCombine={(combined) => onCommit(combined, me)}
-            onOpen={(other) => {
-              if (
-                dirty &&
-                !window.confirm('Open the other plan? The times you haven’t saved will be lost.')
-              )
-                return;
-              onOpen(other);
-            }}
-          />
-        </aside>
-      </div>
+          {total > 0 && (
+            <aside aria-label="So far" className="grid gap-4 lg:sticky lg:top-24">
+              <Surface className="grid gap-3.5">
+                <div className="flex items-center gap-3">
+                  <Faces people={plan.people} />
+                  <p className="min-w-0 text-[14px] leading-snug text-ink-2">
+                    {`${total} ${total === 1 ? 'person has' : 'people have'} answered.`}
+                    {best[0] && total > 1 && (
+                      <>
+                        {' '}
+                        Best so far:{' '}
+                        <strong className="text-ink">{windowWhen(plan, best[0])}</strong>
+                      </>
+                    )}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => go('results')}
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-[12px] bg-well px-4 text-[14px] font-medium text-ink-2 transition-colors hover:bg-ink/10 hover:text-ink lg:h-10"
+                >
+                  <Icon name="star" size={15} /> See the best time
+                </button>
+              </Surface>
+            </aside>
+          )}
+        </div>
+      ) : (
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,.85fr)] lg:items-start">
+          <div className="grid min-w-0 gap-5">
+            {notes}
+            {sendBack && (
+              <Surface
+                className="grid animate-rise gap-4"
+                style={{ boxShadow: `inset 0 0 0 1.5px ${tint(55)}` }}
+              >
+                <div className="flex items-start gap-3.5">
+                  <span
+                    className="grid size-11 shrink-0 place-items-center rounded-[13px]"
+                    style={{ background: ACCENT, color: ON_ACCENT }}
+                  >
+                    <Icon name="check" size={20} />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-[16.5px] font-semibold text-ink">
+                      You’re in. Now send the link back
+                    </p>
+                    <p className="mt-1 text-[13.5px] leading-relaxed text-muted">
+                      Your times live in the link. Send it to the group chat, or back to whoever
+                      sent it to you.
+                    </p>
+                  </div>
+                </div>
+                <ShareActions plan={plan} share="Send it back" />
+              </Surface>
+            )}
+            <BestTime
+              plan={plan}
+              best={best}
+              total={total}
+              answered={!!mine}
+              sharing={sendBack}
+              onRespond={() => go('respond')}
+              onShare={() => go('share')}
+            />
+            {total > 0 && (
+              <Surface className="grid gap-4 !p-3 sm:!p-5">
+                <div className="flex items-baseline justify-between gap-3 px-1 pt-1 sm:px-0 sm:pt-0">
+                  <h2 className="text-[17px] font-semibold tracking-[-0.01em] text-ink">
+                    Everyone’s times
+                  </h2>
+                  <span className="text-[12px] text-muted">{zoneCity(plan.tz)} time</span>
+                </div>
+                <Everyone plan={plan} tally={tally} best={best} today={today} coarse={coarse} />
+              </Surface>
+            )}
+          </div>
+
+          <aside aria-label="People and sharing" className="grid gap-4 lg:sticky lg:top-24">
+            {people}
+            {!sendBack && total > 0 && (
+              <Surface className="grid gap-3.5">
+                <div>
+                  <p className="text-[15.5px] font-semibold text-ink">Waiting on someone?</p>
+                  <p className="mt-1 text-[13.5px] leading-relaxed text-muted">
+                    This link holds everyone’s times so far. Send it on.
+                  </p>
+                </div>
+                <ShareActions plan={plan} share="Share the link" />
+              </Surface>
+            )}
+            <CombineLinks
+              plan={plan}
+              onCombine={(combined) => onCommit(combined, me)}
+              onOpen={(other) => {
+                if (
+                  dirty &&
+                  !window.confirm('Open the other plan? The times you haven’t saved will be lost.')
+                )
+                  return;
+                onOpen(other);
+              }}
+            />
+          </aside>
+        </div>
+      )}
     </div>
+  );
+}
+
+/** A little stack of faces: whoever's in. */
+function Faces({ people, max = 5 }: { people: WhenPerson[]; max?: number }) {
+  const more = people.length - max;
+  return (
+    <span aria-hidden="true" className="flex shrink-0 items-center">
+      {people.slice(0, max).map((person, index) => (
+        <span
+          key={person.id}
+          className={cn(
+            'grid size-8 place-items-center rounded-full text-[12.5px] font-bold shadow-[0_0_0_2.5px_var(--color-surface)]',
+            index > 0 && '-ml-2',
+          )}
+          style={{
+            background: index % 2 ? `color-mix(in srgb, ${GLOW} 70%, ${ACCENT})` : ACCENT,
+            color: ON_ACCENT,
+          }}
+        >
+          {initial(person.name)}
+        </span>
+      ))}
+      {more > 0 && (
+        <span className="mono-num -ml-2 grid size-8 place-items-center rounded-full bg-well text-[11.5px] font-semibold text-ink-2 shadow-[0_0_0_2.5px_var(--color-surface)]">
+          +{more}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -1279,7 +1765,7 @@ function TimeGrid({
 function DayName({ day, previous, today }: { day: string; previous?: string; today: string }) {
   return (
     <>
-      <span className={cn('label block !text-[10px]', day === today && '!text-[var(--when)]')}>
+      <span className={cn('label block !text-[10px]', day === today && '!text-signal-ink')}>
         {day === today ? 'Today' : weekdayName(day)}
       </span>
       <span className="mt-0.5 block text-[12px] leading-tight font-semibold whitespace-nowrap text-ink">
@@ -1289,7 +1775,7 @@ function DayName({ day, previous, today }: { day: string; previous?: string; tod
   );
 }
 
-const rowHeight = (plan: WhenPlan) => (plan.slot === 60 ? 'h-10 lg:h-9' : 'h-7 lg:h-6');
+const rowHeight = (plan: WhenPlan) => (plan.slot === 60 ? 'h-11 lg:h-9' : 'h-8 lg:h-6');
 
 /** Your times: tap a cell, or press and drag a box, to paint it (or erase, starting on a free cell). */
 function PaintGrid({
@@ -1396,6 +1882,10 @@ function PaintGrid({
     focusCell(grid.current, next);
   };
 
+  /** A cell as it shows right now, with the stroke under way painted in. */
+  const shown = (index: number) =>
+    stroke && inBox(rows, stroke.from, stroke.to, index) ? stroke.value : cells[index];
+
   return (
     <TimeGrid
       plan={plan}
@@ -1413,14 +1903,17 @@ function PaintGrid({
             onClick={() => onChange((current) => toggleDay(current, rows, index))}
             aria-label={`${allFree ? 'Clear' : 'Mark all of'} ${formatDay(day)}`}
             className="flex h-12 w-full flex-col items-center justify-center rounded-[10px] text-center transition-colors hover:bg-ink/[.07]"
+            style={allFree ? { background: tint(18) } : undefined}
           >
             <DayName day={day} previous={plan.days[index - 1]} today={today} />
           </button>
         );
       }}
       cell={(index, day, slot) => {
-        const value =
-          stroke && inBox(rows, stroke.from, stroke.to, index) ? stroke.value : cells[index];
+        const value = shown(index);
+        // Painted runs join up down a day, like one brush stroke.
+        const above = value && slot > 0 && shown(index - 1);
+        const below = value && slot < rows - 1 && shown(index + 1);
         return (
           <div
             key={index}
@@ -1430,14 +1923,21 @@ function PaintGrid({
             aria-label={`${formatDay(plan.days[day])}, ${formatTime(slotStart(plan, slot), true)}`}
             tabIndex={index === active ? 0 : -1}
             className={cn(
-              'min-w-[38px] flex-1 basis-0 cursor-pointer touch-none rounded-[7px] transition-colors duration-75',
+              'min-w-[38px] flex-1 basis-0 cursor-pointer touch-none rounded-[9px] transition-colors duration-75',
               height,
               !value &&
                 'bg-subtle shadow-[inset_0_0_0_1px_var(--color-line-strong)] hover:bg-ink/[.09]',
             )}
             style={
               value
-                ? { background: ACCENT, boxShadow: 'inset 0 1px 0 rgb(255 255 255 / .35)' }
+                ? {
+                    background: ACCENT,
+                    boxShadow: 'inset 0 1px 0 rgb(255 255 255 / .35)',
+                    borderTopLeftRadius: above ? 3 : undefined,
+                    borderTopRightRadius: above ? 3 : undefined,
+                    borderBottomLeftRadius: below ? 3 : undefined,
+                    borderBottomRightRadius: below ? 3 : undefined,
+                  }
                 : undefined
             }
           />
@@ -1472,6 +1972,7 @@ function Everyone({
   const [active, setActive] = useState(() => picked ?? 0);
   const shown = hovered ?? picked;
   const height = rowHeight(plan);
+  const top = best[0] && total > 1 ? best[0] : null;
 
   const choose = (index: number) => {
     setPicked(index);
@@ -1513,13 +2014,14 @@ function Everyone({
         cell={(index, day, slot) => {
           const count = tally.counts[index];
           const share = total ? count / total : 0;
+          const winner = !!top && day === top.day && slot >= top.from && slot < top.to;
           return (
             <div
               key={index}
               role="gridcell"
               data-cell={index}
               aria-selected={index === picked}
-              aria-label={`${formatDay(plan.days[day])}, ${formatTime(slotStart(plan, slot), true)} – ${count} of ${total} free`}
+              aria-label={`${formatDay(plan.days[day])}, ${formatTime(slotStart(plan, slot), true)} – ${count} of ${total} free${winner ? ', the best time' : ''}`}
               tabIndex={index === active ? 0 : -1}
               className={cn(
                 'mono-num grid min-w-[38px] flex-1 basis-0 cursor-pointer place-items-center rounded-[7px] text-[10.5px] font-semibold',
@@ -1531,8 +2033,9 @@ function Everyone({
               style={
                 count
                   ? {
-                      background: `rgb(${ACCENT_RGB} / ${0.14 + 0.86 * share})`,
+                      background: tint(Math.round(14 + 86 * share)),
                       color: share > 0.55 ? ON_ACCENT : undefined,
+                      boxShadow: winner ? `inset 0 0 0 2px ${GLOW}` : undefined,
                     }
                   : undefined
               }
@@ -1550,32 +2053,35 @@ function Everyone({
 
       <div
         aria-hidden="true"
-        className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted"
+        className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-1 text-[12px] text-muted sm:px-0"
       >
         <span className="flex items-center gap-1.5">
           Fewer
-          {[0.14, 0.35, 0.57, 0.78, 1].map((alpha) => (
+          {[14, 35, 57, 78, 100].map((strength) => (
             <span
-              key={alpha}
+              key={strength}
               className="inline-block size-3.5 rounded-[4px]"
-              style={{ background: `rgb(${ACCENT_RGB} / ${alpha})` }}
+              style={{ background: tint(strength) }}
             />
           ))}
           More free
         </span>
         <span className="flex items-center gap-1">
-          Numbers count who’s free ·
           <Icon name="check" size={12} strokeWidth={2.5} /> everyone
         </span>
+        {top && (
+          <span className="flex items-center gap-1.5">
+            <span
+              className="inline-block size-3.5 rounded-[4px]"
+              style={{ boxShadow: `inset 0 0 0 2px ${GLOW}` }}
+            />
+            best time
+          </span>
+        )}
       </div>
 
-      {total === 0 ? (
-        <p className="rounded-[14px] bg-subtle p-4 text-[13.5px] leading-relaxed text-muted shadow-[inset_0_0_0_1px_var(--color-line)]">
-          No one’s added their times yet. As people do, this fills in: the brighter a square, the
-          more people are free then.
-        </p>
-      ) : shown === null ? (
-        <p className="text-[13.5px] text-muted">
+      {shown === null ? (
+        <p className="px-1 text-[13.5px] text-muted sm:px-0">
           {coarse ? 'Tap' : 'Point at'} a square to see who’s free then.
         </p>
       ) : (
@@ -1641,7 +2147,7 @@ function PeopleChips({
                 'inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-[12.5px] font-medium',
                 free ? 'text-ink' : 'bg-well text-muted',
               )}
-              style={free ? { background: `rgb(${ACCENT_RGB} / .18)` } : undefined}
+              style={free ? { background: tint(18) } : undefined}
             >
               <Icon name={free ? 'check' : 'x'} size={12} strokeWidth={2.4} />
               {person.name}
@@ -1657,91 +2163,160 @@ function PeopleChips({
 
 /* ---------------- The answer ---------------- */
 
-function BestTimes({ plan, best, total }: { plan: WhenPlan; best: TimeWindow[]; total: number }) {
+/** The payoff: the one time that works, big, with the runners-up under it. */
+function BestTime({
+  plan,
+  best,
+  total,
+  answered,
+  sharing,
+  onRespond,
+  onShare,
+}: {
+  plan: WhenPlan;
+  best: TimeWindow[];
+  total: number;
+  answered: boolean;
+  /** The link is already being handed out just above: don't offer it twice. */
+  sharing: boolean;
+  onRespond: () => void;
+  onShare: () => void;
+}) {
+  const winner = total > 1 ? best[0] : undefined;
+  const wash = {
+    backgroundImage: `radial-gradient(110% 80% at 0% 0%, ${tint(winner ? 26 : 12)}, transparent 62%), radial-gradient(80% 70% at 100% 100%, ${tint(winner ? 22 : 9, GLOW)}, transparent 66%)`,
+  };
+
+  if (!winner) {
+    const [title, lead] =
+      total === 0
+        ? [
+            'No answers yet',
+            'Send the invite. As people paint when they’re free, the best time lights up here.',
+          ]
+        : total === 1
+          ? [
+              `Just ${plan.people[0].name} so far`,
+              'Once a second person adds their times, the overlap shows up here.',
+            ]
+          : [
+              'No overlap yet',
+              'Nobody’s free at the same time so far. As more people add their times, that can change.',
+            ];
+    return (
+      <Surface className="grid gap-5 !p-5 sm:!p-7" style={wash}>
+        <PreviewArt quiet className="mx-auto w-full max-w-[260px]" />
+        <div aria-live="polite" className="text-center">
+          <h2
+            className="font-display text-[26px] leading-[1.05] font-bold tracking-[-0.03em] text-ink"
+            style={{ fontVariationSettings: "'wdth' 108" }}
+          >
+            {title}
+          </h2>
+          <p className="mx-auto mt-2 max-w-[36ch] text-[14.5px] leading-snug text-muted">{lead}</p>
+        </div>
+        <div className={cn('grid gap-2', !sharing && 'sm:grid-cols-2')}>
+          {!sharing && (
+            <ActionButton icon="share" onClick={onShare}>
+              Share the invite
+            </ActionButton>
+          )}
+          <ActionButton variant="quiet" icon="pencil" onClick={onRespond}>
+            {answered ? 'Edit your times' : 'Add your times'}
+          </ActionButton>
+        </div>
+      </Surface>
+    );
+  }
+
+  const everyone = winner.count === total;
+  const { free, busy } = splitByMask(plan, winner.mask);
+  const from = slotStart(plan, winner.from);
+  const to = slotStart(plan, winner.to);
   return (
-    <Surface className="grid gap-4 !p-5 sm:!p-6">
-      <div className="flex items-baseline justify-between gap-3">
-        <Label>Best times</Label>
-        {total > 0 && <span className="text-[12px] text-muted">Times in {plan.tz}</span>}
+    <Surface
+      as="section"
+      aria-labelledby="when-best"
+      className="relative isolate grid gap-5 overflow-hidden !p-5 sm:!p-7"
+      style={wash}
+    >
+      <SunsetArt className="pointer-events-none absolute top-4 right-3 -z-10 w-[88px] text-signal-ink sm:top-6 sm:right-6 sm:w-[110px]" />
+      <div aria-live="polite" className="grid gap-1">
+        <p id="when-best" className="label flex items-center gap-1.5 !text-signal-ink">
+          <Icon name="star" size={14} /> Best time
+        </p>
+        <p
+          className="mt-1.5 font-display text-[38px] leading-[0.95] font-extrabold tracking-[-0.04em] text-ink sm:text-[48px]"
+          style={{ fontVariationSettings: "'wdth' 112" }}
+        >
+          {formatDay(plan.days[winner.day])}
+        </p>
+        <p className="font-display text-[26px] leading-tight font-bold tracking-[-0.03em] text-ink-2 sm:text-[30px]">
+          {formatRange(from, to)}
+        </p>
       </div>
-      <div aria-live="polite">
-        {total === 0 ? (
-          <div className="grid gap-1.5">
-            <p className="text-[16px] font-semibold text-ink">No one’s added their times yet.</p>
-            <p className="text-[13.5px] leading-relaxed text-muted">
-              Add yours, then send the link to the group. As people add theirs, the times that work
-              for the most people rise to the top here.
-            </p>
-          </div>
-        ) : total === 1 ? (
-          <div className="grid gap-1.5">
-            <p className="text-[16px] font-semibold text-ink">
-              {plan.people[0].name} is the only one so far.
-            </p>
-            <p className="text-[13.5px] leading-relaxed text-muted">
-              Once a second person adds their times, the overlaps show up here.
-            </p>
-          </div>
-        ) : best.length === 0 ? (
-          <div className="grid gap-1.5">
-            <p className="text-[16px] font-semibold text-ink">No overlap yet.</p>
-            <p className="text-[13.5px] leading-relaxed text-muted">
-              Nobody’s free at the same time so far. As more people add their times, that can
-              change.
-            </p>
-          </div>
-        ) : (
-          <ol className="grid gap-2">
-            {best.map((window, index) => {
-              const everyone = window.count === total;
-              const { busy } = splitByMask(plan, window.mask);
-              const from = slotStart(plan, window.from);
-              const to = slotStart(plan, window.to);
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <Faces people={free} />
+        <span
+          className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[13.5px] font-semibold"
+          style={
+            everyone
+              ? { background: ACCENT, color: ON_ACCENT }
+              : { background: tint(18), color: 'var(--color-ink)' }
+          }
+        >
+          {everyone ? (
+            <>
+              <Icon name="check" size={14} strokeWidth={2.75} /> Everyone’s free
+            </>
+          ) : (
+            <span className="mono-num">
+              {winner.count} of {total} free
+            </span>
+          )}
+        </span>
+        <span className="text-[13px] text-muted">
+          {!everyone && `${notFree(busy.map((person) => person.name))} · `}
+          {formatDuration(to - from)}
+        </span>
+      </div>
+      <CopyButton
+        text={bestTimesText(plan, best)}
+        label="Copy for the group chat"
+        what="Best times copied"
+        className="!h-12 w-full !rounded-[14px] !text-[15px]"
+      />
+      {best.length > 1 && (
+        <div className="grid gap-2 border-t border-line pt-4">
+          <p className="label">Also works</p>
+          <ol className="grid gap-1.5">
+            {best.slice(1).map((window) => {
+              const start = slotStart(plan, window.from);
+              const stop = slotStart(plan, window.to);
               return (
                 <li
                   key={`${window.day}-${window.from}`}
-                  className={cn(
-                    'grid gap-1 rounded-[16px] p-3.5',
-                    index === 0
-                      ? 'bg-[rgb(255_179_92/.12)] shadow-[inset_0_0_0_1px_rgb(255_179_92/.45)]'
-                      : 'bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)]',
-                  )}
+                  className="flex items-center gap-3 rounded-[14px] bg-subtle/80 px-3.5 py-2.5 shadow-[inset_0_0_0_1px_var(--color-line)]"
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="min-w-0 text-[15px] leading-snug font-semibold text-ink">
-                      {formatDay(plan.days[window.day])}
-                      <span className="text-ink-2"> · {formatRange(from, to)}</span>
-                    </p>
-                    <span
-                      className="mono-num shrink-0 rounded-full px-2 py-0.5 text-[12px] font-semibold"
-                      style={
-                        everyone
-                          ? { background: ACCENT, color: ON_ACCENT }
-                          : { background: `rgb(${ACCENT_RGB} / .16)`, color: ACCENT }
-                      }
-                    >
-                      {window.count}/{total}
-                    </span>
-                  </div>
-                  <p className="text-[13px] text-muted">
-                    {everyone
-                      ? 'Everyone’s free'
-                      : `${window.count} of ${total} free, ${notFree(busy.map((person) => person.name))}`}{' '}
-                    · {formatDuration(to - from)}
+                  <p className="min-w-0 flex-1 text-[14px] leading-snug text-ink">
+                    <span className="font-semibold">{formatDay(plan.days[window.day])}</span>
+                    <span className="text-ink-2"> · {formatRange(start, stop)}</span>
                   </p>
+                  <span
+                    className="mono-num shrink-0 rounded-full px-2 py-0.5 text-[12px] font-semibold"
+                    style={
+                      window.count === total
+                        ? { background: ACCENT, color: ON_ACCENT }
+                        : { background: tint(16), color: 'var(--color-signal-ink)' }
+                    }
+                  >
+                    {window.count}/{total}
+                  </span>
                 </li>
               );
             })}
           </ol>
-        )}
-      </div>
-      {total > 1 && best.length > 0 && (
-        <CopyButton
-          text={bestTimesText(plan, best)}
-          label="Copy for the group chat"
-          what="Best times copied"
-          className="!h-11 w-full lg:!h-10"
-        />
+        </div>
       )}
     </Surface>
   );
