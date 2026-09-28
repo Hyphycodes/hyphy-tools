@@ -621,14 +621,17 @@ export function readImport(
   try {
     data = JSON.parse(text);
   } catch {
-    return { ok: false, error: 'That file isn’t JSON. Choose one made with Export JSON.' };
+    return {
+      ok: false,
+      error: 'That file isn’t a backup from here. Choose one made with “Download a backup”.',
+    };
   }
   const parsed = exportSchema.safeParse(data);
   if (!parsed.success)
     return {
       ok: false,
       error:
-        'That file isn’t a Subscriptions export, or something in it was changed. Nothing was imported.',
+        'That file isn’t a Subscriptions backup, or something in it was changed. Nothing was added.',
     };
   return { ok: true, data: { currency: parsed.data.currency, items: parsed.data.items } };
 }

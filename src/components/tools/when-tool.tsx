@@ -146,9 +146,9 @@ function combineWithDevice(incoming: WhenPlan): [Opened, boolean] {
           ),
       ).length;
       if (more)
-        note = `Combined with the copy saved on this device: ${more} more ${more === 1 ? 'answer' : 'answers'} than the link had.`;
+        note = `Also shows ${more} ${more === 1 ? 'answer' : 'answers'} from links you opened here before.`;
     } else if (merged.reason === 'too-many') {
-      note = `This link and the copy on this device add up to more than ${MAX_PEOPLE} people, so this shows the link as it is.`;
+      note = `With the links you opened here before, this plan would pass ${MAX_PEOPLE} people, so it shows just this link.`;
     }
   }
   const me = kept?.me && plan.people.some((person) => person.id === kept.me) ? kept.me : null;
@@ -414,22 +414,14 @@ function StartScreen({
             again, or start a new plan here.
           </Note>
         )}
-        <input
-          aria-label="What’s the plan for?"
-          placeholder="What’s it for? Game night"
-          value={title}
-          maxLength={80}
-          onChange={(event) => setTitle(event.target.value)}
-          className="h-12 min-w-0 rounded-[12px] bg-transparent px-1 text-[20px] font-semibold text-ink outline-none placeholder:font-normal placeholder:text-faint focus:bg-subtle focus:px-3"
-        />
-
+        {/* The days are the one real question, so they come first; everything else has a default. */}
         <section aria-labelledby={`${id}-days`} className="grid gap-3">
-          <div className="flex items-center justify-between gap-3">
-            <Label id={`${id}-days`}>Which days</Label>
-            <span className="mono-num text-[12px] text-muted">
-              {days.length} of {MAX_DAYS}
-            </span>
-          </div>
+          <h2
+            id={`${id}-days`}
+            className="font-display text-[21px] leading-tight font-bold tracking-[-0.02em] text-ink"
+          >
+            Which days could work?
+          </h2>
           <div className="grid grid-cols-3 gap-2">
             {picks.map((option) => {
               const on = option.days.join() === days.join();
@@ -486,77 +478,106 @@ function StartScreen({
           )}
         </section>
 
-        <section aria-labelledby={`${id}-hours`} className="grid gap-3 border-t border-line pt-5">
-          <Label id={`${id}-hours`}>Which hours</Label>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-[1fr_1fr_1.1fr]">
-            <Field label="From" htmlFor={`${id}-from`}>
-              <Select
-                id={`${id}-from`}
-                value={start}
-                onChange={(event) => {
-                  const value = Number(event.target.value);
-                  setStart(value);
-                  if (end <= value) setEnd(value + 1);
-                }}
-              >
-                {Array.from({ length: 24 }, (_, hour) => (
-                  <option key={hour} value={hour}>
-                    {formatTime(hour * 60)}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="To" htmlFor={`${id}-to`}>
-              <Select
-                id={`${id}-to`}
-                value={end}
-                onChange={(event) => {
-                  const value = Number(event.target.value);
-                  setEnd(value);
-                  if (start >= value) setStart(value - 1);
-                }}
-              >
-                {Array.from({ length: 24 }, (_, index) => index + 1).map((hour) => (
-                  <option key={hour} value={hour}>
-                    {hour === 24 ? 'Midnight' : formatTime(hour * 60)}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <div
-              role="group"
-              aria-labelledby={`${id}-slot`}
-              className="col-span-2 flex flex-col gap-1.5 sm:col-span-1"
-            >
-              <span id={`${id}-slot`} className="text-[13.5px] font-medium text-ink-2">
-                Slots
-              </span>
-              <Segmented
-                name={`${id}-slot-size`}
-                value={String(slot)}
-                options={[
-                  { value: '60', label: '1 hour' },
-                  { value: '30', label: '30 min' },
-                ]}
-                onChange={(value) => setSlot(value === '30' ? 30 : 60)}
-              />
-            </div>
-          </div>
-          <p className="flex items-start gap-2 text-[13px] leading-relaxed text-muted">
-            <Icon name="globe" size={15} className="mt-[2px] shrink-0" />
-            <span>
-              Times are in your time zone
-              {zone && (
-                <>
-                  , <span className="text-ink-2">{zone}</span>
-                </>
-              )}
-              . Everyone sees the plan in this zone, wherever they are.
+        <details className="group/hours -mt-2 border-t border-line pt-1">
+          <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2.5 text-[14px] text-ink-2 [&::-webkit-details-marker]:hidden">
+            <Icon name="clock" size={16} className="shrink-0 text-muted" />
+            <span className="min-w-0 flex-1">
+              {planHours({ start, end })} · {slotWords(slot)}
             </span>
-          </p>
-        </section>
+            <span className="font-medium text-muted group-open/hours:hidden">Change</span>
+            <Icon
+              name="chevron-right"
+              size={15}
+              className="shrink-0 text-muted transition-transform group-open/hours:rotate-90"
+            />
+          </summary>
+          <div className="grid gap-3 pt-2 pb-1">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-[1fr_1fr_1.1fr]">
+              <Field label="From" htmlFor={`${id}-from`}>
+                <Select
+                  id={`${id}-from`}
+                  value={start}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    setStart(value);
+                    if (end <= value) setEnd(value + 1);
+                  }}
+                >
+                  {Array.from({ length: 24 }, (_, hour) => (
+                    <option key={hour} value={hour}>
+                      {formatTime(hour * 60)}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="To" htmlFor={`${id}-to`}>
+                <Select
+                  id={`${id}-to`}
+                  value={end}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    setEnd(value);
+                    if (start >= value) setStart(value - 1);
+                  }}
+                >
+                  {Array.from({ length: 24 }, (_, index) => index + 1).map((hour) => (
+                    <option key={hour} value={hour}>
+                      {hour === 24 ? 'Midnight' : formatTime(hour * 60)}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <div
+                role="group"
+                aria-labelledby={`${id}-slot`}
+                className="col-span-2 flex flex-col gap-1.5 sm:col-span-1"
+              >
+                <span id={`${id}-slot`} className="text-[13.5px] font-medium text-ink-2">
+                  Slots
+                </span>
+                <Segmented
+                  name={`${id}-slot-size`}
+                  value={String(slot)}
+                  options={[
+                    { value: '60', label: '1 hour' },
+                    { value: '30', label: '30 min' },
+                  ]}
+                  onChange={(value) => setSlot(value === '30' ? 30 : 60)}
+                />
+              </div>
+            </div>
+            <p className="flex items-start gap-2 text-[13px] leading-relaxed text-muted">
+              <Icon name="globe" size={15} className="mt-[2px] shrink-0" />
+              <span>
+                Times are in {zone ? <span className="text-ink-2">{zoneCity(zone)}</span> : 'your'}{' '}
+                time, for everyone who opens the plan.
+              </span>
+            </p>
+          </div>
+        </details>
 
-        <div className="grid gap-2 border-t border-line pt-5">
+        <Field label="What’s it for?" htmlFor={`${id}-title`} optional>
+          <Input
+            id={`${id}-title`}
+            aria-label="What’s the plan for?"
+            placeholder="Game night"
+            value={title}
+            maxLength={80}
+            enterKeyHint="done"
+            onChange={(event) => setTitle(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') event.currentTarget.blur();
+            }}
+          />
+        </Field>
+
+        {/* Once a day is picked, it stays in reach on a phone while the calendar scrolls by. */}
+        <div
+          className={cn(
+            '-mx-2 grid gap-2 rounded-[16px] p-2 lg:static lg:mx-0 lg:bg-transparent lg:p-0 lg:backdrop-blur-none',
+            days.length > 0 && 'sticky bottom-3 z-10 bg-surface/95 backdrop-blur',
+          )}
+        >
           <button
             type="button"
             onClick={create}
@@ -568,7 +589,7 @@ function StartScreen({
           <p className="text-center text-[12.5px] text-muted" aria-live="polite">
             {days.length
               ? `${days.length} ${days.length === 1 ? 'day' : 'days'}, ${planHours({ start, end })}, in ${slotWords(slot)}.`
-              : 'Pick at least one day to start.'}
+              : 'Tap the days above to start.'}
           </p>
         </div>
       </Surface>
@@ -601,7 +622,7 @@ function StartScreen({
 
         {saved.length > 0 && (
           <Surface className="grid gap-3">
-            <Label>Your plans on this device</Label>
+            <Label>Your plans</Label>
             <ul className="grid gap-1.5">
               {saved.slice(0, 8).map(({ plan }) => (
                 <li
@@ -630,7 +651,7 @@ function StartScreen({
               ))}
             </ul>
             <p className="text-[12px] leading-relaxed text-muted">
-              Kept in this browser only. Forgetting a plan here doesn’t change its link.
+              Removing a plan here doesn’t change its link.
             </p>
           </Surface>
         )}
@@ -843,7 +864,7 @@ function PlanView({
               </li>
               <li className="flex items-center gap-1.5">
                 <Icon name="globe" size={15} className="text-muted" />
-                Times in {plan.tz}
+                {zoneCity(plan.tz)} time
               </li>
             </ul>
           </div>
@@ -950,6 +971,7 @@ function PlanView({
                       value={name}
                       maxLength={40}
                       autoComplete="given-name"
+                      enterKeyHint="done"
                       placeholder="Your first name"
                       onChange={(event) => {
                         setName(event.target.value);
@@ -965,7 +987,7 @@ function PlanView({
                     >
                       <p>
                         Someone called <strong>{clash.name}</strong> has already added times. Is
-                        that you, on another device?
+                        that you?
                       </p>
                       <div className="flex flex-wrap gap-2">
                         <button
@@ -1751,7 +1773,7 @@ function CombineLinks({
     if (at < 0) {
       setResult({
         tone: 'caution',
-        message: 'That isn’t a When? link. Copy the whole link, including everything after the #.',
+        message: 'That isn’t a When? link. Copy the whole link and try again.',
       });
       return;
     }
@@ -1798,61 +1820,75 @@ function CombineLinks({
       merged.updated && `updated ${merged.updated}`,
     ].filter(Boolean);
     setResult({ tone: 'positive', message: `Combined: ${parts.join(' and ')}.` });
-    toast({ title: 'Links combined', description: 'The address bar has the combined plan.' });
+    toast({ title: 'Links combined' });
   };
 
   return (
-    <Surface className="grid gap-3">
-      <Label id={`${id}-label`}>Combine links</Label>
-      <p className="text-[13px] leading-relaxed text-muted">
-        Got links back from different people? Open each one on this device and they combine on their
-        own, or paste one here.
-      </p>
-      <form
-        className="flex gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void combine();
-        }}
-      >
-        <input
-          aria-labelledby={`${id}-label`}
-          value={text}
-          onChange={(event) => {
-            setText(event.target.value);
-            setResult(null);
-          }}
-          placeholder="Paste a When? link"
-          inputMode="url"
-          autoComplete="off"
-          spellCheck={false}
-          className="h-11 min-w-0 flex-1 rounded-[11px] bg-subtle px-3 text-[16px] text-ink shadow-[inset_0_0_0_1px_var(--color-line-strong)] outline-none placeholder:text-faint focus:shadow-[inset_0_0_0_1.5px_var(--color-signal)] lg:h-10 lg:text-[14px]"
-        />
-        <button
-          type="submit"
-          disabled={!text.trim() || busy}
-          className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-[11px] bg-well px-4 text-[14.5px] font-medium text-ink-2 transition-colors hover:bg-ink/10 hover:text-ink disabled:opacity-40 lg:h-10 lg:text-[14px]"
-        >
-          <Icon name="layers" size={15} /> Combine
-        </button>
-      </form>
-      {result && (
-        <Note icon={result.tone === 'positive' ? 'check' : 'alert'} tone={result.tone}>
-          {result.message}
-          {result.other && (
-            <>
-              {' '}
-              <button
-                type="button"
-                onClick={() => result.other && onOpen(result.other)}
-                className="font-semibold underline underline-offset-2"
-              >
-                Open that plan
-              </button>
-            </>
+    // Rarely needed (opening each link here combines them anyway), so it starts folded.
+    <Surface as="section" className="!py-1">
+      <details className="group/combine">
+        <summary className="flex min-h-13 cursor-pointer list-none items-center gap-2.5 text-[14.5px] font-medium text-ink-2 [&::-webkit-details-marker]:hidden">
+          <Icon name="layers" size={16} className="shrink-0 text-muted" />
+          <span id={`${id}-label`} className="min-w-0 flex-1">
+            Got several links back?
+          </span>
+          <Icon
+            name="chevron-right"
+            size={15}
+            className="shrink-0 text-muted transition-transform group-open/combine:rotate-90"
+          />
+        </summary>
+        <div className="grid gap-3 pt-1 pb-4">
+          <p className="text-[13px] leading-relaxed text-muted">
+            Open each one here, or paste them in one at a time. Everyone’s times end up in one plan.
+          </p>
+          <form
+            className="flex gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void combine();
+            }}
+          >
+            <input
+              aria-labelledby={`${id}-label`}
+              value={text}
+              onChange={(event) => {
+                setText(event.target.value);
+                setResult(null);
+              }}
+              placeholder="Paste a When? link"
+              inputMode="url"
+              autoComplete="off"
+              spellCheck={false}
+              className="h-11 min-w-0 flex-1 rounded-[11px] bg-subtle px-3 text-[16px] text-ink shadow-[inset_0_0_0_1px_var(--color-line-strong)] outline-none placeholder:text-faint focus:shadow-[inset_0_0_0_1.5px_var(--color-signal)] lg:h-10 lg:text-[14px]"
+            />
+            <button
+              type="submit"
+              disabled={!text.trim() || busy}
+              className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-[11px] bg-well px-4 text-[14.5px] font-medium text-ink-2 transition-colors hover:bg-ink/10 hover:text-ink disabled:opacity-40 lg:h-10 lg:text-[14px]"
+            >
+              <Icon name="layers" size={15} /> Combine
+            </button>
+          </form>
+          {result && (
+            <Note icon={result.tone === 'positive' ? 'check' : 'alert'} tone={result.tone}>
+              {result.message}
+              {result.other && (
+                <>
+                  {' '}
+                  <button
+                    type="button"
+                    onClick={() => result.other && onOpen(result.other)}
+                    className="font-semibold underline underline-offset-2"
+                  >
+                    Open that plan
+                  </button>
+                </>
+              )}
+            </Note>
           )}
-        </Note>
-      )}
+        </div>
+      </details>
     </Surface>
   );
 }

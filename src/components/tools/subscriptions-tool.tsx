@@ -244,7 +244,7 @@ export function SubscriptionsTool() {
     else downloadText(exportJson(list, today), `subscriptions-${today}.json`, 'application/json');
     toast({
       title: `Exported ${items.length} ${items.length === 1 ? 'subscription' : 'subscriptions'}`,
-      description: kind === 'csv' ? 'A CSV for any spreadsheet' : 'A JSON file you can import here',
+      description: kind === 'csv' ? 'Opens in any spreadsheet app' : 'Restore it here any time',
       icon: 'download',
     });
   };
@@ -253,7 +253,7 @@ export function SubscriptionsTool() {
     setImportError('');
     setIncoming(null);
     if (file.size > MAX_IMPORT_BYTES) {
-      setImportError('That file is too big to be a Subscriptions export. Nothing was imported.');
+      setImportError('That file is too big to be a Subscriptions backup. Nothing was added.');
       return;
     }
     const result = readImport(await file.text());
@@ -289,9 +289,7 @@ export function SubscriptionsTool() {
 
   const clearAll = () => {
     if (
-      !window.confirm(
-        'Clear your whole list from this browser? Export a copy first if you might want it back.',
-      )
+      !window.confirm('Clear your whole list? Download a backup first if you might want it back.')
     )
       return;
     setList(newList(currency));
@@ -491,82 +489,93 @@ export function SubscriptionsTool() {
 
       <SummaryPanel summary={summary} items={items} today={today} currency={currency} />
 
+      {/* Backups are housekeeping, not the job: one folded line, opened when needed. */}
       <Surface
         as="section"
         aria-labelledby={`${id}-data`}
-        className="grid gap-4 lg:col-start-1 lg:row-start-2"
+        className="!py-1 lg:col-start-1 lg:row-start-2"
       >
-        <div className="grid gap-1.5">
-          <Label id={`${id}-data`}>Keep a copy</Label>
-          <p className="text-[13.5px] leading-relaxed text-muted">
-            Your list is saved in this browser only, and clearing your browser data deletes it.
-            Export a copy to keep it safe or to move it to another device.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => exportAs('csv')}
-            disabled={!items.length}
-            className={quietButton}
-          >
-            <Icon name="download" size={16} /> Export CSV
-          </button>
-          <button
-            type="button"
-            onClick={() => exportAs('json')}
-            disabled={!items.length}
-            className={quietButton}
-          >
-            <Icon name="braces" size={16} /> Export JSON
-          </button>
-          <button type="button" onClick={() => fileInput.current?.click()} className={quietButton}>
-            <Icon name="upload" size={16} /> Import JSON
-          </button>
-          <input
-            ref={fileInput}
-            type="file"
-            accept=".json,application/json"
-            tabIndex={-1}
-            aria-hidden="true"
-            className="sr-only"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.target.value = '';
-              if (file) void chooseImport(file);
-            }}
-          />
-        </div>
-        {importError && (
-          <p role="alert" className="flex items-start gap-2 text-[13.5px] text-critical">
-            <Icon name="alert" size={15} className="mt-0.5 shrink-0" /> {importError}
-          </p>
-        )}
-        {incoming && (
-          <ImportChoice
-            file={incoming.file}
-            data={incoming.data}
-            current={items.length}
-            currency={currency}
-            onChoose={(mode) => applyImport(mode, incoming.data)}
-            onCancel={() => setIncoming(null)}
-          />
-        )}
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-line pt-4">
-          <p className="flex items-center gap-2 text-[12.5px] text-faint">
-            <Icon name="sparkles" size={14} /> Coming later: find subscriptions in your email
-            receipts.
-          </p>
-          {items.length > 0 && (
-            <button
-              type="button"
-              onClick={clearAll}
-              className="inline-flex min-h-11 items-center text-[13px] text-muted underline-offset-2 hover:text-critical hover:underline lg:min-h-0"
-            >
-              Clear the whole list
-            </button>
-          )}
-        </div>
+        <details className="group/data">
+          <summary className="flex min-h-14 cursor-pointer list-none items-center gap-2.5 text-[14.5px] font-medium text-ink-2 hover:text-ink [&::-webkit-details-marker]:hidden">
+            <Icon name="download" size={16} className="shrink-0 text-muted" />
+            <span id={`${id}-data`} className="min-w-0 flex-1">
+              Back up or move your list
+            </span>
+            <Icon
+              name="chevron-right"
+              size={15}
+              className="shrink-0 text-muted transition-transform group-open/data:rotate-90"
+            />
+          </summary>
+          <div className="grid gap-4 pt-1 pb-5">
+            <p className="text-[13.5px] leading-relaxed text-muted">
+              Your list stays in this browser, and clearing your browsing data clears it too.
+              Download a backup to keep it safe or to open it somewhere else.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => exportAs('json')}
+                disabled={!items.length}
+                className={quietButton}
+              >
+                <Icon name="download" size={16} /> Download a backup
+              </button>
+              <button
+                type="button"
+                onClick={() => fileInput.current?.click()}
+                className={quietButton}
+              >
+                <Icon name="upload" size={16} /> Restore a backup
+              </button>
+              <button
+                type="button"
+                onClick={() => exportAs('csv')}
+                disabled={!items.length}
+                className={quietButton}
+              >
+                <Icon name="file-text" size={16} /> Spreadsheet (CSV)
+              </button>
+              <input
+                ref={fileInput}
+                type="file"
+                accept=".json,application/json"
+                tabIndex={-1}
+                aria-hidden="true"
+                className="sr-only"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = '';
+                  if (file) void chooseImport(file);
+                }}
+              />
+            </div>
+            {importError && (
+              <p role="alert" className="flex items-start gap-2 text-[13.5px] text-critical">
+                <Icon name="alert" size={15} className="mt-0.5 shrink-0" /> {importError}
+              </p>
+            )}
+            {incoming && (
+              <ImportChoice
+                file={incoming.file}
+                data={incoming.data}
+                current={items.length}
+                currency={currency}
+                onChoose={(mode) => applyImport(mode, incoming.data)}
+                onCancel={() => setIncoming(null)}
+              />
+            )}
+            {items.length > 0 && (
+              <button
+                type="button"
+                onClick={clearAll}
+                className="inline-flex min-h-11 items-center justify-self-start text-[13px] text-muted underline-offset-2 hover:text-critical hover:underline lg:min-h-0"
+              >
+                Clear the whole list
+              </button>
+            )}
+          </div>
+        </details>
       </Surface>
     </div>
   );
@@ -649,7 +658,9 @@ function SubscriptionForm({
   const [draft, setDraft] = useState(initial);
   const [errors, setErrors] = useState<DraftErrors>({});
   const [more, setMore] = useState(
-    Boolean(initial.trialEnds || initial.cancelUrl || initial.notes),
+    Boolean(
+      initial.trialEnds || initial.cancelUrl || initial.notes || initial.category !== 'other',
+    ),
   );
 
   const change = (patch: Partial<Draft>) => {
@@ -697,6 +708,8 @@ function SubscriptionForm({
             maxLength={80}
             autoFocus={autoFocus}
             autoComplete="off"
+            autoCapitalize="words"
+            enterKeyHint="next"
             placeholder="Music app"
             onChange={(event) => change({ name: event.target.value })}
             className={field}
@@ -793,7 +806,11 @@ function SubscriptionForm({
           label="Next charge"
           htmlFor={`${id}-next`}
           error={errors.next}
-          hint={past ? `That’s past, so the next one is ${dayText(past, today)}.` : undefined}
+          hint={
+            past
+              ? `That’s past, so the next one is ${dayText(past, today)}.`
+              : 'A close guess is fine.'
+          }
         >
           <input
             id={`${id}-next`}
@@ -801,29 +818,8 @@ function SubscriptionForm({
             value={draft.next}
             onChange={(event) => change({ next: event.target.value })}
             className={cn(field, 'text-left')}
-            {...described(`${id}-next`, errors.next, past)}
+            {...described(`${id}-next`, errors.next, true)}
           />
-        </Row>
-        <Row label="Category" htmlFor={`${id}-category`}>
-          <div className="relative">
-            <select
-              id={`${id}-category`}
-              value={draft.category}
-              onChange={(event) => change({ category: event.target.value as CategoryId })}
-              className={cn(field, 'appearance-none pr-9')}
-            >
-              {CATEGORY_IDS.map((category) => (
-                <option key={category} value={category}>
-                  {CATEGORY_LABELS[category]}
-                </option>
-              ))}
-            </select>
-            <Icon
-              name="chevron-down"
-              size={16}
-              className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-muted"
-            />
-          </div>
         </Row>
       </div>
 
@@ -840,10 +836,31 @@ function SubscriptionForm({
             size={16}
             className={cn('transition-transform', more && 'rotate-180')}
           />
-          Free trial, how to cancel, notes
+          Category, free trial, notes
         </button>
         {more && (
           <div id={`${id}-more`} className="grid animate-fade gap-4 sm:grid-cols-2">
+            <Row label="Category" htmlFor={`${id}-category`}>
+              <div className="relative">
+                <select
+                  id={`${id}-category`}
+                  value={draft.category}
+                  onChange={(event) => change({ category: event.target.value as CategoryId })}
+                  className={cn(field, 'appearance-none pr-9')}
+                >
+                  {CATEGORY_IDS.map((category) => (
+                    <option key={category} value={category}>
+                      {CATEGORY_LABELS[category]}
+                    </option>
+                  ))}
+                </select>
+                <Icon
+                  name="chevron-down"
+                  size={16}
+                  className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-muted"
+                />
+              </div>
+            </Row>
             <Row
               label="Free trial ends"
               htmlFor={`${id}-trialEnds`}
@@ -1147,7 +1164,7 @@ function ImportChoice({
         {sameCurrency ? (
           <li>
             <span className="font-medium text-ink-2">Add to my list</span> keeps yours and adds
-            these. Ones exported from here before are updated, not doubled.
+            these. Anything already on your list isn’t doubled.
           </li>
         ) : (
           <li>
@@ -1157,7 +1174,7 @@ function ImportChoice({
         )}
         <li>
           <span className="font-medium text-ink-2">Replace my list</span> swaps yours for the
-          file’s. Export yours first if you might want it back.
+          file’s. Download a backup of yours first if you might want it back.
         </li>
       </ul>
       <div className="flex flex-wrap gap-2">

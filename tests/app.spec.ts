@@ -294,6 +294,7 @@ test('a Wi-Fi code carries the network, with a printed caption', async ({ page }
   await page.getByText('Wi-Fi', { exact: true }).click();
   await page.getByLabel('Network name').fill('Studio-Guest');
   await page.getByLabel('Password').fill('espresso');
+  await page.getByText('Customize', { exact: true }).click();
   await page.getByRole('button', { name: 'Scan to join our Wi-Fi' }).click();
   const code = page.getByRole('img', {
     name: /QR code for WIFI:T:WPA;S:Studio-Guest;P:espresso;;/,

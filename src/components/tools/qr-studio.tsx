@@ -17,7 +17,6 @@ import {
 } from '@/lib/tools/qr-payloads';
 import {
   captionBand,
-  contrast,
   drawShapes,
   LOGO_MAX,
   LOGO_MIN,
@@ -37,6 +36,9 @@ import { Label, Note, Surface } from './kit';
  * scannable. Built on the same encoder as Hyphy's original QR tool (UTF-8, error correction,
  * contrast checks); new here are the kinds, the looks, logos, and guardrails that keep a styled
  * code readable. Everything is drawn on the device; nothing is uploaded or tracked.
+ *
+ * On a phone it reads top to bottom like a calculator: what it opens, the code, then (folded away)
+ * everything that changes how it looks.
  */
 
 const KINDS: { value: QrKind; label: string; icon: IconName }[] = [
@@ -70,10 +72,10 @@ const CORNERS: { value: CornerStyle; label: string }[] = [
   { value: 'circle', label: 'Round' },
 ];
 const LEVELS: { value: QrLevel; label: string }[] = [
-  { value: 'L', label: 'Low (7%)' },
-  { value: 'M', label: 'Medium (15%)' },
-  { value: 'Q', label: 'Quartile (25%)' },
-  { value: 'H', label: 'High (30%)' },
+  { value: 'L', label: 'Light' },
+  { value: 'M', label: 'Standard' },
+  { value: 'Q', label: 'Sturdy' },
+  { value: 'H', label: 'Sturdiest' },
 ];
 const SIZES = [512, 1024, 2048];
 const CAPTIONS: Partial<Record<QrKind, string[]>> = {
@@ -342,7 +344,6 @@ export function QrStudio() {
     [code, look, logo],
   );
   const risks = scanRisks(look, logo);
-  const modules = code.state === 'ready' ? code.matrix.length : 0;
   const band = caption && drawn ? captionBand(drawn.total) : 0;
   const fileBase = `qr-${slugName(describeContent(content), 'code')}`;
   const linkWarning =
@@ -399,116 +400,9 @@ export function QrStudio() {
     setLook((current) => ({ ...current, fg, bg, corners }));
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,.92fr)] lg:gap-6">
-      {/* The code, first on phones so it draws as you type. */}
-      <div className="order-first grid content-start gap-4 lg:sticky lg:top-24 lg:order-last lg:self-start">
-        <Surface className="!p-4 sm:!p-6">
-          <div className="mb-3 flex items-center justify-between">
-            <span className="flex items-center gap-2 text-[12.5px] font-medium text-ink-2">
-              <span
-                className={cn(
-                  'size-1.5 rounded-full',
-                  code.state === 'ready'
-                    ? risks.length
-                      ? 'bg-caution'
-                      : 'bg-positive'
-                    : 'bg-faint',
-                )}
-              />
-              {code.state === 'ready'
-                ? risks.length
-                  ? 'Check before printing'
-                  : 'Ready to scan'
-                : 'Live preview'}
-            </span>
-            <span className="mono-num text-[11px] text-muted">
-              {code.state === 'ready'
-                ? `${modules} × ${modules} · v${(modules - 17) / 4} · ${level}`
-                : '—'}
-            </span>
-          </div>
-          <div
-            className="mx-auto w-full max-w-[250px] rounded-[20px] p-3 shadow-lift transition-colors duration-300 sm:max-w-[320px] sm:p-4"
-            style={{
-              background:
-                look.bg ||
-                'repeating-conic-gradient(#e7e4dc 0% 25%, #ffffff 0% 50%) 50% / 16px 16px',
-            }}
-          >
-            {drawn ? (
-              <svg
-                viewBox={`0 0 ${drawn.total} ${drawn.total + band}`}
-                className="block h-auto w-full animate-fade"
-                role="img"
-                aria-label={`QR code for ${value.slice(0, 120)}`}
-              >
-                <QrShapes shapes={drawn.shapes} />
-                {caption && (
-                  <text
-                    x={drawn.total / 2}
-                    y={drawn.total + band * 0.42}
-                    textAnchor="middle"
-                    dominantBaseline="middle"
-                    fontWeight={600}
-                    fontSize={drawn.total * 0.07}
-                    fill={captionColor}
-                    style={{ fontFamily: 'var(--font-sans)' }}
-                  >
-                    {caption}
-                  </text>
-                )}
-              </svg>
-            ) : (
-              <div className="grid aspect-square place-items-center px-4 text-center text-[13.5px] text-[#6c685e]">
-                <span>
-                  <Icon name="qr" size={36} className="mx-auto mb-3 text-[#a19c91]" />
-                  {code.state === 'too-long'
-                    ? 'That’s too much for one code. Shorten it, or lower the error correction.'
-                    : 'Your code draws here as you type.'}
-                </span>
-              </div>
-            )}
-          </div>
-          <div className="mt-4 grid grid-cols-2 gap-2 sm:mt-5">
-            <button
-              type="button"
-              disabled={!drawn}
-              onClick={downloadPng}
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-[12px] bg-ink px-4 text-[15px] font-semibold text-on-ink disabled:opacity-40 lg:h-10 lg:text-[14px]"
-            >
-              <Icon name="download" size={16} /> PNG
-            </button>
-            <button
-              type="button"
-              disabled={!drawn}
-              onClick={downloadSvg}
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-[12px] bg-well px-4 text-[15px] font-medium text-ink-2 hover:bg-ink/10 disabled:opacity-40 lg:h-10 lg:text-[14px]"
-            >
-              <Icon name="download" size={16} /> SVG
-            </button>
-          </div>
-          <p role="status" className="mt-2 min-h-5 text-center text-[12.5px] text-muted">
-            {message}
-          </p>
-          {drawn && risks.length > 0 && (
-            <div className="mt-1 grid gap-1.5">
-              {risks.map((risk) => (
-                <Note key={risk} icon="alert" tone="caution">
-                  {risk}
-                </Note>
-              ))}
-            </div>
-          )}
-          {drawn && risks.length === 0 && (
-            <p className="mt-1 text-center text-[12px] text-muted">
-              Styled codes scan with every phone we know of — still, scan it once before you print a
-              thousand.
-            </p>
-          )}
-        </Surface>
-      </div>
-
-      <Surface className="grid content-start gap-6">
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,.92fr)] lg:grid-rows-[auto_1fr] lg:gap-6">
+      {/* What the code opens comes first everywhere: on a phone it's the one box that matters. */}
+      <Surface className="grid content-start gap-4 lg:col-start-1 lg:row-start-1">
         <section aria-labelledby={`${id}-what`} className="grid gap-4">
           <Label id={`${id}-what`}>What it opens</Label>
           <div
@@ -541,15 +435,17 @@ export function QrStudio() {
           </div>
 
           {kind === 'link' && (
-            <Field label="Web address" htmlFor={`${id}-url`} error={linkWarning || undefined}>
+            <Field label="Link" htmlFor={`${id}-url`} error={linkWarning || undefined}>
               <Input
                 id={`${id}-url`}
                 aria-label="Link or text"
                 inputMode="url"
+                enterKeyHint="done"
                 autoComplete="url"
                 autoCapitalize="off"
+                autoCorrect="off"
                 spellCheck={false}
-                placeholder="yourshop.example/menu"
+                placeholder="Paste or type a link"
                 value={url}
                 onChange={(event) => setUrl(event.target.value)}
                 onBlur={() => url.trim() && setUrl(normalizeLink(url))}
@@ -611,8 +507,7 @@ export function QrStudio() {
                 The network is hidden
               </label>
               <p className="text-[12.5px] text-muted">
-                Guests point their camera and join. The password is inside the code, so anyone who
-                can see the code can join.
+                Guests point their camera and join. Anyone who can see the code can join.
               </p>
             </div>
           )}
@@ -656,8 +551,7 @@ export function QrStudio() {
                 />
               </Field>
               <p className="text-[12.5px] text-muted sm:col-span-2">
-                Scanning offers to save you as a contact. Every field you fill makes the code denser
-                — keep it to what people need.
+                Scanning offers to save you as a contact. Fill in only what people need.
               </p>
             </div>
           )}
@@ -738,309 +632,437 @@ export function QrStudio() {
             </div>
           )}
         </section>
+      </Surface>
 
-        <section aria-labelledby={`${id}-look`} className="grid gap-4 border-t border-line pt-5">
-          <div className="flex items-center justify-between">
-            <Label id={`${id}-look`}>Look</Label>
-            <span className="mono-num text-[11px] text-muted">
-              Contrast {contrast(look.fg, look.bg || '#ffffff').toFixed(1)}:1
+      {/* The code: right under the box on phones, so it draws as you type; beside it on desktops. */}
+      <div className="grid content-start gap-4 lg:sticky lg:top-24 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:self-start">
+        <Surface className="!p-4 sm:!p-6">
+          <div className="mb-3 flex items-center justify-between">
+            <span className="flex items-center gap-2 text-[12.5px] font-medium text-ink-2">
+              <span
+                className={cn(
+                  'size-1.5 rounded-full',
+                  code.state === 'ready'
+                    ? risks.length
+                      ? 'bg-caution'
+                      : 'bg-positive'
+                    : 'bg-faint',
+                )}
+              />
+              {code.state === 'ready'
+                ? risks.length
+                  ? 'Check before printing'
+                  : 'Ready to scan'
+                : 'Preview'}
             </span>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {PRESETS.map((preset) => {
-              const on =
-                look.fg === preset.fg && look.bg === preset.bg && look.corners === preset.corners;
-              return (
-                <button
-                  key={preset.name}
-                  type="button"
-                  aria-pressed={on}
-                  aria-label={`${preset.name} colors`}
-                  title={preset.name}
-                  onClick={() => setColors(preset.fg, preset.bg, preset.corners)}
-                  className={cn(
-                    'grid size-11 place-items-center rounded-[12px] shadow-[inset_0_0_0_1px_rgb(0_0_0/.12)] transition-transform hover:scale-105 lg:size-10',
-                    on && 'ring-2 ring-signal ring-offset-2 ring-offset-[var(--color-surface)]',
-                  )}
-                  style={{ background: preset.bg }}
-                >
-                  <span
-                    className="grid size-5 place-items-center rounded-[5px]"
-                    style={{ background: preset.fg }}
+          <div
+            className="mx-auto w-full max-w-[250px] rounded-[20px] p-3 shadow-lift transition-colors duration-300 sm:max-w-[320px] sm:p-4"
+            style={{
+              background:
+                look.bg ||
+                'repeating-conic-gradient(#e7e4dc 0% 25%, #ffffff 0% 50%) 50% / 16px 16px',
+            }}
+          >
+            {drawn ? (
+              <svg
+                viewBox={`0 0 ${drawn.total} ${drawn.total + band}`}
+                className="block h-auto w-full animate-fade"
+                role="img"
+                aria-label={`QR code for ${value.slice(0, 120)}`}
+              >
+                <QrShapes shapes={drawn.shapes} />
+                {caption && (
+                  <text
+                    x={drawn.total / 2}
+                    y={drawn.total + band * 0.42}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fontWeight={600}
+                    fontSize={drawn.total * 0.07}
+                    fill={captionColor}
+                    style={{ fontFamily: 'var(--font-sans)' }}
                   >
-                    {preset.corners && (
-                      <span
-                        className="size-2 rounded-[2px]"
-                        style={{ background: preset.corners }}
-                      />
-                    )}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {(
-              [
-                ['fg', 'Code'],
-                ['bg', 'Background'],
-                ['corners', 'Corners'],
-              ] as const
-            ).map(([key, name]) => (
-              <label
-                key={key}
-                className="flex items-center gap-2 rounded-[12px] bg-subtle py-1.5 pr-3 pl-1.5 text-[12.5px] shadow-[inset_0_0_0_1px_var(--color-line)]"
-              >
-                <input
-                  type="color"
-                  value={look[key] || (key === 'bg' ? '#ffffff' : look.fg)}
-                  onChange={(event) => setLook({ ...look, [key]: event.target.value })}
-                  className="size-8 cursor-pointer rounded-[8px] border-0 bg-transparent p-0"
-                  aria-label={`${name} color`}
-                />
+                    {caption}
+                  </text>
+                )}
+              </svg>
+            ) : (
+              // Short on phones while empty, so the box above stays the focus.
+              <div className="grid aspect-[2/1] place-items-center px-4 text-center text-[13.5px] text-[#6c685e] sm:aspect-square">
                 <span>
-                  <span className="block text-muted">{name}</span>
-                  <span className="mono-num block text-[10.5px] text-ink-2">
-                    {key === 'bg' && !look.bg
-                      ? 'None'
-                      : key === 'corners' && !look.corners
-                        ? 'Same'
-                        : look[key]}
-                  </span>
+                  <Icon name="qr" size={32} className="mx-auto mb-2 text-[#a19c91] sm:mb-3" />
+                  {code.state === 'too-long'
+                    ? 'That’s too much for one code. Try something shorter.'
+                    : 'Your code appears here as you type.'}
                 </span>
-              </label>
-            ))}
-            <label className="flex items-center gap-2 px-1 text-[12.5px] text-ink-2">
-              <input
-                type="checkbox"
-                checked={!look.bg}
-                onChange={(event) =>
-                  setLook({ ...look, bg: event.target.checked ? '' : '#ffffff' })
-                }
-                className="size-4 accent-[var(--color-ink)]"
-              />
-              Transparent
-            </label>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="grid gap-2">
-              <span className="text-[13px] font-medium text-ink-2">Dots</span>
-              <Choice
-                label="Dot style"
-                value={look.dot}
-                onChange={(dot) => setLook({ ...look, dot })}
-                options={DOTS}
-                render={(dot) => <StyleSample dot={dot} />}
-              />
-            </div>
-            <div className="grid gap-2">
-              <span className="text-[13px] font-medium text-ink-2">Corners</span>
-              <Choice
-                label="Corner style"
-                value={look.corner}
-                onChange={(corner) => setLook({ ...look, corner })}
-                options={CORNERS}
-                render={(corner) => <StyleSample corner={corner} />}
-              />
-            </div>
-          </div>
-
-          <div className="grid gap-2 rounded-[16px] bg-subtle p-3 shadow-[inset_0_0_0_1px_var(--color-line)]">
-            <div className="flex flex-wrap items-center gap-3">
-              {logo ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={logo.src}
-                  alt="Your logo"
-                  className="size-11 rounded-[10px] bg-white object-contain p-1"
-                />
-              ) : (
-                <span className="grid size-11 place-items-center rounded-[10px] bg-well text-muted">
-                  <Icon name="image" size={18} />
-                </span>
-              )}
-              <span className="min-w-0 flex-1">
-                <span className="block text-[14px] font-medium text-ink">Logo in the middle</span>
-                <span className="block text-[12.5px] text-muted">
-                  {logo
-                    ? 'High error correction is on, so the code still reads.'
-                    : 'PNG, JPG or SVG. It stays on your device.'}
-                </span>
-              </span>
-              <input
-                ref={logoInput}
-                type="file"
-                accept="image/png,image/jpeg,image/webp,image/svg+xml"
-                className="sr-only"
-                id={`${id}-logo`}
-                onChange={async (event) => {
-                  const file = event.target.files?.[0];
-                  event.target.value = '';
-                  if (!file) return;
-                  try {
-                    setLogoError('');
-                    const src = await logoFrom(file);
-                    setLogo((current) => ({
-                      src,
-                      size: current?.size ?? 0.2,
-                      plate: current?.plate ?? true,
-                    }));
-                  } catch (error) {
-                    setLogoError(
-                      error instanceof Error ? error.message : 'That logo couldn’t be read.',
-                    );
-                  }
-                }}
-              />
-              <label
-                htmlFor={`${id}-logo`}
-                className="inline-flex h-10 items-center gap-1.5 rounded-[11px] bg-well px-3 text-[13.5px] font-medium text-ink-2 hover:bg-ink/10 hover:text-ink"
-              >
-                <Icon name="upload" size={15} /> {logo ? 'Change' : 'Add a logo'}
-              </label>
-              {logo && (
-                <button
-                  type="button"
-                  onClick={() => setLogo(null)}
-                  className="h-10 rounded-[11px] px-3 text-[13.5px] text-muted hover:bg-ink/5 hover:text-ink"
-                >
-                  Remove
-                </button>
-              )}
-            </div>
-            {logoError && <p className="text-[12.5px] text-critical">{logoError}</p>}
-            {logo && (
-              <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
-                <label className="grid gap-1 text-[12.5px] text-muted">
-                  <span className="flex justify-between">
-                    Logo size <span className="mono-num">{Math.round(logo.size * 100)}%</span>
-                  </span>
-                  <input
-                    type="range"
-                    min={LOGO_MIN}
-                    max={LOGO_MAX}
-                    step={0.01}
-                    value={logo.size}
-                    onChange={(event) => setLogo({ ...logo, size: Number(event.target.value) })}
-                  />
-                </label>
-                <label className="flex items-center gap-2 text-[13px] text-ink-2">
-                  <input
-                    type="checkbox"
-                    checked={logo.plate}
-                    onChange={(event) => setLogo({ ...logo, plate: event.target.checked })}
-                    className="size-4 accent-[var(--color-ink)]"
-                  />
-                  Plate behind it
-                </label>
               </div>
             )}
           </div>
-
-          <Field
-            label="Caption under the code"
-            htmlFor={`${id}-caption`}
-            optional
-            hint="Printed with the code, so people know what they’re scanning."
-          >
-            <Input
-              id={`${id}-caption`}
-              value={caption}
-              maxLength={32}
-              placeholder={CAPTIONS[kind]?.[0] ?? 'Scan me'}
-              onChange={(event) => setCaption(event.target.value)}
-            />
-          </Field>
-          <div className="-mt-1 flex flex-wrap gap-1.5">
-            {(CAPTIONS[kind] ?? ['Scan me']).map((suggestion) => (
-              <button
-                key={suggestion}
-                type="button"
-                aria-pressed={caption === suggestion}
-                onClick={() => setCaption(caption === suggestion ? '' : suggestion)}
-                className={cn(
-                  'rounded-full px-3 py-1.5 text-[12.5px] transition-colors',
-                  caption === suggestion
-                    ? 'bg-ink text-on-ink'
-                    : 'bg-well text-ink-2 hover:bg-ink/10',
-                )}
-              >
-                {suggestion}
-              </button>
-            ))}
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:mt-5">
+            <button
+              type="button"
+              disabled={!drawn}
+              onClick={downloadPng}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-[12px] bg-ink px-4 text-[15px] font-semibold text-on-ink disabled:opacity-40 lg:h-10 lg:text-[14px]"
+            >
+              <Icon name="download" size={16} /> PNG
+            </button>
+            <button
+              type="button"
+              disabled={!drawn}
+              onClick={downloadSvg}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-[12px] bg-well px-4 text-[15px] font-medium text-ink-2 hover:bg-ink/10 disabled:opacity-40 lg:h-10 lg:text-[14px]"
+            >
+              <Icon name="download" size={16} /> SVG
+            </button>
           </div>
-        </section>
+          <p role="status" className="mt-2 min-h-5 text-center text-[12.5px] text-muted">
+            {message}
+          </p>
+          {drawn && risks.length > 0 && (
+            <div className="mt-1 grid gap-1.5">
+              {risks.map((risk) => (
+                <Note key={risk} icon="alert" tone="caution">
+                  {risk}
+                </Note>
+              ))}
+            </div>
+          )}
+          {drawn && risks.length === 0 && (
+            <p className="mt-1 text-center text-[12px] text-muted">
+              Scan it once with your phone before you print a stack.
+            </p>
+          )}
+        </Surface>
+      </div>
 
-        <details className="group border-t border-line pt-4">
-          <summary className="flex list-none items-center gap-2 text-[13.5px] font-medium text-ink-2 [&::-webkit-details-marker]:hidden">
+      {/* Styling is optional: good defaults, tucked away until someone wants to play. */}
+      <Surface className="grid content-start !py-1 lg:col-start-1 lg:row-start-2 lg:self-start">
+        <details className="group/look">
+          <summary className="flex min-h-14 cursor-pointer list-none items-center gap-3 text-[15px] font-semibold text-ink [&::-webkit-details-marker]:hidden">
+            <span
+              aria-hidden="true"
+              className="grid size-8 shrink-0 place-items-center rounded-[9px] shadow-[inset_0_0_0_1px_rgb(0_0_0/.14)]"
+              style={{
+                background:
+                  look.bg ||
+                  'repeating-conic-gradient(#e7e4dc 0% 25%, #ffffff 0% 50%) 50% / 8px 8px',
+              }}
+            >
+              <span className="size-3.5 rounded-[3px]" style={{ background: look.fg }} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block">Customize</span>
+              <span className="block truncate text-[12.5px] font-normal text-muted">
+                Colors, dot style, logo and a caption
+              </span>
+            </span>
+            <Icon
+              name="chevron-right"
+              size={16}
+              className="shrink-0 text-muted transition-transform group-open/look:rotate-90"
+            />
+          </summary>
+          <section aria-label="Look" className="grid gap-4 pt-2 pb-5">
+            <div className="flex flex-wrap items-center gap-2">
+              {PRESETS.map((preset) => {
+                const on =
+                  look.fg === preset.fg && look.bg === preset.bg && look.corners === preset.corners;
+                return (
+                  <button
+                    key={preset.name}
+                    type="button"
+                    aria-pressed={on}
+                    aria-label={`${preset.name} colors`}
+                    title={preset.name}
+                    onClick={() => setColors(preset.fg, preset.bg, preset.corners)}
+                    className={cn(
+                      'grid size-11 place-items-center rounded-[12px] shadow-[inset_0_0_0_1px_rgb(0_0_0/.12)] transition-transform hover:scale-105 lg:size-10',
+                      on && 'ring-2 ring-signal ring-offset-2 ring-offset-[var(--color-surface)]',
+                    )}
+                    style={{ background: preset.bg }}
+                  >
+                    <span
+                      className="grid size-5 place-items-center rounded-[5px]"
+                      style={{ background: preset.fg }}
+                    >
+                      {preset.corners && (
+                        <span
+                          className="size-2 rounded-[2px]"
+                          style={{ background: preset.corners }}
+                        />
+                      )}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {(
+                [
+                  ['fg', 'Code'],
+                  ['bg', 'Background'],
+                  ['corners', 'Corners'],
+                ] as const
+              ).map(([key, name]) => (
+                <label
+                  key={key}
+                  className="flex items-center gap-2 rounded-[12px] bg-subtle py-1.5 pr-3 pl-1.5 text-[12.5px] shadow-[inset_0_0_0_1px_var(--color-line)]"
+                >
+                  <input
+                    type="color"
+                    value={look[key] || (key === 'bg' ? '#ffffff' : look.fg)}
+                    onChange={(event) => setLook({ ...look, [key]: event.target.value })}
+                    className="size-8 cursor-pointer rounded-[8px] border-0 bg-transparent p-0"
+                    aria-label={`${name} color`}
+                  />
+                  <span>
+                    <span className="block text-muted">{name}</span>
+                    <span className="mono-num block text-[10.5px] text-ink-2">
+                      {key === 'bg' && !look.bg
+                        ? 'None'
+                        : key === 'corners' && !look.corners
+                          ? 'Same'
+                          : look[key]}
+                    </span>
+                  </span>
+                </label>
+              ))}
+              <label className="flex items-center gap-2 px-1 text-[12.5px] text-ink-2">
+                <input
+                  type="checkbox"
+                  checked={!look.bg}
+                  onChange={(event) =>
+                    setLook({ ...look, bg: event.target.checked ? '' : '#ffffff' })
+                  }
+                  className="size-4 accent-[var(--color-ink)]"
+                />
+                Transparent
+              </label>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <span className="text-[13px] font-medium text-ink-2">Dots</span>
+                <Choice
+                  label="Dot style"
+                  value={look.dot}
+                  onChange={(dot) => setLook({ ...look, dot })}
+                  options={DOTS}
+                  render={(dot) => <StyleSample dot={dot} />}
+                />
+              </div>
+              <div className="grid gap-2">
+                <span className="text-[13px] font-medium text-ink-2">Corners</span>
+                <Choice
+                  label="Corner style"
+                  value={look.corner}
+                  onChange={(corner) => setLook({ ...look, corner })}
+                  options={CORNERS}
+                  render={(corner) => <StyleSample corner={corner} />}
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-2 rounded-[16px] bg-subtle p-3 shadow-[inset_0_0_0_1px_var(--color-line)]">
+              <div className="flex flex-wrap items-center gap-3">
+                {logo ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={logo.src}
+                    alt="Your logo"
+                    className="size-11 rounded-[10px] bg-white object-contain p-1"
+                  />
+                ) : (
+                  <span className="grid size-11 place-items-center rounded-[10px] bg-well text-muted">
+                    <Icon name="image" size={18} />
+                  </span>
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[14px] font-medium text-ink">Logo in the middle</span>
+                  <span className="block text-[12.5px] text-muted">
+                    {logo ? 'The code is made sturdier so it still scans.' : 'PNG, JPG or SVG.'}
+                  </span>
+                </span>
+                <input
+                  ref={logoInput}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  className="sr-only"
+                  id={`${id}-logo`}
+                  onChange={async (event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = '';
+                    if (!file) return;
+                    try {
+                      setLogoError('');
+                      const src = await logoFrom(file);
+                      setLogo((current) => ({
+                        src,
+                        size: current?.size ?? 0.2,
+                        plate: current?.plate ?? true,
+                      }));
+                    } catch (error) {
+                      setLogoError(
+                        error instanceof Error ? error.message : 'That logo couldn’t be read.',
+                      );
+                    }
+                  }}
+                />
+                <label
+                  htmlFor={`${id}-logo`}
+                  className="inline-flex h-10 items-center gap-1.5 rounded-[11px] bg-well px-3 text-[13.5px] font-medium text-ink-2 hover:bg-ink/10 hover:text-ink"
+                >
+                  <Icon name="upload" size={15} /> {logo ? 'Change' : 'Add a logo'}
+                </label>
+                {logo && (
+                  <button
+                    type="button"
+                    onClick={() => setLogo(null)}
+                    className="h-10 rounded-[11px] px-3 text-[13.5px] text-muted hover:bg-ink/5 hover:text-ink"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+              {logoError && <p className="text-[12.5px] text-critical">{logoError}</p>}
+              {logo && (
+                <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
+                  <label className="grid gap-1 text-[12.5px] text-muted">
+                    <span className="flex justify-between">
+                      Logo size <span className="mono-num">{Math.round(logo.size * 100)}%</span>
+                    </span>
+                    <input
+                      type="range"
+                      min={LOGO_MIN}
+                      max={LOGO_MAX}
+                      step={0.01}
+                      value={logo.size}
+                      onChange={(event) => setLogo({ ...logo, size: Number(event.target.value) })}
+                    />
+                  </label>
+                  <label className="flex items-center gap-2 text-[13px] text-ink-2">
+                    <input
+                      type="checkbox"
+                      checked={logo.plate}
+                      onChange={(event) => setLogo({ ...logo, plate: event.target.checked })}
+                      className="size-4 accent-[var(--color-ink)]"
+                    />
+                    Plate behind it
+                  </label>
+                </div>
+              )}
+            </div>
+
+            <Field
+              label="Caption under the code"
+              htmlFor={`${id}-caption`}
+              optional
+              hint="Printed with the code, so people know what they’re scanning."
+            >
+              <Input
+                id={`${id}-caption`}
+                value={caption}
+                maxLength={32}
+                placeholder={CAPTIONS[kind]?.[0] ?? 'Scan me'}
+                onChange={(event) => setCaption(event.target.value)}
+              />
+            </Field>
+            <div className="-mt-1 flex flex-wrap gap-1.5">
+              {(CAPTIONS[kind] ?? ['Scan me']).map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  aria-pressed={caption === suggestion}
+                  onClick={() => setCaption(caption === suggestion ? '' : suggestion)}
+                  className={cn(
+                    'rounded-full px-3 py-1.5 text-[12.5px] transition-colors',
+                    caption === suggestion
+                      ? 'bg-ink text-on-ink'
+                      : 'bg-well text-ink-2 hover:bg-ink/10',
+                  )}
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          </section>
+        </details>
+
+        <details className="group/print border-t border-line">
+          <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 text-[13.5px] font-medium text-ink-2 [&::-webkit-details-marker]:hidden">
             <Icon
               name="chevron-right"
               size={15}
-              className="text-muted transition-transform group-open:rotate-90"
+              className="text-muted transition-transform group-open/print:rotate-90"
             />
             Print settings
             <span className="ml-auto text-[12px] font-normal text-muted">
-              {level} · {size}px · border {look.margin}
+              {size}px · border {look.margin}
             </span>
           </summary>
-          <div className="mt-4 grid gap-4">
-            <div className="grid grid-cols-2 gap-3">
+          <div className="pb-5">
+            <div className="grid gap-4 pt-2">
+              <div className="grid grid-cols-2 gap-3">
+                <Field
+                  label="Sturdiness"
+                  htmlFor={`${id}-level`}
+                  hint={
+                    logo
+                      ? 'Highest while there’s a logo.'
+                      : 'Sturdier codes survive scuffs, with more dots.'
+                  }
+                >
+                  <Select
+                    id={`${id}-level`}
+                    value={level}
+                    disabled={Boolean(logo)}
+                    onChange={(event) => setChosenLevel(event.target.value as QrLevel)}
+                  >
+                    {LEVELS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="PNG size" htmlFor={`${id}-size`}>
+                  <Select
+                    id={`${id}-size`}
+                    value={size}
+                    onChange={(event) => setSize(Number(event.target.value))}
+                  >
+                    {SIZES.map((option) => (
+                      <option key={option} value={option}>
+                        {option} px wide
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
               <Field
-                label="Error correction"
-                htmlFor={`${id}-level`}
-                hint={
-                  logo ? 'High while there’s a logo.' : 'Higher survives scuffs, but is denser.'
+                label={
+                  <span className="flex w-full items-center justify-between">
+                    Border
+                    <span className="mono-num text-[11px] font-normal text-muted">
+                      {look.margin}
+                    </span>
+                  </span>
                 }
+                htmlFor={`${id}-margin`}
               >
-                <Select
-                  id={`${id}-level`}
-                  value={level}
-                  disabled={Boolean(logo)}
-                  onChange={(event) => setChosenLevel(event.target.value as QrLevel)}
-                >
-                  {LEVELS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="PNG size" htmlFor={`${id}-size`}>
-                <Select
-                  id={`${id}-size`}
-                  value={size}
-                  onChange={(event) => setSize(Number(event.target.value))}
-                >
-                  {SIZES.map((option) => (
-                    <option key={option} value={option}>
-                      {option} px wide
-                    </option>
-                  ))}
-                </Select>
+                <input
+                  id={`${id}-margin`}
+                  type="range"
+                  min={0}
+                  max={8}
+                  step={1}
+                  value={look.margin}
+                  onChange={(event) => setLook({ ...look, margin: Number(event.target.value) })}
+                  className="w-full"
+                />
               </Field>
             </div>
-            <Field
-              label={
-                <span className="flex w-full items-center justify-between">
-                  Border (quiet zone)
-                  <span className="mono-num text-[11px] font-normal text-muted">
-                    {look.margin} modules
-                  </span>
-                </span>
-              }
-              htmlFor={`${id}-margin`}
-            >
-              <input
-                id={`${id}-margin`}
-                type="range"
-                min={0}
-                max={8}
-                step={1}
-                value={look.margin}
-                onChange={(event) => setLook({ ...look, margin: Number(event.target.value) })}
-                className="w-full"
-              />
-            </Field>
           </div>
         </details>
       </Surface>

@@ -29,10 +29,10 @@ import {
  */
 
 const LEVELS: { value: QrLevel; label: string }[] = [
-  { value: 'L', label: 'Low (7%)' },
-  { value: 'M', label: 'Medium (15%)' },
-  { value: 'Q', label: 'Quartile (25%)' },
-  { value: 'H', label: 'High (30%)' },
+  { value: 'L', label: 'Light' },
+  { value: 'M', label: 'Standard' },
+  { value: 'Q', label: 'Sturdy' },
+  { value: 'H', label: 'Sturdiest' },
 ];
 const SIZES = [512, 1024, 2048];
 const DEFAULT_FG = '#0f0f0e';
@@ -320,143 +320,9 @@ export function QrTool({
     });
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.95fr)] lg:gap-6">
-      {/* The code, first on phones so it draws as you type. */}
-      <div className="order-first grid content-start gap-4 lg:sticky lg:top-6 lg:order-last lg:self-start">
-        <div className="rounded-[26px] bg-tool-qr/25 p-4 shadow-[inset_0_0_0_1px_rgb(0_0_0/.04)] sm:p-6">
-          <div className="mb-3 flex items-center justify-between">
-            <span className="flex items-center gap-2 text-[12.5px] font-medium text-ink/70">
-              <span
-                className={cn(
-                  'size-1.5 rounded-full',
-                  code.state === 'ready' ? 'bg-positive' : 'bg-ink/25',
-                )}
-              />
-              {code.state === 'ready' ? 'Ready to scan' : 'Live preview'}
-            </span>
-            <span className="mono-num text-[11px] text-ink/50">
-              {code.state === 'ready'
-                ? `${modules} × ${modules} · v${(modules - 17) / 4} · ${level}`
-                : '—'}
-            </span>
-          </div>
-          <div
-            className="mx-auto w-full max-w-[230px] rounded-[20px] p-3 shadow-lift transition-colors duration-300 sm:max-w-[300px] sm:p-4"
-            style={{ background: bg }}
-          >
-            {code.state === 'ready' ? (
-              <svg
-                viewBox={`0 0 ${total} ${total + band}`}
-                shapeRendering="crispEdges"
-                className="block h-auto w-full animate-fade"
-                role="img"
-                aria-label={`QR code for ${value.slice(0, 100)}`}
-              >
-                <rect width={total} height={total + band} fill={bg} />
-                <path d={path} fill={fg} className="transition-[fill] duration-300" />
-                {caption && (
-                  <text
-                    x={total / 2}
-                    y={total + band * 0.42}
-                    textAnchor="middle"
-                    dominantBaseline="middle"
-                    fontWeight={600}
-                    fontSize={total * 0.07}
-                    fill={fg}
-                    style={{ fontFamily: 'var(--font-sans)' }}
-                  >
-                    {caption}
-                  </text>
-                )}
-              </svg>
-            ) : (
-              <div className="grid aspect-square place-items-center px-4 text-center text-[13.5px] text-muted">
-                <span>
-                  <Icon name="qr" size={36} className="mx-auto mb-3 text-faint" />
-                  {code.state === 'empty'
-                    ? kind === 'wifi'
-                      ? 'Add the network name. Your code appears here.'
-                      : kind === 'email'
-                        ? 'Add an email address. Your code appears here.'
-                        : 'Paste a link. Your code appears here.'
-                    : 'That’s too long for one code. Shorten it or lower the error correction.'}
-                </span>
-              </div>
-            )}
-          </div>
-          <div className="mt-4 grid grid-cols-2 gap-2 sm:mt-5">
-            <Button variant="primary" disabled={code.state !== 'ready'} onClick={downloadPng}>
-              <Icon name="download" size={16} /> PNG
-            </Button>
-            <Button disabled={code.state !== 'ready'} onClick={downloadSvg}>
-              <Icon name="download" size={16} /> SVG
-            </Button>
-          </div>
-          <p role="status" className="mt-2 min-h-5 text-center text-[12.5px] text-ink/60">
-            {message}
-          </p>
-
-          {canSave && (
-            <div className="mt-2 border-t border-ink/10 pt-4">
-              <div className="grid gap-2.5 sm:grid-cols-2">
-                <Input
-                  id={`${id}-label`}
-                  aria-label="Name"
-                  value={label}
-                  onChange={(event) => {
-                    setLabel(event.target.value);
-                    touched();
-                  }}
-                  placeholder="Name it — Table tent, menu"
-                  className="!bg-white/85"
-                />
-                <Input
-                  id={`${id}-place`}
-                  aria-label="Where it goes"
-                  value={placement}
-                  onChange={(event) => {
-                    setPlacement(event.target.value);
-                    touched();
-                  }}
-                  placeholder="Where it goes (optional)"
-                  className="!bg-white/85"
-                />
-              </div>
-              <AttachPicker
-                value={projectId}
-                onChange={(next) => {
-                  setProjectId(next);
-                  touched();
-                }}
-                className="mt-2.5"
-              />
-              <Button
-                className="mt-2.5 w-full !bg-white/85 hover:!bg-white"
-                disabled={code.state !== 'ready' || saving || saved}
-                onClick={saveToSpace}
-              >
-                <Icon name={saved ? 'check' : 'pin'} size={16} />
-                {saving ? 'Saving…' : saved ? `Saved in ${spaceName}` : `Save to ${spaceName}`}
-              </Button>
-              <Button
-                className="mt-2 w-full !bg-white/60 hover:!bg-white"
-                disabled={code.state !== 'ready' || imageSaver.busy || Boolean(imageSaved)}
-                onClick={savePngToFiles}
-              >
-                <Icon name={imageSaved ? 'check' : 'files'} size={16} />
-                {imageSaver.busy
-                  ? 'Saving image…'
-                  : imageSaved
-                    ? 'Image saved to Files'
-                    : 'Save image to Files'}
-              </Button>
-              <SaveProgress state={imageSaver.state} className="mt-1.5 text-center" />
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="grid content-start gap-6 rounded-[22px] bg-surface p-5 shadow-card">
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.95fr)] lg:grid-rows-[auto_1fr] lg:gap-6">
+      {/* What the code opens comes first everywhere: on a phone it's the one box that matters. */}
+      <div className="grid content-start gap-6 rounded-[22px] bg-surface p-5 shadow-card lg:col-start-1 lg:row-start-1">
         <section aria-labelledby={`${id}-what`} className="grid gap-4">
           <h2 id={`${id}-what`} className="label">
             What it opens
@@ -582,120 +448,267 @@ export function QrTool({
             </div>
           )}
         </section>
+      </div>
 
-        <section aria-labelledby={`${id}-look`} className="grid gap-4 border-t border-line pt-5">
-          <div className="flex items-center justify-between">
-            <h2 id={`${id}-look`} className="label">
-              Look
-            </h2>
-            <span className={cn('mono-num text-[11px]', risky ? 'text-caution' : 'text-faint')}>
-              Contrast {contrast.toFixed(1)}:1
+      {/* The code: right under the box on phones, so it draws as you type; beside it on desktops. */}
+      <div className="grid content-start gap-4 lg:sticky lg:top-6 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:self-start">
+        <div className="rounded-[26px] bg-tool-qr/25 p-4 shadow-[inset_0_0_0_1px_rgb(0_0_0/.04)] sm:p-6">
+          <div className="mb-3 flex items-center justify-between">
+            <span className="flex items-center gap-2 text-[12.5px] font-medium text-ink/70">
+              <span
+                className={cn(
+                  'size-1.5 rounded-full',
+                  code.state === 'ready' ? 'bg-positive' : 'bg-ink/25',
+                )}
+              />
+              {code.state === 'ready' ? 'Ready to scan' : 'Preview'}
             </span>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {presets.map((preset) => (
-              <button
-                key={preset.fg + preset.bg}
-                type="button"
-                aria-label={`${preset.name}: ${preset.fg} on ${preset.bg}`}
-                title={preset.name}
-                onClick={() => {
-                  setFg(preset.fg);
-                  setBg(preset.bg);
-                  touched();
-                }}
-                className={cn(
-                  'grid size-10 place-items-center rounded-[11px] shadow-[inset_0_0_0_1px_var(--color-line-strong)] transition-transform hover:scale-105',
-                  fg === preset.fg && bg === preset.bg && 'ring-2 ring-signal ring-offset-2',
+          <div
+            className="mx-auto w-full max-w-[230px] rounded-[20px] p-3 shadow-lift transition-colors duration-300 sm:max-w-[300px] sm:p-4"
+            style={{ background: bg }}
+          >
+            {code.state === 'ready' ? (
+              <svg
+                viewBox={`0 0 ${total} ${total + band}`}
+                shapeRendering="crispEdges"
+                className="block h-auto w-full animate-fade"
+                role="img"
+                aria-label={`QR code for ${value.slice(0, 100)}`}
+              >
+                <rect width={total} height={total + band} fill={bg} />
+                <path d={path} fill={fg} className="transition-[fill] duration-300" />
+                {caption && (
+                  <text
+                    x={total / 2}
+                    y={total + band * 0.42}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fontWeight={600}
+                    fontSize={total * 0.07}
+                    fill={fg}
+                    style={{ fontFamily: 'var(--font-sans)' }}
+                  >
+                    {caption}
+                  </text>
                 )}
-                style={{ background: preset.bg }}
-              >
-                <span className="size-4 rounded-[4px]" style={{ background: preset.fg }} />
-              </button>
-            ))}
-            <span className="mx-1 h-6 w-px bg-line" />
-            {[
-              { key: 'fg', name: 'Code', value: fg, set: setFg },
-              { key: 'bg', name: 'Background', value: bg, set: setBg },
-            ].map((swatch) => (
-              <label
-                key={swatch.key}
-                className="flex items-center gap-2 rounded-[11px] bg-subtle py-1.5 pr-3 pl-1.5 text-[12.5px] shadow-[inset_0_0_0_1px_var(--color-line)]"
-              >
-                <input
-                  type="color"
-                  value={swatch.value}
+              </svg>
+            ) : (
+              <div className="grid aspect-square place-items-center px-4 text-center text-[13.5px] text-muted">
+                <span>
+                  <Icon name="qr" size={36} className="mx-auto mb-3 text-faint" />
+                  {code.state === 'empty'
+                    ? kind === 'wifi'
+                      ? 'Add the network name. Your code appears here.'
+                      : kind === 'email'
+                        ? 'Add an email address. Your code appears here.'
+                        : 'Paste a link. Your code appears here.'
+                    : 'That’s too long for one code. Try something shorter.'}
+                </span>
+              </div>
+            )}
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:mt-5">
+            <Button variant="primary" disabled={code.state !== 'ready'} onClick={downloadPng}>
+              <Icon name="download" size={16} /> PNG
+            </Button>
+            <Button disabled={code.state !== 'ready'} onClick={downloadSvg}>
+              <Icon name="download" size={16} /> SVG
+            </Button>
+          </div>
+          <p role="status" className="mt-2 min-h-5 text-center text-[12.5px] text-ink/60">
+            {message}
+          </p>
+
+          {canSave && (
+            <div className="mt-2 border-t border-ink/10 pt-4">
+              <div className="grid gap-2.5 sm:grid-cols-2">
+                <Input
+                  id={`${id}-label`}
+                  aria-label="Name"
+                  value={label}
                   onChange={(event) => {
-                    swatch.set(event.target.value);
+                    setLabel(event.target.value);
                     touched();
                   }}
-                  className="size-7 cursor-pointer rounded-[7px] border-0 bg-transparent p-0"
-                  aria-label={`${swatch.name} color`}
+                  placeholder="Name it — Table tent, menu"
+                  className="!bg-white/85"
                 />
-                <span>
-                  <span className="block text-muted">{swatch.name}</span>
-                  <span className="mono-num block text-[10.5px]">{swatch.value}</span>
-                </span>
-              </label>
-            ))}
-          </div>
-          {risky && (
-            <p
-              role="status"
-              className="flex items-center gap-2 rounded-[10px] bg-caution-soft px-3 py-2 text-[13px] text-caution"
-            >
-              <Icon name="alert" size={15} />
-              Low contrast — some phones may not scan this.
-              <button
-                type="button"
-                className="ml-auto font-medium underline"
-                onClick={() => {
-                  setFg(DEFAULT_FG);
-                  setBg(DEFAULT_BG);
+                <Input
+                  id={`${id}-place`}
+                  aria-label="Where it goes"
+                  value={placement}
+                  onChange={(event) => {
+                    setPlacement(event.target.value);
+                    touched();
+                  }}
+                  placeholder="Where it goes (optional)"
+                  className="!bg-white/85"
+                />
+              </div>
+              <AttachPicker
+                value={projectId}
+                onChange={(next) => {
+                  setProjectId(next);
+                  touched();
                 }}
+                className="mt-2.5"
+              />
+              <Button
+                className="mt-2.5 w-full !bg-white/85 hover:!bg-white"
+                disabled={code.state !== 'ready' || saving || saved}
+                onClick={saveToSpace}
               >
-                Reset
-              </button>
-            </p>
+                <Icon name={saved ? 'check' : 'pin'} size={16} />
+                {saving ? 'Saving…' : saved ? `Saved in ${spaceName}` : `Save to ${spaceName}`}
+              </Button>
+              <Button
+                className="mt-2 w-full !bg-white/60 hover:!bg-white"
+                disabled={code.state !== 'ready' || imageSaver.busy || Boolean(imageSaved)}
+                onClick={savePngToFiles}
+              >
+                <Icon name={imageSaved ? 'check' : 'files'} size={16} />
+                {imageSaver.busy
+                  ? 'Saving image…'
+                  : imageSaved
+                    ? 'Image saved to Files'
+                    : 'Save image to Files'}
+              </Button>
+              <SaveProgress state={imageSaver.state} className="mt-1.5 text-center" />
+            </div>
           )}
-          <Field
-            label="Caption under the code"
-            htmlFor={`${id}-caption`}
-            optional
-            hint="Printed with the code, so people know what they’re scanning."
-          >
-            <Input
-              id={`${id}-caption`}
-              value={caption}
-              maxLength={32}
-              placeholder={CAPTIONS[kind][0]}
-              onChange={(event) => {
-                setCaption(event.target.value);
-                touched();
-              }}
-            />
-          </Field>
-          <div className="-mt-1 flex flex-wrap gap-1.5">
-            {CAPTIONS[kind].map((suggestion) => (
-              <button
-                key={suggestion}
-                type="button"
-                onClick={() => setCaption(caption === suggestion ? '' : suggestion)}
-                aria-pressed={caption === suggestion}
-                className={cn(
-                  'rounded-full px-3 py-1.5 text-[12.5px] transition-colors',
-                  caption === suggestion
-                    ? 'bg-ink text-on-ink'
-                    : 'bg-well text-ink-2 hover:bg-ink/10',
-                )}
-              >
-                {suggestion}
-              </button>
-            ))}
-          </div>
-        </section>
+        </div>
+      </div>
 
-        <details className="group border-t border-line pt-4">
+      {/* Styling is optional: good defaults, tucked away until someone wants to change them. */}
+      <div className="grid content-start rounded-[22px] bg-surface px-5 py-1 shadow-card lg:col-start-1 lg:row-start-2 lg:self-start">
+        <details className="group/look">
+          <summary className="flex min-h-14 cursor-pointer list-none items-center gap-3 text-[15px] font-semibold text-ink [&::-webkit-details-marker]:hidden">
+            <span
+              aria-hidden="true"
+              className="grid size-8 shrink-0 place-items-center rounded-[9px] shadow-[inset_0_0_0_1px_var(--color-line-strong)]"
+              style={{ background: bg }}
+            >
+              <span className="size-3.5 rounded-[3px]" style={{ background: fg }} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block">Customize</span>
+              <span className="block truncate text-[12.5px] font-normal text-muted">
+                Colors and a caption
+              </span>
+            </span>
+            <Icon
+              name="chevron-right"
+              size={16}
+              className="shrink-0 text-muted transition-transform group-open/look:rotate-90"
+            />
+          </summary>
+          <section aria-label="Look" className="grid gap-4 pt-2 pb-5">
+            <div className="flex flex-wrap items-center gap-2">
+              {presets.map((preset) => (
+                <button
+                  key={preset.fg + preset.bg}
+                  type="button"
+                  aria-label={`${preset.name}: ${preset.fg} on ${preset.bg}`}
+                  title={preset.name}
+                  onClick={() => {
+                    setFg(preset.fg);
+                    setBg(preset.bg);
+                    touched();
+                  }}
+                  className={cn(
+                    'grid size-10 place-items-center rounded-[11px] shadow-[inset_0_0_0_1px_var(--color-line-strong)] transition-transform hover:scale-105',
+                    fg === preset.fg && bg === preset.bg && 'ring-2 ring-signal ring-offset-2',
+                  )}
+                  style={{ background: preset.bg }}
+                >
+                  <span className="size-4 rounded-[4px]" style={{ background: preset.fg }} />
+                </button>
+              ))}
+              <span className="mx-1 h-6 w-px bg-line" />
+              {[
+                { key: 'fg', name: 'Code', value: fg, set: setFg },
+                { key: 'bg', name: 'Background', value: bg, set: setBg },
+              ].map((swatch) => (
+                <label
+                  key={swatch.key}
+                  className="flex items-center gap-2 rounded-[11px] bg-subtle py-1.5 pr-3 pl-1.5 text-[12.5px] shadow-[inset_0_0_0_1px_var(--color-line)]"
+                >
+                  <input
+                    type="color"
+                    value={swatch.value}
+                    onChange={(event) => {
+                      swatch.set(event.target.value);
+                      touched();
+                    }}
+                    className="size-7 cursor-pointer rounded-[7px] border-0 bg-transparent p-0"
+                    aria-label={`${swatch.name} color`}
+                  />
+                  <span>
+                    <span className="block text-muted">{swatch.name}</span>
+                    <span className="mono-num block text-[10.5px]">{swatch.value}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            {risky && (
+              <p
+                role="status"
+                className="flex items-center gap-2 rounded-[10px] bg-caution-soft px-3 py-2 text-[13px] text-caution"
+              >
+                <Icon name="alert" size={15} />
+                Low contrast — some phones may not scan this.
+                <button
+                  type="button"
+                  className="ml-auto font-medium underline"
+                  onClick={() => {
+                    setFg(DEFAULT_FG);
+                    setBg(DEFAULT_BG);
+                  }}
+                >
+                  Reset
+                </button>
+              </p>
+            )}
+            <Field
+              label="Caption under the code"
+              htmlFor={`${id}-caption`}
+              optional
+              hint="Printed with the code, so people know what they’re scanning."
+            >
+              <Input
+                id={`${id}-caption`}
+                value={caption}
+                maxLength={32}
+                placeholder={CAPTIONS[kind][0]}
+                onChange={(event) => {
+                  setCaption(event.target.value);
+                  touched();
+                }}
+              />
+            </Field>
+            <div className="-mt-1 flex flex-wrap gap-1.5">
+              {CAPTIONS[kind].map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  onClick={() => setCaption(caption === suggestion ? '' : suggestion)}
+                  aria-pressed={caption === suggestion}
+                  className={cn(
+                    'rounded-full px-3 py-1.5 text-[12.5px] transition-colors',
+                    caption === suggestion
+                      ? 'bg-ink text-on-ink'
+                      : 'bg-well text-ink-2 hover:bg-ink/10',
+                  )}
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          </section>
+        </details>
+
+        <details className="group border-t border-line py-4">
           <summary className="flex list-none items-center gap-2 text-[13.5px] font-medium text-ink-2 [&::-webkit-details-marker]:hidden">
             <Icon
               name="chevron-right"
@@ -704,15 +717,15 @@ export function QrTool({
             />
             Print settings
             <span className="ml-auto text-[12px] font-normal text-faint">
-              {level} · {size}px · margin {margin}
+              {size}px · border {margin}
             </span>
           </summary>
           <div className="mt-4 grid gap-4">
             <div className="grid grid-cols-2 gap-3">
               <Field
-                label="Error correction"
+                label="Sturdiness"
                 htmlFor={`${id}-level`}
-                hint="Higher survives scuffs, but is denser."
+                hint="Sturdier codes survive scuffs, with more dots."
               >
                 <Select
                   id={`${id}-level`}
@@ -743,10 +756,8 @@ export function QrTool({
             <Field
               label={
                 <span className="flex w-full items-center justify-between">
-                  Quiet zone
-                  <span className="mono-num text-[11px] font-normal text-faint">
-                    {margin} modules
-                  </span>
+                  Border
+                  <span className="mono-num text-[11px] font-normal text-faint">{margin}</span>
                 </span>
               }
               htmlFor={`${id}-margin`}

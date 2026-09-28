@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { useId, useState, type ClipboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ClipboardEvent, type ReactNode } from 'react';
 import { cn } from '@/components/ui/cn';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { useToast } from '@/components/ui/toast';
@@ -89,6 +89,20 @@ const when = (at: number) =>
     minute: '2-digit',
   }).format(new Date(at));
 
+/** Whether an element is on screen: the phone's floating copy bar steps aside for the real one. */
+function useOnScreen<T extends Element>() {
+  const ref = useRef<T>(null);
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, visible] as const;
+}
+
 function StepTitle({ n, id, children }: { n: number; id: string; children: ReactNode }) {
   return (
     <h3 id={id} className="flex items-center gap-2.5 text-[16px] font-semibold text-ink">
@@ -161,11 +175,12 @@ export function SignalLinksTool() {
   };
 
   const clearRecent = () => {
-    if (!window.confirm('Clear your recent links from this browser?')) return;
+    if (!window.confirm('Clear your recent links?')) return;
     setRecent([]);
   };
 
   const qrFirst = Boolean(place?.qr);
+  const [result, resultVisible] = useOnScreen<HTMLDivElement>();
 
   return (
     <div className="grid gap-5">
@@ -229,6 +244,7 @@ export function SignalLinksTool() {
                 autoComplete="url"
                 spellCheck={false}
                 maxLength={4000}
+                enterKeyHint="next"
                 placeholder="Paste a link, like shop.example/menu"
                 value={draft.page}
                 onChange={(event) => {
@@ -273,16 +289,11 @@ export function SignalLinksTool() {
                   {pageError}
                 </p>
               ) : (
-                <p className="text-muted">
-                  Your shop, menu, booking page or sign-up form. Anything after a ? or # in it is
-                  kept.
-                </p>
+                <p className="text-muted">Your shop, menu, booking page or sign-up form.</p>
               )}
               {link && link.replaced.length > 0 && (
                 <Note tone="caution" icon="replace">
-                  This address already had campaign tags (
-                  <span className="mono-num break-all">{link.replaced.join(', ')}</span>). They’re
-                  replaced by the ones below.
+                  This address already had tracking tags. Your answers below replace them.
                 </Note>
               )}
             </div>
@@ -307,7 +318,7 @@ export function SignalLinksTool() {
                     aria-checked={on}
                     onClick={() => choosePlace(option.id)}
                     className={cn(
-                      'flex min-h-[60px] min-w-0 items-center gap-3 rounded-[14px] px-3 py-2.5 text-left transition-[background-color,box-shadow] sm:min-h-[68px]',
+                      'flex min-h-[52px] min-w-0 items-center gap-3 rounded-[14px] px-3 py-2.5 text-left transition-[background-color,box-shadow] sm:min-h-[60px]',
                       on
                         ? 'bg-surface shadow-[inset_0_0_0_2px_var(--accent,var(--color-signal))]'
                         : 'bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)] hover:bg-ink/5 hover:shadow-[inset_0_0_0_1px_var(--color-line-strong)]',
@@ -345,9 +356,6 @@ export function SignalLinksTool() {
                             <span className="sr-only">, printed as a QR code</span>
                           </>
                         )}
-                      </span>
-                      <span className="mono-num mt-1 block text-[11px] leading-snug break-words text-muted">
-                        {option.source} · {option.medium}
                       </span>
                     </span>
                   </button>
@@ -426,8 +434,7 @@ export function SignalLinksTool() {
                 size={16}
                 className={cn('transition-transform', advanced && 'rotate-180')}
               />
-              Advanced: edit the tags directly
-              <span className="mono-num text-[11.5px] font-normal text-faint">utm_source…</span>
+              Advanced: edit the tags yourself
             </button>
             {advanced && (
               <div id={`${id}-advanced`} className="grid animate-fade gap-4">
@@ -491,64 +498,66 @@ export function SignalLinksTool() {
               </p>
             </div>
             <LinkPreview link={link} tags={tags} />
-            {link ? (
-              <div className="grid gap-2 sm:grid-cols-2">
-                {qrFirst ? (
-                  <Link
-                    href={qrStudioHref(link.href)}
-                    onClick={() => rememberLink(link.href)}
-                    className={cn(inkButton, 'sm:col-span-2')}
-                  >
-                    <Icon name="qr" size={17} /> Make a QR code
-                  </Link>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={copyLink}
-                    className={cn(inkButton, 'sm:col-span-2')}
-                  >
-                    <Icon name={copied === link.href ? 'check' : 'copy'} size={17} />
-                    {copied === link.href ? 'Copied' : 'Copy link'}
-                  </button>
-                )}
-                <a
-                  href={link.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={() => rememberLink(link.href)}
-                  className={quietButton}
-                >
-                  <Icon name="external" size={16} /> Open to test
-                  <span className="sr-only">(opens in a new tab)</span>
-                </a>
-                {qrFirst ? (
-                  <button type="button" onClick={copyLink} className={quietButton}>
-                    <Icon name={copied === link.href ? 'check' : 'copy'} size={16} />
-                    {copied === link.href ? 'Copied' : 'Copy link'}
-                  </button>
-                ) : (
-                  <Link
-                    href={qrStudioHref(link.href)}
+            <div ref={result}>
+              {link ? (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {qrFirst ? (
+                    <Link
+                      href={qrStudioHref(link.href)}
+                      onClick={() => rememberLink(link.href)}
+                      className={cn(inkButton, 'sm:col-span-2')}
+                    >
+                      <Icon name="qr" size={17} /> Make a QR code
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={copyLink}
+                      className={cn(inkButton, 'sm:col-span-2')}
+                    >
+                      <Icon name={copied === link.href ? 'check' : 'copy'} size={17} />
+                      {copied === link.href ? 'Copied' : 'Copy link'}
+                    </button>
+                  )}
+                  <a
+                    href={link.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     onClick={() => rememberLink(link.href)}
                     className={quietButton}
                   >
+                    <Icon name="external" size={16} /> Open to test
+                    <span className="sr-only">(opens in a new tab)</span>
+                  </a>
+                  {qrFirst ? (
+                    <button type="button" onClick={copyLink} className={quietButton}>
+                      <Icon name={copied === link.href ? 'check' : 'copy'} size={16} />
+                      {copied === link.href ? 'Copied' : 'Copy link'}
+                    </button>
+                  ) : (
+                    <Link
+                      href={qrStudioHref(link.href)}
+                      onClick={() => rememberLink(link.href)}
+                      className={quietButton}
+                    >
+                      <Icon name="qr" size={16} /> Make a QR code
+                    </Link>
+                  )}
+                </div>
+              ) : (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <button type="button" disabled className={cn(inkButton, 'sm:col-span-2')}>
+                    <Icon name="copy" size={17} /> Copy link
+                  </button>
+                  <button type="button" disabled className={quietButton}>
+                    <Icon name="external" size={16} /> Open to test
+                  </button>
+                  <button type="button" disabled className={quietButton}>
                     <Icon name="qr" size={16} /> Make a QR code
-                  </Link>
-                )}
-              </div>
-            ) : (
-              <div className="grid gap-2 sm:grid-cols-2">
-                <button type="button" disabled className={cn(inkButton, 'sm:col-span-2')}>
-                  <Icon name="copy" size={17} /> Copy link
-                </button>
-                <button type="button" disabled className={quietButton}>
-                  <Icon name="external" size={16} /> Open to test
-                </button>
-                <button type="button" disabled className={quietButton}>
-                  <Icon name="qr" size={16} /> Make a QR code
-                </button>
-              </div>
-            )}
+                  </button>
+                </div>
+              )}
+            </div>
             <Advice link={link} tags={tags} placeChosen={draft.place !== null} started={started} />
           </Surface>
 
@@ -577,14 +586,33 @@ export function SignalLinksTool() {
               )}
               .
             </p>
-            <p className="flex items-start gap-2 text-[13px] leading-relaxed text-muted">
-              <Icon name="lock" size={15} className="mt-[3px] shrink-0" />
-              Hyphy doesn’t count clicks. The link goes straight to your page; the tags only label
-              the visit.
-            </p>
           </Surface>
         </aside>
       </div>
+
+      {/* On a phone the finished link is a long scroll away: its main button floats until the
+          real one is on screen. */}
+      {link && !resultVisible && (
+        <div className="fixed inset-x-0 bottom-0 z-30 animate-rise border-t border-line bg-surface/95 px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))] backdrop-blur lg:hidden">
+          <div className="mx-auto flex max-w-[640px] items-center gap-3">
+            <p className="mono-num min-w-0 flex-1 truncate text-[12.5px] text-muted">{link.href}</p>
+            {qrFirst ? (
+              <Link
+                href={qrStudioHref(link.href)}
+                onClick={() => rememberLink(link.href)}
+                className={cn(inkButton, 'shrink-0')}
+              >
+                <Icon name="qr" size={17} /> Make a QR code
+              </Link>
+            ) : (
+              <button type="button" onClick={copyLink} className={cn(inkButton, 'shrink-0')}>
+                <Icon name={copied === link.href ? 'check' : 'copy'} size={17} />
+                {copied === link.href ? 'Copied' : 'Copy link'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {loaded && recent.length > 0 && (
         <Surface as="section" aria-labelledby={`${id}-recent`} className="grid gap-3 sm:!p-6">
@@ -593,7 +621,7 @@ export function SignalLinksTool() {
               <Label id={`${id}-recent`}>Recent links · {recent.length}</Label>
               <p className="mt-1 text-[12.5px] text-muted">
                 The last {recent.length === 1 ? 'one' : recent.length} you copied, opened or made
-                into a code. Kept in this browser only.
+                into a code.
               </p>
             </div>
             <button

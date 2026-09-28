@@ -360,7 +360,7 @@ export function BringTool() {
   const adopt = () => {
     if (!list) return;
     const ok = window.confirm(
-      'Edit this list on this device? Do this if you’re organizing it. Your changes travel in the link, like everything else.',
+      'Edit this list? Do this if you’re the one organizing it. Your changes go out with the link.',
     );
     if (!ok) return;
     setStore((current) => ({
@@ -552,8 +552,8 @@ export function BringTool() {
               </h2>
               <p className="mt-1 text-[13.5px] leading-relaxed text-muted">
                 {organizer
-                  ? 'Everyone gets the whole list inside one link. When they claim something, they send the updated link back; open it here and their claims join yours.'
-                  : 'The list lives in the link, so after you claim something, send the updated link to the group. Whoever opens it next sees what you’re bringing.'}
+                  ? 'Send one link to everyone who’s coming. When they claim something, they send it back: open it here and their claims show up.'
+                  : 'After you claim something, send the updated link to the group so everyone sees what you’re bringing.'}
               </p>
             </div>
             <ShareLinkCard
@@ -572,8 +572,7 @@ export function BringTool() {
         ) : (
           organizer && (
             <Note icon="link">
-              Add what’s needed, then share one link with everyone who’s coming. Nothing is sent
-              anywhere until you share it.
+              Add what’s needed, then share one link with everyone who’s coming.
             </Note>
           )
         )}
@@ -600,7 +599,7 @@ export function BringTool() {
             onClick={adopt}
             className="justify-self-start px-1 text-[13px] text-muted underline-offset-2 hover:text-ink hover:underline"
           >
-            Organizing this on a new device? Edit the list here
+            Are you organizing this? Edit the list
           </button>
         )}
       </aside>
@@ -636,6 +635,8 @@ function DetailsEditor({
   onChange: (details: Details) => void;
 }) {
   const id = useId();
+  // When, where and a note are extras: folded into one button until someone wants them.
+  const [more, setMore] = useState(Boolean(list?.when || list?.where || list?.note));
   const [noting, setNoting] = useState(Boolean(list?.note));
   return (
     <Surface className="grid gap-3">
@@ -644,48 +645,64 @@ function DetailsEditor({
         placeholder="What’s the occasion?"
         value={list?.title ?? ''}
         maxLength={80}
+        enterKeyHint="done"
         onChange={(event) => onChange({ title: event.target.value })}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') event.currentTarget.blur();
+        }}
         className="h-12 min-w-0 rounded-[12px] bg-transparent px-1 text-[20px] font-semibold text-ink outline-none placeholder:font-normal placeholder:text-faint focus:bg-subtle focus:px-3"
       />
-      <div className="grid gap-2 sm:grid-cols-2">
-        <IconInput
-          icon="calendar"
-          label="When (optional)"
-          value={list?.when ?? ''}
-          maxLength={80}
-          placeholder="When? Saturday, 2pm"
-          onChange={(event) => onChange({ when: event.target.value })}
-        />
-        <IconInput
-          icon="map-pin"
-          label="Where (optional)"
-          value={list?.where ?? ''}
-          maxLength={120}
-          placeholder="Where? Lakeside Park"
-          onChange={(event) => onChange({ where: event.target.value })}
-        />
-      </div>
-      {noting ? (
-        <Field label="A note for everyone" htmlFor={`${id}-note`} optional>
-          <Textarea
-            id={`${id}-note`}
-            rows={2}
-            value={list?.note ?? ''}
-            maxLength={400}
-            placeholder="Bring a chair if you have one."
-            autoFocus={!list?.note}
-            onChange={(event) => onChange({ note: event.target.value })}
-            className="!min-h-[76px]"
-          />
-        </Field>
-      ) : (
+      {!more ? (
         <button
           type="button"
-          onClick={() => setNoting(true)}
-          className="inline-flex h-11 items-center gap-2 justify-self-start rounded-[10px] px-2 text-[14px] font-medium text-ink-2 transition-colors hover:bg-ink/5 hover:text-ink lg:h-9"
+          onClick={() => setMore(true)}
+          className="-mt-1 inline-flex h-11 items-center gap-2 justify-self-start rounded-[10px] px-1 text-[14px] font-medium text-muted transition-colors hover:text-ink lg:h-9"
         >
-          <Icon name="plus" size={15} /> Add a note for everyone
+          <Icon name="plus" size={15} /> Add when, where or a note
         </button>
+      ) : (
+        <>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <IconInput
+              icon="calendar"
+              label="When (optional)"
+              value={list?.when ?? ''}
+              maxLength={80}
+              placeholder="When? Saturday, 2pm"
+              onChange={(event) => onChange({ when: event.target.value })}
+            />
+            <IconInput
+              icon="map-pin"
+              label="Where (optional)"
+              value={list?.where ?? ''}
+              maxLength={120}
+              placeholder="Where? Lakeside Park"
+              onChange={(event) => onChange({ where: event.target.value })}
+            />
+          </div>
+          {noting ? (
+            <Field label="A note for everyone" htmlFor={`${id}-note`} optional>
+              <Textarea
+                id={`${id}-note`}
+                rows={2}
+                value={list?.note ?? ''}
+                maxLength={400}
+                placeholder="Bring a chair if you have one."
+                autoFocus={!list?.note}
+                onChange={(event) => onChange({ note: event.target.value })}
+                className="!min-h-[76px]"
+              />
+            </Field>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setNoting(true)}
+              className="inline-flex h-11 items-center gap-2 justify-self-start rounded-[10px] px-2 text-[14px] font-medium text-ink-2 transition-colors hover:bg-ink/5 hover:text-ink lg:h-9"
+            >
+              <Icon name="plus" size={15} /> Add a note for everyone
+            </button>
+          )}
+        </>
       )}
     </Surface>
   );
@@ -752,7 +769,7 @@ function Templates({ onPick }: { onPick: (templateId: string) => void }) {
       <div>
         <p className="text-[14.5px] font-medium text-ink">Start from a list</p>
         <p className="mt-0.5 text-[13px] leading-relaxed text-muted">
-          The usual things for the occasion, to change, add to or trim. Or type your own below.
+          Tap one for the usual things, then change what you like. Or type your own below.
         </p>
       </div>
       <div className="flex flex-wrap gap-2">
@@ -1195,8 +1212,7 @@ function Combine({ onCombine }: { onCombine: (text: string) => Promise<Combined>
         </summary>
         <form onSubmit={submit} className="grid gap-3 px-5 pb-5">
           <p className="text-[13px] leading-relaxed text-muted">
-            Opening a link on this device already combines it with the copy here. You can also paste
-            one to fold its claims in without leaving the page.
+            Opening a link here already adds its claims. You can also paste one instead.
           </p>
           <div className="flex gap-2">
             <label htmlFor={`${id}-link`} className="sr-only">
@@ -1261,7 +1277,7 @@ function DeviceLists({
   return (
     <Surface className="grid gap-3">
       <div className="flex items-center justify-between gap-3">
-        <Label>On this device</Label>
+        <Label>Your lists</Label>
         <button
           type="button"
           onClick={onStartNew}
@@ -1305,7 +1321,7 @@ function DeviceLists({
         })}
       </ul>
       <p className="text-[12.5px] leading-relaxed text-muted">
-        Kept in this browser only. Removing a list here doesn’t touch anyone else’s copy.
+        Removing a list here doesn’t change anyone else’s.
       </p>
     </Surface>
   );
@@ -1352,11 +1368,7 @@ function NameSheet({
         }}
         className="grid gap-3 pt-1"
       >
-        <Field
-          label="Your name"
-          htmlFor={`${id}-name`}
-          hint="Saved in this browser, so you’re only asked once."
-        >
+        <Field label="Your name" htmlFor={`${id}-name`} hint="You’re only asked once.">
           <Input
             id={`${id}-name`}
             data-autofocus

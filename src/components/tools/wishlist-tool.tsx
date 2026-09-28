@@ -537,13 +537,12 @@ function OwnerChoiceView({
       </div>
       <aside aria-label="Your list" className="grid gap-4 lg:sticky lg:top-24">
         <Surface className="grid gap-3">
-          <h2 className="text-[16px] font-semibold text-ink">Make changes from this device</h2>
+          <h2 className="text-[16px] font-semibold text-ink">Want to change it?</h2>
           <p className="text-[13.5px] leading-relaxed text-muted">
-            Keeps the list in this browser so you can edit it and share a new link. Claims stay out
-            of it.
+            Edit your list here and share a new link. Claims stay hidden from you.
           </p>
           <Button variant="primary" size="lg" onClick={onAdopt}>
-            <Icon name="pencil" size={16} /> Edit it on this device
+            <Icon name="pencil" size={16} /> Edit my list
           </Button>
         </Surface>
         {deviceLists}
@@ -778,8 +777,7 @@ function OwnerView({
           {items.length === 0 && (
             <div className="grid justify-items-start gap-3 rounded-[16px] bg-subtle p-4 shadow-[inset_0_0_0_1px_var(--color-line)]">
               <p className="text-[14px] leading-relaxed text-ink-2">
-                Add what you’d love below: a link, a price, a note, how much you want it. Or see how
-                a finished list looks first.
+                Add what you’d love below, or see how a finished list looks first.
               </p>
               <button
                 type="button"
@@ -920,9 +918,8 @@ function OwnerView({
               </Note>
               {changed && (
                 <Note icon="refresh">
-                  You’ve changed the list since you last shared it. Share the new link: gift-givers
-                  who open it on the same device keep the claims they’ve seen, and the newest link
-                  carries your list.
+                  You’ve changed the list since you shared it. Share the new link so everyone sees
+                  the changes.
                 </Note>
               )}
             </>
@@ -937,7 +934,7 @@ function OwnerView({
               <span className="font-semibold text-ink">
                 {items.length} {items.length === 1 ? 'wish' : 'wishes'}
               </span>
-              {loves > 0 && `, ${loves} you’d love`}. Saved in this browser.
+              {loves > 0 && `, ${loves} you’d love`}.
             </p>
             <CopyButton
               text={wishText(list)}
@@ -985,6 +982,8 @@ function HeaderEditor({
 }) {
   const id = useId();
   const who = list?.who.trim() ?? '';
+  const occasion = list?.occasion ?? 'christmas';
+  const currency = list?.currency ?? 'USD';
   return (
     <Surface className="relative grid gap-4 overflow-hidden">
       <Ribbon />
@@ -996,61 +995,84 @@ function HeaderEditor({
         onChange={(event) => onChange({ title: event.target.value })}
         className="h-12 min-w-0 rounded-[12px] bg-transparent px-1 font-display text-[24px] font-bold tracking-[-0.02em] text-ink outline-none placeholder:text-faint focus:bg-subtle focus:px-3"
       />
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_132px]">
-        <Field label="Whose list?" htmlFor={`${id}-who`} hint="Gift-givers see this name.">
-          <Input
-            id={`${id}-who`}
-            value={list?.who ?? ''}
-            maxLength={40}
-            placeholder="Maya"
-            autoComplete="off"
-            onChange={(event) => onChange({ who: event.target.value })}
+      <Field label="Whose list?" htmlFor={`${id}-who`} hint="Gift-givers see this name.">
+        <Input
+          id={`${id}-who`}
+          value={list?.who ?? ''}
+          maxLength={40}
+          placeholder="Maya"
+          autoComplete="off"
+          enterKeyHint="done"
+          onChange={(event) => onChange({ who: event.target.value })}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') event.currentTarget.blur();
+          }}
+        />
+      </Field>
+      {/* Christmas and the local currency are right for most lists: folded into one line. */}
+      <details className="group/extras -mt-1">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-[14px] text-ink-2 [&::-webkit-details-marker]:hidden">
+          <Tinted name={OCCASION_ICONS[occasion]} size={15} color={GOLD} />
+          <span className="min-w-0 flex-1 truncate">
+            {OCCASION_NAMES[occasion]} · prices in {currency}
+          </span>
+          <span className="font-medium text-muted group-open/extras:hidden">Change</span>
+          <Icon
+            name="chevron-right"
+            size={15}
+            className="shrink-0 text-muted transition-transform group-open/extras:rotate-90"
           />
-        </Field>
-        <Field label="Prices in" htmlFor={`${id}-currency`}>
-          <Select
-            id={`${id}-currency`}
-            value={list?.currency ?? 'USD'}
-            onChange={(event) => onChange({ currency: event.target.value as WishList['currency'] })}
-          >
-            {CURRENCIES.map((code) => (
-              <option key={code} value={code}>
-                {code}
-              </option>
-            ))}
-          </Select>
-        </Field>
-      </div>
-      <div className="grid gap-2">
-        <span id={`${id}-occasion`} className="text-[13.5px] font-medium text-ink-2">
-          Occasion
-        </span>
-        <div
-          role="radiogroup"
-          aria-labelledby={`${id}-occasion`}
-          className="flex flex-wrap gap-1.5"
-        >
-          {OCCASIONS.map((occasion) => {
-            const on = (list?.occasion ?? 'christmas') === occasion;
-            return (
-              <button
-                key={occasion}
-                type="button"
-                role="radio"
-                aria-checked={on}
-                onClick={() => onChange({ occasion })}
-                className={cn(
-                  'inline-flex h-11 items-center gap-1.5 rounded-full px-3.5 text-[14px] font-medium transition-colors lg:h-9 lg:text-[13.5px]',
-                  on ? 'bg-ink text-on-ink' : 'bg-well text-ink-2 hover:bg-ink/10 hover:text-ink',
-                )}
-              >
-                <Icon name={OCCASION_ICONS[occasion]} size={14} />
-                {OCCASION_NAMES[occasion]}
-              </button>
-            );
-          })}
+        </summary>
+        <div className="grid gap-3 pt-2">
+          <Field label="Prices in" htmlFor={`${id}-currency`} className="max-w-[160px]">
+            <Select
+              id={`${id}-currency`}
+              value={list?.currency ?? 'USD'}
+              onChange={(event) =>
+                onChange({ currency: event.target.value as WishList['currency'] })
+              }
+            >
+              {CURRENCIES.map((code) => (
+                <option key={code} value={code}>
+                  {code}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <div className="grid gap-2">
+            <span id={`${id}-occasion`} className="text-[13.5px] font-medium text-ink-2">
+              Occasion
+            </span>
+            <div
+              role="radiogroup"
+              aria-labelledby={`${id}-occasion`}
+              className="flex flex-wrap gap-1.5"
+            >
+              {OCCASIONS.map((option) => {
+                const on = occasion === option;
+                return (
+                  <button
+                    key={option}
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    onClick={() => onChange({ occasion: option })}
+                    className={cn(
+                      'inline-flex h-11 items-center gap-1.5 rounded-full px-3.5 text-[14px] font-medium transition-colors lg:h-9 lg:text-[13.5px]',
+                      on
+                        ? 'bg-ink text-on-ink'
+                        : 'bg-well text-ink-2 hover:bg-ink/10 hover:text-ink',
+                    )}
+                  >
+                    <Icon name={OCCASION_ICONS[option]} size={14} />
+                    {OCCASION_NAMES[option]}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
-      </div>
+      </details>
     </Surface>
   );
 }
@@ -1256,6 +1278,10 @@ function WishForm({
   // Remounting the price field clears it after an add (it keeps its own text while focused).
   const [round, setRound] = useState(0);
   const nameInput = useRef<HTMLInputElement>(null);
+  // A note and how much it's wanted are extras: folded away while adding, until asked for.
+  const [extras, setExtras] = useState(
+    Boolean(onCancel || initial.note || initial.want !== EMPTY_DRAFT.want),
+  );
   const change = (patch: Partial<WishDraft>) => setDraft((current) => ({ ...current, ...patch }));
 
   const submit = (event: FormEvent) => {
@@ -1283,6 +1309,7 @@ function WishForm({
           value={draft.name}
           maxLength={120}
           placeholder="Merino hiking socks"
+          enterKeyHint="next"
           aria-invalid={Boolean(errors.name)}
           onChange={(event) => change({ name: event.target.value })}
         />
@@ -1293,7 +1320,7 @@ function WishForm({
           optional
           htmlFor={`${id}-url`}
           error={errors.url}
-          hint="Paste it from the shop. Only the address is kept; nothing is fetched."
+          hint="Paste it from the shop."
         >
           <Input
             id={`${id}-url`}
@@ -1327,43 +1354,59 @@ function WishForm({
           />
         </Field>
       </div>
-      <Field label="Note" optional htmlFor={`${id}-note`}>
-        <Input
-          id={`${id}-note`}
-          value={draft.note}
-          maxLength={200}
-          placeholder="Size M, dark green, anything but white"
-          onChange={(event) => change({ note: event.target.value })}
-        />
-      </Field>
-      <div className="grid gap-2">
-        <span id={`${id}-want`} className="text-[13.5px] font-medium text-ink-2">
-          How much you want it
-        </span>
-        <div role="radiogroup" aria-labelledby={`${id}-want`} className="flex flex-wrap gap-1.5">
-          {WANTS.map((want) => {
-            const on = draft.want === want;
-            return (
-              <button
-                key={want}
-                type="button"
-                role="radio"
-                aria-checked={on}
-                onClick={() => change({ want })}
-                className={cn(
-                  'inline-flex h-11 items-center gap-1.5 rounded-full px-3.5 text-[14px] font-medium transition-colors lg:h-9 lg:text-[13.5px]',
-                  on
-                    ? 'bg-surface text-ink shadow-[inset_0_0_0_1.5px_var(--color-ink)]'
-                    : 'bg-well text-ink-2 hover:bg-ink/10 hover:text-ink',
-                )}
-              >
-                <Tinted name={WANT_ICONS[want].icon} size={14} color={WANT_ICONS[want].color} />
-                {WANT_NAMES[want]}
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      {!extras ? (
+        <button
+          type="button"
+          onClick={() => setExtras(true)}
+          className="inline-flex h-11 items-center gap-2 justify-self-start rounded-[10px] px-1 text-[14px] font-medium text-muted transition-colors hover:text-ink lg:h-9"
+        >
+          <Icon name="plus" size={15} /> Add a note or how much you want it
+        </button>
+      ) : (
+        <>
+          <Field label="Note" optional htmlFor={`${id}-note`}>
+            <Input
+              id={`${id}-note`}
+              value={draft.note}
+              maxLength={200}
+              placeholder="Size M, dark green, anything but white"
+              onChange={(event) => change({ note: event.target.value })}
+            />
+          </Field>
+          <div className="grid gap-2">
+            <span id={`${id}-want`} className="text-[13.5px] font-medium text-ink-2">
+              How much you want it
+            </span>
+            <div
+              role="radiogroup"
+              aria-labelledby={`${id}-want`}
+              className="flex flex-wrap gap-1.5"
+            >
+              {WANTS.map((want) => {
+                const on = draft.want === want;
+                return (
+                  <button
+                    key={want}
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    onClick={() => change({ want })}
+                    className={cn(
+                      'inline-flex h-11 items-center gap-1.5 rounded-full px-3.5 text-[14px] font-medium transition-colors lg:h-9 lg:text-[13.5px]',
+                      on
+                        ? 'bg-surface text-ink shadow-[inset_0_0_0_1.5px_var(--color-ink)]'
+                        : 'bg-well text-ink-2 hover:bg-ink/10 hover:text-ink',
+                    )}
+                  >
+                    <Tinted name={WANT_ICONS[want].icon} size={14} color={WANT_ICONS[want].color} />
+                    {WANT_NAMES[want]}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
       <div className="flex flex-wrap gap-2 pt-1">
         <button
           type="submit"
@@ -1438,9 +1481,7 @@ function Gate({
           <Icon name="eye-off" size={17} /> It’s my list
         </button>
       </div>
-      <p className="relative text-[12.5px] text-muted">
-        This device remembers your answer for this list.
-      </p>
+      <p className="relative text-[12.5px] text-muted">You’ll only be asked once.</p>
     </Surface>
   );
 }
@@ -1564,8 +1605,7 @@ function Combine({ onCombine }: { onCombine: (text: string) => Promise<Combined>
         </summary>
         <form onSubmit={submit} className="grid gap-3 px-5 pb-5">
           <p className="text-[13px] leading-relaxed text-muted">
-            Opening a link on this device already combines its claims with the ones here. You can
-            also paste one to fold it in without leaving the page.
+            Opening a link here already adds its claims. You can also paste one instead.
           </p>
           <div className="flex gap-2">
             <label htmlFor={`${id}-link`} className="sr-only">
@@ -1640,7 +1680,7 @@ function GivenLists({
   };
   return (
     <Surface className="grid gap-3">
-      <Label>Lists on this device</Label>
+      <Label>Your lists</Label>
       <ul className="grid gap-1">
         {viewing !== null && (
           <li>
@@ -1732,12 +1772,7 @@ function NameSheet({
         }}
         className="grid gap-3 pt-1"
       >
-        <Field
-          label="Your name"
-          optional
-          htmlFor={`${id}-name`}
-          hint="Saved in this browser, so you’re only asked once."
-        >
+        <Field label="Your name" optional htmlFor={`${id}-name`} hint="You’re only asked once.">
           <Input
             id={`${id}-name`}
             data-autofocus

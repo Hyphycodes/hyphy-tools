@@ -70,7 +70,7 @@ export function scanRisks(look: QrLook, logo: QrLogo | null) {
   if (look.corners && contrast(look.corners, background) < 3)
     risks.push('The corner squares are too faint: phones find the code by them.');
   if (look.margin < 2)
-    risks.push('A thin border: leave at least 2 modules of space around the code.');
+    risks.push('A thin border: give the code more space around it so phones can find it.');
   if (!look.bg) risks.push('Transparent background: only print it on something plain and light.');
   if (logo && logo.size > LOGO_MAX) risks.push('The logo is too big to scan reliably.');
   return risks;
