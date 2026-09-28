@@ -475,3 +475,57 @@ export function giftProgress(list: GiftList) {
   const bought = list.items.filter((item) => holder(list.claims[item.id])?.got).length;
   return { total, claimed, bought, open: total - claimed };
 }
+
+/* ---------------- fast entry ---------------- */
+
+/**
+ * A name for a wish from its shop link: "trailhouse.example/socks/merino-crew" → "Merino crew".
+ * The last readable part of the path; ids, numbers and file endings are skipped. '' when the link
+ * says nothing (just a shop's home page).
+ */
+export function nameFromUrl(url: string) {
+  let path: string;
+  try {
+    path = new URL(url).pathname;
+  } catch {
+    return '';
+  }
+  const parts = path
+    .split('/')
+    .map((part) => {
+      try {
+        return decodeURIComponent(part);
+      } catch {
+        return part;
+      }
+    })
+    .map((part) => part.replace(/\.(html?|php|aspx?)$/i, ''))
+    .filter(
+      (part) =>
+        part &&
+        !/[=&]/.test(part) &&
+        !/^(p|dp|gp|ref|product|products|item|items|shop|en|us|[a-z]{2}-[a-z]{2})$/i.test(part),
+    );
+  for (const part of parts.reverse()) {
+    const words = part
+      .split(/[-_+\s]+/)
+      .filter((word) => word && !/\d/.test(word) && word.length < 24);
+    if (!words.length) continue;
+    const text = words.join(' ').toLowerCase().slice(0, 120);
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  }
+  return '';
+}
+
+/**
+ * What was typed or pasted into the one field → a name and a link. A link inside the text is
+ * taken out ("Socks https://shop.example/socks" → "Socks" + the link); a bare link names itself.
+ */
+export function splitWish(text: string): { name: string; url: string } {
+  const match = text.match(/(?:https?:\/\/|www\.)\S+/i);
+  if (!match) return { name: text.trim(), url: '' };
+  const read = readUrl(match[0].replace(/[),.;]+$/, ''));
+  if ('error' in read || !read.url) return { name: text.trim(), url: '' };
+  const name = text.replace(match[0], ' ').replace(/\s+/g, ' ').trim();
+  return { name: name || nameFromUrl(read.url), url: read.url };
+}

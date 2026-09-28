@@ -457,3 +457,31 @@ export function bringText(list: BringList, link?: string) {
   if (link) lines.push('', `Claim something: ${link}`);
   return lines.join('\n');
 }
+
+/* ---------------- people this device puts down ---------------- */
+
+/**
+ * People this device has put down for something ("Sam's bringing the ice"). Their claims are made
+ * here, under ids made here, so this device can change or let go of them like its own. Nobody
+ * else's claimer id is ever reused.
+ */
+export const MAX_PEOPLE = 24;
+export const bringPeopleSchema = z.object({
+  v: z.literal(1),
+  people: z.array(claimerSchema).check(z.maxLength(MAX_PEOPLE)),
+});
+export type BringPeople = z.infer<typeof bringPeopleSchema>;
+export const EMPTY_PEOPLE: BringPeople = { v: 1, people: [] };
+
+/**
+ * The person with this name (any case), made with `freshId` the first time they're named. The
+ * one named last goes first; past the limit, the longest unnamed is forgotten.
+ */
+export function personNamed(people: BringPeople, name: string, freshId: string) {
+  const clean = name.trim().slice(0, 40);
+  const key = clean.toLowerCase();
+  const known = people.people.find((person) => person.name.trim().toLowerCase() === key);
+  const person = known ?? { id: freshId, name: clean };
+  const rest = people.people.filter((entry) => entry.id !== person.id);
+  return { person, people: { v: 1 as const, people: [person, ...rest].slice(0, MAX_PEOPLE) } };
+}
