@@ -6,9 +6,11 @@ import {
   useMemo,
   useRef,
   useState,
+  type DragEvent,
   type FormEvent,
   type KeyboardEvent,
   type PointerEvent,
+  type ReactNode,
 } from 'react';
 import { cn } from '@/components/ui/cn';
 import { Icon, type IconName } from '@/components/ui/icon';
@@ -21,7 +23,6 @@ import {
   blurPixels,
   DEFAULT_FORMATS,
   fitInside,
-  FRAME_MODES,
   frameFileName,
   layoutFrame,
   MAX_SIDE,
@@ -43,7 +44,18 @@ import {
   type Rect,
   type Size,
 } from '@/lib/tools/social-formats';
-import { FileDrop, IconButton, Label, Note, Surface } from './kit';
+import {
+  ActionBar,
+  ActionButton,
+  Choices,
+  IconButton,
+  Journey,
+  MoreOptions,
+  Note,
+  SampleButton,
+  StartPanel,
+  Surface,
+} from './kit';
 
 /*
  * Social Crop: one photo, framed for every feed. The photo is decoded once into an editing copy
@@ -353,16 +365,17 @@ async function renderFrame(photo: Photo, format: FrameFormat, framing: Framing, 
 }
 
 /**
- * The frame's place on the stage: centered, with room around it to see what's cropped away and
- * a line under it for the hint.
+ * The frame's place on the stage: centered, with room around it to see what's cropped away, a
+ * line above it for the frame's name and one under it for the hint.
  */
 function frameIn(stage: Size, output: Size): Rect {
   const pad = Math.round(Math.max(14, Math.min(40, Math.min(stage.width, stage.height) * 0.07)));
+  const above = pad + 18;
   const below = pad + 16;
   const inner = fitInside(
     {
       width: Math.max(1, stage.width - pad * 2),
-      height: Math.max(1, stage.height - pad - below),
+      height: Math.max(1, stage.height - above - below),
     },
     output,
   );
@@ -370,7 +383,7 @@ function frameIn(stage: Size, output: Size): Rect {
   const height = Math.max(1, Math.round(inner.height));
   return {
     x: Math.round((stage.width - width) / 2),
-    y: Math.round(pad + (stage.height - pad - below - height) / 2),
+    y: Math.round(above + (stage.height - above - below - height) / 2),
     width,
     height,
   };
@@ -455,7 +468,7 @@ function paintStage(canvas: HTMLCanvasElement, stage: Size, view: StageView) {
   if (!context) return;
   const styles = getComputedStyle(canvas);
   const room = styles.getPropertyValue('--color-subtle').trim() || '#10100f';
-  const accent = styles.getPropertyValue('--accent').trim() || '#ff9e7a';
+  const accent = styles.getPropertyValue('--accent').trim() || '#9b86ff';
   const { photo, output, framing } = view;
   const frame = frameIn(stage, output);
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
@@ -680,12 +693,70 @@ async function sampleBeach(): Promise<File> {
   return new File([blob], 'sample-beach.jpg', { type: 'image/jpeg' });
 }
 
+/* ---------------- the path ---------------- */
+
+const STEPS = ['Add a photo', 'Pick the feeds', 'Frame it', 'Export'];
+type Step = 0 | 1 | 2 | 3;
+
+/** The shapes feeds come in, each with the sizes that share it: how the picker is laid out. */
+type ShapeGroup = { id: string; name: string; ratio: string; hint: string; formats: string[] };
+const SHAPES: ShapeGroup[] = [
+  { id: 'square', name: 'Square', ratio: '1:1', hint: 'Feed posts', formats: ['instagram-post'] },
+  {
+    id: 'portrait',
+    name: 'Portrait',
+    ratio: '4:5',
+    hint: 'Takes up more of the feed',
+    formats: ['instagram-portrait'],
+  },
+  {
+    id: 'story',
+    name: 'Story',
+    ratio: '9:16',
+    hint: 'Full screen on a phone',
+    formats: ['instagram-story', 'tiktok'],
+  },
+  {
+    id: 'wide',
+    name: 'Wide',
+    ratio: '16:9',
+    hint: 'Thumbnails and link posts',
+    formats: ['youtube-thumbnail', 'x-post', 'linkedin-post'],
+  },
+  {
+    id: 'banner',
+    name: 'Banner',
+    ratio: '3:1 – 4:1',
+    hint: 'Profile headers and covers',
+    formats: ['x-header', 'linkedin-banner', 'facebook-cover'],
+  },
+];
+
+/** Every preset, in the order the shapes are offered (anything unlisted after them). */
+const ORDERED: FrameFormat[] = [
+  ...SHAPES.flatMap((shape) =>
+    shape.formats.map((id) => SOCIAL_FORMATS.find((format) => format.id === id)!),
+  ),
+  ...SOCIAL_FORMATS.filter((format) => !SHAPES.some((shape) => shape.formats.includes(format.id))),
+].filter(Boolean);
+
+const networkName = (format: FrameFormat) =>
+  format.network === 'custom'
+    ? format.label
+    : (NETWORKS.find((item) => item.id === format.network)?.name ?? format.label);
+
+const backgroundFor = (photo: Photo, type: OutputType): Background =>
+  photo.transparent ? (type === 'jpg' ? 'white' : 'checker') : undefined;
+
+const still = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
 /* ---------------- the tool ---------------- */
 
 export function SocialCropTool() {
   const toast = useToast();
   const [photo, setPhoto] = useState<Photo | null>(null);
   const [opening, setOpening] = useState(false);
+  const [step, setStep] = useState<Step>(0);
   const [selected, setSelected] = useState<string[]>(DEFAULT_FORMATS);
   const [customs, setCustoms] = useState<FrameFormat[]>([]);
   const [framings, setFramings] = useState<Record<string, Framing>>({});
@@ -694,21 +765,37 @@ export function SocialCropTool() {
   const [exporting, setExporting] = useState<{ done: number; total: number } | null>(null);
   const [message, setMessage] = useState('');
   const current = useRef<Photo | null>(null);
-  const composer = useRef<HTMLDivElement>(null);
+  const root = useRef<HTMLDivElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
   const opener = useRef<(files: File[]) => void>(() => {});
+  const customField = useId();
 
-  const formats = useMemo(() => [...SOCIAL_FORMATS, ...customs], [customs]);
+  const formats = useMemo(() => [...ORDERED, ...customs], [customs]);
   const frames = formats.filter((format) => selected.includes(format.id));
   const active = frames.find((format) => format.id === activeId) ?? frames[0] ?? null;
   const fallback = useMemo(() => newFraming(photo?.colors[0]), [photo]);
   const framingOf = (format: FrameFormat) => framings[format.id] ?? fallback;
   const busy = opening || exporting !== null;
+  // Where you are: nothing to frame without a photo, nothing to export without a size.
+  const view: Step = !photo ? 0 : frames.length ? step : (Math.min(step, 1) as Step);
 
   // The photo's memory goes back when the tool closes.
   useEffect(() => {
     const holder = current;
     return () => release(holder.current);
   }, []);
+
+  // Each step starts at its top: on a phone the last one may have been scrolled far down.
+  const shown = useRef(view);
+  useEffect(() => {
+    if (shown.current === view) return;
+    shown.current = view;
+    const element = root.current;
+    if (!element) return;
+    const top = element.getBoundingClientRect().top;
+    if (Math.abs(top - 80) < 40) return;
+    element.scrollIntoView({ behavior: still() ? 'auto' : 'smooth', block: 'start' });
+  }, [view]);
 
   async function load(file: File) {
     setOpening(true);
@@ -719,7 +806,8 @@ export function SocialCropTool() {
       current.current = next;
       setPhoto(next);
       setFramings({});
-      setMessage(`${file.name} is ready. Drag each frame to compose it.`);
+      setStep((now) => (now === 0 ? 1 : now));
+      setMessage('');
     } catch {
       const heic = /hei[cf]/i.test(file.type) || /\.hei[cf]$/i.test(file.name);
       setMessage(
@@ -777,6 +865,7 @@ export function SocialCropTool() {
     current.current = null;
     setPhoto(null);
     setFramings({});
+    setStep(0);
     setMessage('');
   }
 
@@ -790,6 +879,14 @@ export function SocialCropTool() {
     }
   }
 
+  /** A shape card: off turns every size in it off; on starts with its most used size. */
+  function toggleShape(shape: ShapeGroup) {
+    const ids = shape.formats;
+    if (selected.some((id) => ids.includes(id)))
+      setSelected(selected.filter((id) => !ids.includes(id)));
+    else toggle(ids[0]);
+  }
+
   function addCustom(format: FrameFormat) {
     if (!customs.some((item) => item.id === format.id)) setCustoms([...customs, format]);
     if (!selected.includes(format.id)) setSelected([...selected, format.id]);
@@ -801,12 +898,22 @@ export function SocialCropTool() {
     setSelected(selected.filter((item) => item !== formatId));
   }
 
-  function compose(formatId: string) {
+  /** "Any size": opens the custom size field and puts the cursor in it. */
+  function openCustom() {
+    const field = document.getElementById(customField);
+    const details = field?.closest('details');
+    if (details) details.open = true;
+    field?.focus();
+  }
+
+  function go(next: Step) {
+    if (next === 2 && view < 2 && frames.length) setActiveId(frames[0].id);
+    setStep(next);
+  }
+
+  function adjust(formatId: string) {
     setActiveId(formatId);
-    // On a phone the composer is above the gallery: bring it into view.
-    if (!window.matchMedia('(max-width: 1023px)').matches) return;
-    const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    composer.current?.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'start' });
+    setStep(2);
   }
 
   const setFraming = (formatId: string, next: Framing) =>
@@ -857,196 +964,486 @@ export function SocialCropTool() {
       })
     : [];
   const index = active ? frames.indexOf(active) : -1;
-  const step = (by: number) =>
+  const stepBy = (by: number) =>
     frames.length && setActiveId(frames[(index + by + frames.length) % frames.length].id);
+  const upNext = index >= 0 && index < frames.length - 1 ? frames[index + 1] : null;
+
+  const status = (
+    <p role="status" className="min-h-5 text-center text-[13px] text-muted empty:hidden">
+      {message}
+    </p>
+  );
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,.9fr)] lg:items-start">
-      <div ref={composer} className="grid min-w-0 scroll-mt-20 gap-5 lg:sticky lg:top-24">
-        {photo ? (
-          <Surface className="grid gap-4">
-            <PhotoBar photo={photo} busy={busy} onReplace={open} onRemove={clear} />
-            {active ? (
-              <Composer
+    <div ref={root} data-social-crop className="grid min-w-0 scroll-mt-20 gap-4">
+      <input
+        ref={picker}
+        type="file"
+        accept={ACCEPT}
+        className="sr-only"
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={(event) => {
+          open(Array.from(event.target.files ?? []));
+          event.target.value = '';
+        }}
+      />
+
+      {view > 0 && (
+        <Journey
+          steps={STEPS}
+          current={view}
+          onPick={(pick) => go(pick as Step)}
+          reachable={(pick) => pick === 1 || (pick > 1 && frames.length > 0)}
+          className="mx-auto w-full max-w-[1100px]"
+        />
+      )}
+
+      {view === 0 && (
+        <DropArea onFiles={open} disabled={busy}>
+          <StartPanel
+            art={<FanArt />}
+            eyebrow="Post · Portrait · Story · Wide · Banner"
+            title="Start with one photo"
+            lead="We frame it for Instagram, TikTok, YouTube and more. You nudge each one, then download them all."
+          >
+            <div className="mx-auto grid max-w-[360px] gap-2">
+              <ActionButton
+                icon={opening ? 'loader' : 'plus'}
+                onClick={() => picker.current?.click()}
+                disabled={busy}
+                className={cn(opening && '[&_svg]:animate-spin')}
+              >
+                {opening ? 'Opening…' : 'Add a photo'}
+              </ActionButton>
+              <SampleButton onClick={trySample} disabled={busy}>
+                Try a sample photo
+              </SampleButton>
+              {status}
+            </div>
+            <p className="mt-4 text-[13px] text-faint">
+              <span className="hidden sm:inline">Drop a photo here or paste it. </span>
+              It stays on this device.
+            </p>
+          </StartPanel>
+        </DropArea>
+      )}
+
+      {photo && view === 1 && (
+        <Surface key="feeds" className="mx-auto grid w-full max-w-[1100px] animate-rise gap-5">
+          <PhotoBar photo={photo} busy={busy} onReplace={open} onRemove={clear} />
+          <StepHead
+            title="Where will you post it?"
+            lead="We picked the usual ones. Tap a shape to add or remove it."
+          />
+          <ul className="grid grid-cols-2 gap-2.5 lg:grid-cols-3">
+            {SHAPES.map((shape) => (
+              <ShapeCard
+                key={shape.id}
                 photo={photo}
-                format={active}
-                framing={framingOf(active)}
+                shape={shape}
+                formats={formats.filter((format) => shape.formats.includes(format.id))}
+                selected={selected}
+                framingOf={framingOf}
+                onShape={() => toggleShape(shape)}
+                onToggle={toggle}
+              />
+            ))}
+            <CustomCard
+              customs={customs}
+              selected={selected}
+              onToggle={toggle}
+              onOpen={openCustom}
+            />
+          </ul>
+          <MoreOptions
+            label="Your own size"
+            summary={customs.length ? `${customs.length} added` : '3:2 or 1200×628'}
+            defaultOpen={customs.length > 0}
+          >
+            <CustomSizes
+              inputId={customField}
+              customs={customs}
+              selected={selected}
+              onToggle={toggle}
+              onAdd={addCustom}
+              onRemove={removeCustom}
+            />
+          </MoreOptions>
+          {status}
+          <ActionBar className="!mt-0">
+            <ActionButton icon="arrow-right" onClick={() => go(2)} disabled={!frames.length}>
+              {frames.length
+                ? `Frame ${frames.length === 1 ? 'it' : `${frames.length} sizes`}`
+                : 'Pick at least one'}
+            </ActionButton>
+          </ActionBar>
+        </Surface>
+      )}
+
+      {photo && view === 2 && active && (
+        <Surface key="frame" className="mx-auto grid w-full max-w-[1100px] animate-rise gap-4">
+          <FrameStrip
+            photo={photo}
+            frames={frames}
+            active={active}
+            framingOf={framingOf}
+            type={type}
+            onPick={setActiveId}
+          />
+          <Composer
+            photo={photo}
+            format={active}
+            framing={framingOf(active)}
+            type={type}
+            position={{ index, total: frames.length, step: stepBy }}
+            onChange={(next) => setFraming(active.id, next)}
+          >
+            {status}
+            <ActionBar className="!mt-0 lg:mt-auto">
+              {upNext ? (
+                <div className="flex gap-2">
+                  <ActionButton
+                    icon="arrow-right"
+                    onClick={() => setActiveId(upNext.id)}
+                    className="min-w-0 flex-1"
+                  >
+                    <span className="truncate">Next: {upNext.label}</span>
+                  </ActionButton>
+                  <ActionButton variant="quiet" onClick={() => go(3)} className="!w-auto shrink-0">
+                    Export
+                  </ActionButton>
+                </div>
+              ) : (
+                <ActionButton icon="check" onClick={() => go(3)}>
+                  Looks good · Export
+                </ActionButton>
+              )}
+            </ActionBar>
+          </Composer>
+        </Surface>
+      )}
+
+      {photo && view === 3 && (
+        <Surface key="export" className="mx-auto grid w-full max-w-[1100px] animate-rise gap-5">
+          <PhotoBar photo={photo} busy={busy} onReplace={open} onRemove={clear} />
+          <StepHead
+            title={frames.length === 1 ? 'Your frame is ready' : `${frames.length} frames, ready`}
+            lead="Each one at its exact size. Tap one to change its framing."
+          />
+          <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
+            {frames.map((format) => (
+              <FrameTile
+                key={format.id}
+                photo={photo}
+                format={format}
+                framing={framingOf(format)}
                 type={type}
                 busy={busy}
-                position={{ index, total: frames.length, step }}
-                onChange={(next) => setFraming(active.id, next)}
-                onDownload={() => downloadOne(active)}
+                onAdjust={() => adjust(format.id)}
+                onDownload={() => downloadOne(format)}
               />
-            ) : (
-              <p className="rounded-[16px] bg-subtle px-4 py-10 text-center text-[14px] text-muted shadow-[inset_0_0_0_1px_var(--color-line)]">
-                Pick a size to compose your photo in it.
-              </p>
-            )}
-            <p role="status" className="min-h-5 text-[13px] text-muted">
-              {message}
-            </p>
-          </Surface>
-        ) : (
-          <Surface className="grid gap-3">
-            <FileDrop
-              onFiles={open}
-              accept={ACCEPT}
-              multiple={false}
-              icon="crop"
-              accent="#ff9e7a"
-              title="Choose a photo"
-              disabled={busy}
-              hint="It’s framed for Instagram, TikTok, YouTube and more, ready to download."
-              className="sm:!py-14"
-            />
-            <button
-              type="button"
-              onClick={trySample}
-              disabled={busy}
-              className="mx-auto flex h-11 items-center gap-1.5 rounded-full px-4 text-[14px] font-medium text-signal-ink transition-colors hover:bg-signal-soft disabled:opacity-50 lg:h-9 lg:text-[13.5px]"
-            >
-              <Icon
-                name={opening ? 'loader' : 'sparkles'}
-                size={15}
-                className={cn(opening && 'animate-spin')}
-              />
-              {opening ? 'Opening…' : 'Try a sample photo'}
-            </button>
-            <p role="status" className="min-h-5 text-center text-[13px] text-muted">
-              {message}
-            </p>
-          </Surface>
-        )}
-      </div>
-
-      <div className={cn('min-w-0 gap-5 lg:grid', photo ? 'grid' : 'hidden')}>
-        <Surface className="grid gap-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <Label>Your frames · {frames.length}</Label>
-            {photo && frames.length > 1 && (
-              <span className="text-[12.5px] text-muted">Tap one to compose it</span>
-            )}
-          </div>
-          {frames.length === 0 ? (
-            <p className="rounded-[14px] bg-subtle px-4 py-8 text-center text-[13.5px] text-muted">
-              No sizes chosen yet. Pick some under Change sizes.
-            </p>
-          ) : (
-            <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {frames.map((format) =>
-                photo ? (
-                  <FrameTile
-                    key={format.id}
-                    photo={photo}
-                    format={format}
-                    framing={framingOf(format)}
-                    type={type}
-                    selected={format.id === active?.id}
-                    busy={busy}
-                    onSelect={() => compose(format.id)}
-                    onDownload={() => downloadOne(format)}
-                  />
-                ) : (
-                  <Placeholder key={format.id} format={format} />
-                ),
-              )}
-            </ul>
-          )}
-
-          <div className="grid gap-3 border-t border-line pt-4">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-[13.5px] font-medium text-ink-2">Save as</span>
-              <div
-                role="radiogroup"
-                aria-label="File type"
-                className="flex rounded-[12px] bg-well p-1"
+            ))}
+            <li className="flex min-w-0">
+              <button
+                type="button"
+                onClick={() => go(1)}
+                className="flex min-h-[120px] w-full flex-col items-center justify-center gap-2 rounded-[18px] p-3 text-[13.5px] font-medium text-ink-2 shadow-[inset_0_0_0_1.5px_var(--color-line)] transition-colors hover:bg-ink/5 hover:text-ink"
               >
-                {(Object.keys(TYPES) as OutputType[]).map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    role="radio"
-                    aria-checked={type === option}
-                    onClick={() => setType(option)}
-                    className={cn(
-                      'h-10 min-w-16 rounded-[9px] px-3 text-[13.5px] font-medium transition-colors lg:h-8',
-                      type === option
-                        ? 'bg-surface text-ink shadow-card'
-                        : 'text-muted hover:text-ink',
-                    )}
-                  >
-                    {TYPES[option].label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {soft.length > 0 && (
-              <Note tone="caution" icon="alert">
-                {soft.length === 1 ? 'One frame' : `${soft.length} frames`} will look soft: your
-                photo has fewer pixels than {soft.length === 1 ? 'it needs' : 'they need'} (
-                {soft.map((format) => format.name).join(', ')}).{' '}
-                {soft.some(
-                  (format) => framingOf(format).zoom > 1.01 && framingOf(format).mode === 'crop',
-                )
-                  ? 'Zoom out, or use a bigger photo.'
-                  : 'A bigger photo would be sharper.'}
-              </Note>
-            )}
-            <button
-              type="button"
-              onClick={downloadAll}
-              disabled={!photo || busy || frames.length === 0}
-              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-[12px] bg-ink px-4 text-[15px] font-medium text-on-ink transition-colors hover:bg-ink-2 disabled:opacity-45 lg:h-11 lg:text-[14.5px]"
-            >
-              <Icon
-                name={exporting ? 'loader' : 'download'}
-                size={17}
-                className={cn(exporting && 'animate-spin')}
-              />
-              {exporting
-                ? `Preparing ${Math.min(exporting.done + 1, exporting.total)} of ${exporting.total}…`
-                : frames.length > 1
-                  ? `Download all ${frames.length} · zip`
-                  : 'Download'}
-            </button>
-            <p className="text-[12px] leading-relaxed text-faint">
-              Every frame at its exact size
-              {type === 'png' && ', with see-through parts kept'}.
+                <span className="grid size-10 place-items-center rounded-full bg-well">
+                  <Icon name="plus" size={18} />
+                </span>
+                Add or remove sizes
+              </button>
+            </li>
+          </ul>
+          {soft.length > 0 && (
+            <Note tone="caution" icon="alert">
+              {soft.length === 1 ? 'One frame' : `${soft.length} frames`} will look soft: your photo
+              has fewer pixels than {soft.length === 1 ? 'it needs' : 'they need'} (
+              {soft.map((format) => format.name).join(', ')}).{' '}
+              {soft.some(
+                (format) => framingOf(format).zoom > 1.01 && framingOf(format).mode === 'crop',
+              )
+                ? 'Zoom out, or use a bigger photo.'
+                : 'A bigger photo would be sharper.'}
+            </Note>
+          )}
+          <MoreOptions label="File type" summary={TYPES[type].label}>
+            <Choices
+              label="File type"
+              value={type}
+              onChange={setType}
+              options={[
+                { value: 'jpg', label: 'JPG' },
+                { value: 'png', label: 'PNG' },
+              ]}
+            />
+            <p className="mt-2 text-[12.5px] text-muted">
+              JPG files are smaller. PNG keeps see-through parts.
             </p>
-          </div>
-        </Surface>
-
-        <Surface className="!p-0">
-          <details open={!photo} className="group">
-            <summary className="flex min-h-14 cursor-pointer list-none items-center gap-2.5 px-4 text-[14.5px] font-medium text-ink sm:px-5 [&::-webkit-details-marker]:hidden">
-              <Icon name="crop" size={16} className="shrink-0 text-muted" />
-              Change sizes
-              <span className="text-[13px] font-normal text-muted">{selected.length} chosen</span>
-              <Icon
-                name="chevron-down"
-                size={16}
-                className="ml-auto shrink-0 text-muted transition-transform group-open:rotate-180"
-              />
-            </summary>
-            <div className="px-4 pb-4 sm:px-5 sm:pb-5">
-              <SizePicker
-                selected={selected}
-                customs={customs}
-                onToggle={toggle}
-                onAdd={addCustom}
-                onRemove={removeCustom}
-                onAll={() => setSelected(formats.map((format) => format.id))}
-                onNone={() => setSelected([])}
-              />
+          </MoreOptions>
+          {status}
+          <ActionBar className="!mt-0">
+            <div className="grid gap-1">
+              <ActionButton
+                icon={exporting ? 'loader' : 'download'}
+                onClick={downloadAll}
+                disabled={busy || frames.length === 0}
+                className={cn(exporting && '[&_svg]:animate-spin')}
+              >
+                {exporting
+                  ? `Preparing ${Math.min(exporting.done + 1, exporting.total)} of ${exporting.total}…`
+                  : frames.length > 1
+                    ? `Download all ${frames.length}`
+                    : 'Download'}
+              </ActionButton>
+              <p className="text-center text-[12px] text-faint">
+                {frames.length > 1 ? 'One zip, ' : ''}
+                {TYPES[type].label}
+                {type === 'png' && ', see-through parts kept'} · made on this device
+              </p>
             </div>
-          </details>
+          </ActionBar>
         </Surface>
-      </div>
+      )}
     </div>
   );
 }
 
 /* ---------------- parts ---------------- */
+
+function StepHead({ title, lead }: { title: string; lead: string }) {
+  return (
+    <div className="grid gap-1">
+      <h2 className="font-display text-[23px] leading-tight font-bold tracking-[-0.02em] text-balance text-ink sm:text-[26px]">
+        {title}
+      </h2>
+      <p className="text-[14.5px] text-pretty text-muted">{lead}</p>
+    </div>
+  );
+}
+
+const hasFiles = (event: DragEvent) => Array.from(event.dataTransfer.types).includes('Files');
+
+/** The whole start screen takes a dropped photo. */
+function DropArea({
+  onFiles,
+  disabled,
+  children,
+}: {
+  onFiles: (files: File[]) => void;
+  disabled: boolean;
+  children: ReactNode;
+}) {
+  const [over, setOver] = useState(false);
+  return (
+    <div
+      onDragEnter={(event) => {
+        if (!hasFiles(event) || disabled) return;
+        event.preventDefault();
+        setOver(true);
+      }}
+      onDragOver={(event) => {
+        if (!hasFiles(event)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = disabled ? 'none' : 'copy';
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOver(false);
+      }}
+      onDrop={(event) => {
+        if (!hasFiles(event)) return;
+        event.preventDefault();
+        setOver(false);
+        if (!disabled) onFiles(Array.from(event.dataTransfer.files).slice(0, 1));
+      }}
+      className={cn(
+        'mx-auto w-full max-w-[860px] rounded-[26px] transition-shadow',
+        over && 'shadow-[0_0_0_2px_var(--accent,var(--color-ink))]',
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** One photo, fanned out into the shapes it becomes. Drawn inline, small. */
+function FanArt() {
+  const id = useId().replace(/:/g, '');
+  // Left to right, back to front: [width, height, turn, ratio].
+  const cards: [number, number, number, string][] = [
+    [54, 96, -28, '9:16'],
+    [120, 40, 26, 'Banner'],
+    [66, 82, -15, '4:5'],
+    [112, 63, 15, '16:9'],
+    [86, 86, 0, '1:1'],
+  ];
+  return (
+    <svg
+      viewBox="-6 16 332 176"
+      role="img"
+      aria-label="One photo becoming a post, a story, a portrait, a thumbnail and a banner"
+      className="mx-auto block h-auto w-full max-w-[400px]"
+    >
+      <defs>
+        <linearGradient id={`${id}-sky`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#5b4bd6" />
+          <stop offset="0.55" stopColor="#9b86ff" />
+          <stop offset="1" stopColor="#ffc6de" />
+        </linearGradient>
+        <linearGradient id={`${id}-sea`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#2c6fd8" />
+          <stop offset="1" stopColor="#4fb8ff" />
+        </linearGradient>
+        <radialGradient id={`${id}-glow`}>
+          <stop offset="0" stopColor="var(--glow, #4fb8ff)" stopOpacity="0.32" />
+          <stop offset="1" stopColor="var(--glow, #4fb8ff)" stopOpacity="0" />
+        </radialGradient>
+        <g id={`${id}-scene`}>
+          <rect width="150" height="100" fill={`url(#${id}-sky)`} />
+          <circle cx="104" cy="38" r="12" fill="#fff1c9" />
+          <circle cx="104" cy="38" r="20" fill="#fff1c9" opacity="0.25" />
+          <rect y="58" width="150" height="18" fill={`url(#${id}-sea)`} />
+          <path d="M0 74 Q40 70 75 74 T150 73 V100 H0Z" fill="#f1d9aa" />
+          <path d="M34 60 q14 -12 28 0z" fill="#ff7a8a" />
+          <rect x="47.5" y="60" width="1.6" height="18" fill="#5a4636" />
+          <path
+            d="M128 100 q-4 -22 -10 -42 M118 58 q-14 -6 -24 4 M118 58 q-2 -12 -14 -14 M118 58 q10 -10 22 -6 M118 58 q12 2 16 14"
+            stroke="#2d3a6e"
+            strokeWidth="3.2"
+            strokeLinecap="round"
+            fill="none"
+          />
+        </g>
+      </defs>
+      <ellipse cx="160" cy="118" rx="150" ry="74" fill={`url(#${id}-glow)`} />
+      {cards.map(([width, height, turn, ratio], order) => {
+        const x = 160 - width / 2;
+        const y = 150 - height;
+        const front = turn === 0;
+        return (
+          <g key={ratio} transform={`rotate(${turn} 160 330)`}>
+            <g className="animate-rise" style={{ animationDelay: `${80 + order * 70}ms` }}>
+              <clipPath id={`${id}-clip-${order}`}>
+                <rect x={x} y={y} width={width} height={height} rx="7" />
+              </clipPath>
+              <rect
+                x={x - 1}
+                y={y + 3}
+                width={width + 2}
+                height={height + 2}
+                rx="8"
+                fill="#000"
+                opacity="0.35"
+              />
+              <g clipPath={`url(#${id}-clip-${order})`}>
+                <svg
+                  x={x}
+                  y={y}
+                  width={width}
+                  height={height}
+                  viewBox="0 0 150 100"
+                  preserveAspectRatio="xMidYMid slice"
+                >
+                  <use href={`#${id}-scene`} />
+                </svg>
+              </g>
+              <rect
+                x={x + 0.5}
+                y={y + 0.5}
+                width={width - 1}
+                height={height - 1}
+                rx="6.5"
+                fill="none"
+                stroke="#fff"
+                strokeOpacity={front ? 0.7 : 0.28}
+              />
+              <rect
+                x={x + 5}
+                y={y + 5}
+                width={ratio.length * 5 + 8}
+                height="12"
+                rx="6"
+                fill="#12110d"
+                opacity="0.55"
+              />
+              <text
+                x={x + 9}
+                y={y + 13.6}
+                fill="#fff"
+                fontSize="8"
+                fontWeight="600"
+                fontFamily="system-ui, sans-serif"
+              >
+                {ratio}
+              </text>
+              {front && (
+                <path
+                  d={`M${x - 3} ${y + 13} V${y - 3} H${x + 13} M${x + width - 13} ${y - 3} H${x + width + 3} V${y + 13} M${x - 3} ${y + height - 13} V${y + height + 3} H${x + 13} M${x + width - 13} ${y + height + 3} H${x + width + 3} V${y + height - 13}`}
+                  stroke="var(--accent, #9b86ff)"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  fill="none"
+                />
+              )}
+            </g>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+/** One frame, drawn small from the preview copy: shape cards, the strip and the export tiles. */
+function FramePreview({
+  photo,
+  format,
+  framing,
+  box,
+  background,
+  className,
+}: {
+  photo: Photo;
+  format: FrameFormat;
+  framing: Framing;
+  box: Size;
+  background: Background;
+  className?: string;
+}) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const { width, height } = outputSize(format, photo.size, framing);
+  const shown = fitInside(box, { width, height });
+  const cssWidth = Math.max(1, Math.round(shown.width));
+  const cssHeight = Math.max(1, Math.round(shown.height));
+  // Shrinks with a narrow card, keeping its shape.
+
+  useEffect(() => {
+    const element = canvas.current;
+    const context = element?.getContext('2d');
+    if (!element || !context) return;
+    context.clearRect(0, 0, element.width, element.height);
+    paintFrame(
+      context,
+      photo,
+      { width, height },
+      framing,
+      { x: 0, y: 0, width: element.width, height: element.height },
+      { preview: true, background },
+    );
+  }, [photo, framing, width, height, background, cssWidth, cssHeight]);
+
+  return (
+    <canvas
+      ref={canvas}
+      aria-hidden="true"
+      width={cssWidth * 2}
+      height={cssHeight * 2}
+      style={{ width: cssWidth }}
+      className={cn('block h-auto max-w-full rounded-[4px] shadow-lift', className)}
+    />
+  );
+}
 
 function PhotoBar({
   photo,
@@ -1060,12 +1457,36 @@ function PhotoBar({
   onRemove: () => void;
 }) {
   const id = useId();
+  const thumb = useRef<HTMLCanvasElement>(null);
   const scaled = photo.size.width !== photo.original.width;
+
+  useEffect(() => {
+    const element = thumb.current;
+    const context = element?.getContext('2d');
+    if (!element || !context) return;
+    const { preview } = photo;
+    const cover = Math.max(element.width / preview.width, element.height / preview.height);
+    const width = preview.width * cover;
+    const height = preview.height * cover;
+    context.clearRect(0, 0, element.width, element.height);
+    context.drawImage(
+      preview,
+      (element.width - width) / 2,
+      (element.height - height) / 2,
+      width,
+      height,
+    );
+  }, [photo]);
+
   return (
     <div className="flex items-center gap-3">
-      <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-well text-ink-2">
-        <Icon name="image" size={19} />
-      </span>
+      <canvas
+        ref={thumb}
+        width={88}
+        height={88}
+        aria-hidden="true"
+        className="size-11 shrink-0 rounded-[12px] bg-well shadow-[inset_0_0_0_1px_var(--color-line)]"
+      />
       <div className="min-w-0 flex-1">
         <p className="truncate text-[14px] font-medium text-ink">{photo.name}</p>
         <p className="mono-num truncate text-[11.5px] text-muted">
@@ -1088,7 +1509,7 @@ function PhotoBar({
       <label
         htmlFor={`${id}-replace`}
         className={cn(
-          'inline-flex h-10 items-center gap-1.5 rounded-[11px] bg-well px-3 text-[13.5px] font-medium text-ink-2 transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-signal hover:bg-ink/10 hover:text-ink lg:h-9',
+          'inline-flex h-11 items-center gap-1.5 rounded-[12px] bg-well px-3 text-[13.5px] font-medium text-ink-2 transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-signal hover:bg-ink/10 hover:text-ink lg:h-9',
           busy && 'pointer-events-none opacity-45',
         )}
       >
@@ -1096,6 +1517,337 @@ function PhotoBar({
       </label>
       <IconButton icon="x" label="Remove the photo" onClick={onRemove} disabled={busy} />
     </div>
+  );
+}
+
+/** A shape, with your photo already in it, and the feeds that use it. */
+function ShapeCard({
+  photo,
+  shape,
+  formats,
+  selected,
+  framingOf,
+  onShape,
+  onToggle,
+}: {
+  photo: Photo;
+  shape: ShapeGroup;
+  formats: FrameFormat[];
+  selected: string[];
+  framingOf: (format: FrameFormat) => Framing;
+  onShape: () => void;
+  onToggle: (formatId: string) => void;
+}) {
+  const on = formats.filter((format) => selected.includes(format.id));
+  const lit = on.length > 0;
+  const lead = on[0] ?? formats[0];
+  if (!lead) return null;
+  return (
+    <li
+      className={cn(
+        'relative flex min-w-0 flex-col rounded-[18px] transition-[background-color,box-shadow]',
+        lit
+          ? 'bg-signal-soft shadow-[inset_0_0_0_2px_var(--accent,var(--color-ink))]'
+          : 'bg-well shadow-[inset_0_0_0_1px_var(--color-line)]',
+      )}
+    >
+      <button
+        type="button"
+        role="checkbox"
+        aria-checked={lit}
+        aria-label={`${shape.name}, ${shape.ratio}: ${formats.map(networkName).join(', ')}`}
+        onClick={onShape}
+        className="grid gap-2 rounded-[18px] p-2.5 pb-1.5 text-left transition-transform active:scale-[.98] sm:p-3 sm:pb-2"
+      >
+        <span
+          className={cn(
+            'flex h-[104px] items-center justify-center rounded-[12px] bg-black/25 transition-opacity sm:h-[120px]',
+            !lit && 'opacity-55',
+          )}
+        >
+          <FramePreview
+            photo={photo}
+            format={lead}
+            framing={framingOf(lead)}
+            box={{ width: 220, height: 96 }}
+            background={backgroundFor(photo, 'jpg')}
+          />
+        </span>
+        <span className="flex min-w-0 items-baseline gap-2">
+          <span className="text-[15.5px] leading-tight font-semibold text-ink">{shape.name}</span>
+          <span className="mono-num text-[11.5px] whitespace-nowrap text-muted">{shape.ratio}</span>
+        </span>
+        <span className="hidden text-[12.5px] leading-snug text-muted sm:block">{shape.hint}</span>
+      </button>
+      <span
+        aria-hidden="true"
+        className={cn(
+          'pointer-events-none absolute top-4 right-4 grid size-6 place-items-center rounded-full transition-colors sm:top-5 sm:right-5',
+          lit ? 'text-[#12110d]' : 'bg-surface shadow-[inset_0_0_0_1.5px_var(--color-line-strong)]',
+        )}
+        style={lit ? { background: 'var(--accent, var(--color-ink))' } : undefined}
+      >
+        {lit && <Icon name="check" size={14} strokeWidth={3} />}
+      </span>
+      <div className="flex flex-wrap gap-1.5 px-2.5 pb-2.5 sm:px-3 sm:pb-3">
+        {formats.map((format) => (
+          <FeedPill
+            key={format.id}
+            format={format}
+            on={selected.includes(format.id)}
+            onToggle={() => onToggle(format.id)}
+          />
+        ))}
+      </div>
+    </li>
+  );
+}
+
+function FeedPill({
+  format,
+  on,
+  onToggle,
+}: {
+  format: FrameFormat;
+  on: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      aria-label={`${format.name}, ${format.ratio ? `${format.label} shape` : sizeLabel(format)}`}
+      title={`${format.name} · ${format.ratio ? format.label : sizeLabel(format)}`}
+      onClick={onToggle}
+      className={cn(
+        'inline-flex min-h-10 min-w-0 items-center gap-1 rounded-full pr-2.5 pl-2 text-[12.5px] font-medium sm:gap-1.5 sm:pr-3 sm:pl-2.5 transition-[background-color,color,transform] active:scale-[.96] lg:min-h-8 lg:text-[12.5px]',
+        on ? 'text-[#12110d]' : 'bg-white/[.06] text-ink-2 hover:bg-ink/10 hover:text-ink',
+      )}
+      style={on ? { background: 'var(--accent, var(--color-ink))' } : undefined}
+    >
+      <Icon name={NETWORK_ICONS[format.network]} size={14} className="shrink-0" />
+      <span className="truncate">{networkName(format)}</span>
+    </button>
+  );
+}
+
+/** The sixth card: a size of your own, typed under "Your own size". */
+function CustomCard({
+  customs,
+  selected,
+  onToggle,
+  onOpen,
+}: {
+  customs: FrameFormat[];
+  selected: string[];
+  onToggle: (formatId: string) => void;
+  onOpen: () => void;
+}) {
+  const lit = customs.some((format) => selected.includes(format.id));
+  return (
+    <li
+      className={cn(
+        'flex min-w-0 flex-col rounded-[18px]',
+        lit
+          ? 'bg-signal-soft shadow-[inset_0_0_0_2px_var(--accent,var(--color-ink))]'
+          : 'shadow-[inset_0_0_0_1.5px_var(--color-line)]',
+      )}
+    >
+      <button
+        type="button"
+        onClick={onOpen}
+        className="grid gap-2 rounded-[18px] p-2.5 pb-1.5 text-left transition-transform active:scale-[.98] sm:p-3 sm:pb-2"
+      >
+        <span className="flex h-[104px] items-center justify-center rounded-[12px] border-[1.5px] border-dashed border-line-strong text-muted sm:h-[120px]">
+          <Icon name="plus" size={22} />
+        </span>
+        <span className="flex min-w-0 items-baseline gap-2">
+          <span className="text-[15.5px] leading-tight font-semibold text-ink">Any size</span>
+          <span className="mono-num hidden text-[11.5px] whitespace-nowrap text-muted sm:inline">
+            3:2 · 1200×628
+          </span>
+        </span>
+        <span className="hidden text-[12.5px] leading-snug text-muted sm:block">
+          A shape or an exact size of your own
+        </span>
+      </button>
+      {customs.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 px-2.5 pb-2.5 sm:px-3 sm:pb-3">
+          {customs.map((format) => (
+            <FeedPill
+              key={format.id}
+              format={format}
+              on={selected.includes(format.id)}
+              onToggle={() => onToggle(format.id)}
+            />
+          ))}
+        </div>
+      )}
+    </li>
+  );
+}
+
+function CustomSizes({
+  inputId,
+  customs,
+  selected,
+  onToggle,
+  onAdd,
+  onRemove,
+}: {
+  inputId: string;
+  customs: FrameFormat[];
+  selected: string[];
+  onToggle: (formatId: string) => void;
+  onAdd: (format: FrameFormat) => void;
+  onRemove: (formatId: string) => void;
+}) {
+  const id = useId();
+  const [text, setText] = useState('');
+  const [error, setError] = useState('');
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    const result = parseCustom(text);
+    if ('error' in result) return setError(result.error);
+    const known = customs.some((item) => item.id === result.format.id);
+    if (!known && customs.length >= MAX_CUSTOM)
+      return setError(`Up to ${MAX_CUSTOM} custom sizes. Remove one to add another.`);
+    onAdd(result.format);
+    setText('');
+    setError('');
+  };
+
+  return (
+    <div className="grid gap-2">
+      <form onSubmit={submit} className="flex gap-2">
+        <input
+          id={inputId}
+          aria-label="A custom shape or size"
+          aria-describedby={`${id}-custom-hint`}
+          aria-invalid={error ? true : undefined}
+          placeholder="3:2 or 1200x628"
+          value={text}
+          maxLength={24}
+          inputMode="text"
+          enterKeyHint="done"
+          autoComplete="off"
+          onChange={(event) => {
+            setText(event.target.value);
+            setError('');
+          }}
+          className="h-11 min-w-0 flex-1 rounded-[12px] bg-subtle px-3 text-[16px] text-ink shadow-[inset_0_0_0_1px_var(--color-line-strong)] outline-none placeholder:text-faint focus:shadow-[inset_0_0_0_1.5px_var(--color-signal)] lg:h-10 lg:text-[14px]"
+        />
+        <button
+          type="submit"
+          disabled={!text.trim()}
+          className="inline-flex h-11 items-center gap-1.5 rounded-[12px] bg-well px-3.5 text-[14px] font-medium text-ink transition-colors hover:bg-ink/10 disabled:opacity-40 lg:h-10 lg:text-[13.5px]"
+        >
+          <Icon name="plus" size={15} /> Add
+        </button>
+      </form>
+      <p
+        id={`${id}-custom-hint`}
+        className={cn('text-[12.5px]', error ? 'text-critical' : 'text-muted')}
+      >
+        {error ||
+          'A shape (3:2) keeps your photo’s own sharpness; a size (1200x628) comes out exactly that big.'}
+      </p>
+      {customs.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {customs.map((format) => (
+            <span key={format.id} className="inline-flex items-center gap-0.5">
+              <SizeChip
+                format={format}
+                on={selected.includes(format.id)}
+                onToggle={() => onToggle(format.id)}
+              />
+              <IconButton
+                icon="x"
+                label={`Remove ${format.label}`}
+                onClick={() => onRemove(format.id)}
+              />
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Every chosen frame, small: swipe along it and tap one to frame it. */
+function FrameStrip({
+  photo,
+  frames,
+  active,
+  framingOf,
+  type,
+  onPick,
+}: {
+  photo: Photo;
+  frames: FrameFormat[];
+  active: FrameFormat;
+  framingOf: (format: FrameFormat) => Framing;
+  type: OutputType;
+  onPick: (formatId: string) => void;
+}) {
+  const list = useRef<HTMLUListElement>(null);
+  // The frame being edited stays in view as you step through them.
+  useEffect(() => {
+    const item = list.current?.querySelector<HTMLElement>('[aria-current="true"]');
+    item?.scrollIntoView({
+      behavior: still() ? 'auto' : 'smooth',
+      block: 'nearest',
+      inline: 'center',
+    });
+  }, [active.id]);
+  if (frames.length < 2) return null;
+  return (
+    <ul
+      ref={list}
+      aria-label="Your frames"
+      className="scroller -mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:-mx-5 sm:px-5"
+    >
+      {frames.map((format) => {
+        const here = format.id === active.id;
+        return (
+          <li key={format.id} className="shrink-0">
+            <button
+              type="button"
+              aria-current={here}
+              aria-label={`Frame ${format.name}`}
+              onClick={() => onPick(format.id)}
+              className={cn(
+                'grid w-[76px] justify-items-center gap-1.5 rounded-[14px] p-1.5 pb-1 transition-[background-color,box-shadow]',
+                here
+                  ? 'bg-signal-soft shadow-[inset_0_0_0_2px_var(--accent,var(--color-ink))]'
+                  : 'hover:bg-ink/5',
+              )}
+            >
+              <span className="flex h-[52px] items-center justify-center">
+                <FramePreview
+                  photo={photo}
+                  format={format}
+                  framing={framingOf(format)}
+                  box={{ width: 60, height: 50 }}
+                  background={backgroundFor(photo, type)}
+                  className={cn('rounded-[3px]', !here && 'opacity-75')}
+                />
+              </span>
+              <span
+                className={cn(
+                  'flex max-w-full min-w-0 items-center gap-1 text-[11.5px] font-medium',
+                  here ? 'text-ink' : 'text-muted',
+                )}
+              >
+                <Icon name={NETWORK_ICONS[format.network]} size={12} className="shrink-0" />
+                <span className="truncate">{format.label}</span>
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -1108,19 +1860,18 @@ function Composer({
   format,
   framing,
   type,
-  busy,
   position,
   onChange,
-  onDownload,
+  children,
 }: {
   photo: Photo;
   format: FrameFormat;
   framing: Framing;
   type: OutputType;
-  busy: boolean;
   position: { index: number; total: number; step: (by: number) => void };
   onChange: (framing: Framing) => void;
-  onDownload: () => void;
+  /** The next action, under the controls. */
+  children?: ReactNode;
 }) {
   const id = useId();
   const box = useRef<HTMLDivElement>(null);
@@ -1138,11 +1889,7 @@ function Composer({
   const range = ZOOM[framing.mode];
   const fit = framing.mode === 'fit';
   const showCovered = covered && Boolean(format.covered);
-  const background: Background = photo.transparent
-    ? type === 'jpg'
-      ? 'white'
-      : 'checker'
-    : undefined;
+  const background = backgroundFor(photo, type);
 
   useLayoutEffect(() => {
     latest.current = { photo, format, framing, onChange };
@@ -1293,96 +2040,95 @@ function Composer({
   const moved = framing.x !== 0.5 || framing.y !== 0.5 || framing.zoom !== 1;
 
   return (
-    <div className="grid gap-4">
-      <div className="flex items-center gap-2">
-        <IconButton
-          icon="chevron-left"
-          label="Previous frame"
-          onClick={() => position.step(-1)}
-          disabled={position.total < 2}
-        />
-        <div className="min-w-0 flex-1 text-center">
-          <p className="flex items-center justify-center gap-1.5 text-[15px] font-semibold text-ink">
-            <Icon name={NETWORK_ICONS[format.network]} size={16} className="text-ink-2" />
-            <span className="truncate">{format.name}</span>
-          </p>
-          <p className="mono-num text-[11.5px] text-muted">
-            {sizeLabel(output)} · {ratioLabel(format.width, format.height)}
-            {position.total > 1 && ` · ${position.index + 1} of ${position.total}`}
-          </p>
-        </div>
-        <IconButton
-          icon="chevron-right"
-          label="Next frame"
-          onClick={() => position.step(1)}
-          disabled={position.total < 2}
-        />
-      </div>
-
-      <div
-        ref={box}
-        className="relative h-[min(58vh,460px)] overflow-hidden rounded-[16px] bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)] lg:h-[clamp(300px,calc(100vh_-_470px),600px)]"
-      >
-        <div
-          role="application"
-          aria-roledescription="frame composer"
-          aria-label={`${format.name}, ${output.width} by ${output.height}`}
-          aria-describedby={`${id}-how`}
-          tabIndex={0}
-          onKeyDown={onKeyDown}
-          className="absolute inset-0 rounded-[16px] outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--color-signal)]"
-        >
-          <canvas
-            ref={canvas}
-            aria-hidden="true"
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerEnd}
-            onPointerCancel={onPointerEnd}
-            className={cn(
-              'absolute inset-0 size-full touch-none select-none',
-              dragging ? 'cursor-grabbing' : 'cursor-grab',
-            )}
+    <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-6">
+      <div className="grid min-w-0 gap-3">
+        <div className="hidden items-center gap-2 sm:flex">
+          <IconButton
+            icon="chevron-left"
+            label="Previous frame"
+            onClick={() => position.step(-1)}
+            disabled={position.total < 2}
+          />
+          <div className="min-w-0 flex-1 text-center">
+            <p className="flex items-center justify-center gap-1.5 text-[16px] font-semibold text-ink">
+              <Icon name={NETWORK_ICONS[format.network]} size={16} className="text-ink-2" />
+              <span className="truncate">{format.name}</span>
+            </p>
+            <p className="mono-num text-[11.5px] text-muted">
+              {position.total > 1 && `${position.index + 1} of ${position.total} · `}
+              {ratioLabel(format.width, format.height)} · {sizeLabel(output)}
+            </p>
+          </div>
+          <IconButton
+            icon="chevron-right"
+            label="Next frame"
+            onClick={() => position.step(1)}
+            disabled={position.total < 2}
           />
         </div>
-        <p
-          id={`${id}-how`}
-          className={cn(
-            'pointer-events-none absolute inset-x-0 bottom-2.5 text-center text-[11.5px] text-ink-2 transition-opacity duration-300',
-            dragging ? 'opacity-0' : 'opacity-80',
-          )}
+
+        <div
+          ref={box}
+          className="relative -mx-2 h-[min(48vh,500px)] overflow-hidden rounded-[18px] bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)] sm:mx-0 lg:h-[clamp(380px,calc(100vh_-_300px),640px)]"
         >
-          Drag to move · pinch or use the slider to zoom
-          <span className="sr-only">. Arrow keys move it, plus and minus zoom, 0 resets.</span>
-        </p>
+          <div
+            role="application"
+            aria-roledescription="frame composer"
+            aria-label={`${format.name}, ${output.width} by ${output.height}`}
+            aria-describedby={`${id}-how`}
+            tabIndex={0}
+            onKeyDown={onKeyDown}
+            className="absolute inset-0 rounded-[18px] outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--color-signal)]"
+          >
+            <canvas
+              ref={canvas}
+              aria-hidden="true"
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerEnd}
+              onPointerCancel={onPointerEnd}
+              className={cn(
+                'absolute inset-0 size-full touch-none select-none',
+                dragging ? 'cursor-grabbing' : 'cursor-grab',
+              )}
+            />
+          </div>
+          <p className="pointer-events-none absolute inset-x-0 top-2.5 flex justify-center px-3 sm:hidden">
+            <span className="flex max-w-full min-w-0 items-center gap-1.5 rounded-full bg-black/45 px-3 py-1 text-[12.5px] font-medium text-white">
+              <Icon name={NETWORK_ICONS[format.network]} size={13} className="shrink-0" />
+              <span className="truncate">{format.name}</span>
+              <span className="mono-num shrink-0 text-white/65">
+                {ratioLabel(format.width, format.height)}
+              </span>
+            </span>
+          </p>
+          <p
+            id={`${id}-how`}
+            className={cn(
+              'pointer-events-none absolute inset-x-0 bottom-2.5 flex items-center justify-center gap-1.5 text-[12px] text-ink-2 transition-opacity duration-300',
+              dragging ? 'opacity-0' : 'opacity-85',
+            )}
+          >
+            <Icon name="move" size={13} />
+            Drag to move · pinch to zoom
+            <span className="sr-only">. Arrow keys move it, plus and minus zoom, 0 resets.</span>
+          </p>
+        </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <div
-          role="radiogroup"
-          aria-label="How the photo fills the frame"
-          className="flex rounded-[12px] bg-well p-1"
-        >
-          {FRAME_MODES.map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              role="radio"
-              aria-checked={framing.mode === mode}
-              onClick={() => onChange(withMode(framing, mode))}
-              className={cn(
-                'flex h-10 items-center gap-1.5 rounded-[9px] px-3 text-[13.5px] font-medium transition-colors lg:h-8',
-                framing.mode === mode
-                  ? 'bg-surface text-ink shadow-card'
-                  : 'text-muted hover:text-ink',
-              )}
-            >
-              <Icon name={mode === 'crop' ? 'crop' : 'frame'} size={15} />
-              {mode === 'crop' ? 'Crop to fill' : 'Fit it all'}
-            </button>
-          ))}
-        </div>
-        <div className="flex min-w-[210px] flex-1 items-center gap-1">
+      <div className="grid min-w-0 content-start gap-4 lg:pt-14">
+        <Choices
+          label="How the photo fills the frame"
+          value={framing.mode}
+          onChange={(mode) => onChange(withMode(framing, mode))}
+          className="!flex-nowrap [&>button]:flex-1 [&>button]:justify-center"
+          options={[
+            { value: 'crop', label: 'Fill the frame', icon: 'crop' },
+            { value: 'fit', label: 'Show it all', icon: 'frame' },
+          ]}
+        />
+
+        <div className="flex items-center gap-1">
           <IconButton
             icon="zoom-out"
             label={fit ? 'Smaller' : 'Zoom out'}
@@ -1398,7 +2144,7 @@ function Composer({
             step={0.01}
             value={framing.zoom}
             onChange={(event) => zoomTo(Number(event.target.value))}
-            className="min-w-0 flex-1"
+            className="h-11 min-w-0 flex-1 accent-[var(--accent,var(--color-ink))]"
           />
           <IconButton
             icon="zoom-in"
@@ -1406,121 +2152,112 @@ function Composer({
             onClick={() => zoomTo(framing.zoom * 1.15)}
             disabled={framing.zoom >= range.max}
           />
-          <span className="mono-num w-11 text-right text-[12px] text-muted">
-            {Math.round(framing.zoom * 100)}%
-          </span>
-        </div>
-        <button
-          type="button"
-          onClick={reset}
-          disabled={!moved}
-          className="inline-flex h-10 items-center gap-1.5 rounded-[10px] px-2.5 text-[13.5px] font-medium text-ink-2 transition-colors hover:bg-ink/5 hover:text-ink disabled:opacity-40 lg:h-8"
-        >
-          <Icon name="restore" size={15} /> Reset
-        </button>
-      </div>
-
-      {fit && (
-        <div
-          role="radiogroup"
-          aria-label="Around the photo"
-          className="flex flex-wrap items-center gap-2 animate-fade"
-        >
-          <span className="mr-1 text-[13px] font-medium text-ink-2">Around it</span>
           <button
             type="button"
-            role="radio"
-            aria-checked={framing.backdrop.fill === 'blur'}
-            onClick={() => setBackdrop({ fill: 'blur' })}
-            className={cn(
-              'h-10 rounded-full px-3.5 text-[13px] font-medium transition-colors lg:h-9',
-              framing.backdrop.fill === 'blur'
-                ? 'bg-ink text-on-ink'
-                : 'bg-well text-ink-2 hover:bg-ink/10',
-            )}
+            onClick={reset}
+            disabled={!moved}
+            aria-label="Center it again"
+            title="Center it again"
+            className="ml-1 inline-flex h-10 items-center gap-1.5 rounded-[10px] px-2.5 text-[13.5px] font-medium text-ink-2 transition-colors hover:bg-ink/5 hover:text-ink disabled:opacity-35 lg:h-9"
           >
-            Soft blur
+            <Icon name="restore" size={15} /> Reset
           </button>
-          {swatches.map((color) => {
-            const on = framing.backdrop.fill === 'color' && framing.backdrop.color === color;
-            return (
-              <button
-                key={color}
-                type="button"
-                role="radio"
-                aria-checked={on}
-                aria-label={`Solid ${color}`}
-                title={color}
-                onClick={() => setBackdrop({ fill: 'color', color })}
-                style={{ background: color }}
-                className={cn(
-                  'size-9 rounded-full shadow-[inset_0_0_0_1px_rgb(0_0_0/.18)] transition-transform hover:scale-105',
-                  on && 'ring-2 ring-ink ring-offset-2 ring-offset-surface',
-                )}
+        </div>
+
+        {fit && (
+          <div
+            role="radiogroup"
+            aria-label="Around the photo"
+            className="flex flex-wrap items-center gap-2 animate-fade"
+          >
+            <span className="mr-1 text-[13.5px] font-medium text-ink-2">Around it</span>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={framing.backdrop.fill === 'blur'}
+              onClick={() => setBackdrop({ fill: 'blur' })}
+              className={cn(
+                'h-10 rounded-full px-3.5 text-[13px] font-medium transition-colors lg:h-9',
+                framing.backdrop.fill === 'blur'
+                  ? 'bg-ink text-on-ink'
+                  : 'bg-well text-ink-2 hover:bg-ink/10',
+              )}
+            >
+              Soft blur
+            </button>
+            {swatches.map((color) => {
+              const on = framing.backdrop.fill === 'color' && framing.backdrop.color === color;
+              return (
+                <button
+                  key={color}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  aria-label={`Solid ${color}`}
+                  title={color}
+                  onClick={() => setBackdrop({ fill: 'color', color })}
+                  style={{ background: color }}
+                  className={cn(
+                    'size-10 rounded-full shadow-[inset_0_0_0_1px_rgb(0_0_0/.18)] transition-transform hover:scale-105 lg:size-9',
+                    on && 'ring-2 ring-ink ring-offset-2 ring-offset-surface',
+                  )}
+                />
+              );
+            })}
+            <label
+              className="relative grid size-10 place-items-center rounded-full bg-well text-ink-2 hover:bg-ink/10 lg:size-9"
+              title="Any color"
+            >
+              <Icon name="pipette" size={15} />
+              <input
+                type="color"
+                aria-label="Any color"
+                value={framing.backdrop.color.toLowerCase()}
+                onChange={(event) =>
+                  setBackdrop({ fill: 'color', color: event.target.value.toUpperCase() })
+                }
+                className="absolute inset-0 size-full cursor-pointer opacity-0"
               />
-            );
-          })}
-          <label
-            className="relative grid size-9 place-items-center rounded-full bg-well text-ink-2 hover:bg-ink/10"
-            title="Any color"
-          >
-            <Icon name="pipette" size={15} />
-            <input
-              type="color"
-              aria-label="Any color"
-              value={framing.backdrop.color.toLowerCase()}
-              onChange={(event) =>
-                setBackdrop({ fill: 'color', color: event.target.value.toUpperCase() })
-              }
-              className="absolute inset-0 size-full cursor-pointer opacity-0"
-            />
-          </label>
-        </div>
-      )}
+            </label>
+          </div>
+        )}
 
-      {format.covered && (
-        <div className="grid gap-1.5">
-          <button
-            type="button"
-            aria-pressed={covered}
-            onClick={() => setCovered(!covered)}
-            className={cn(
-              'inline-flex h-10 items-center gap-2 justify-self-start rounded-[10px] px-3 text-[13.5px] font-medium transition-colors lg:h-9',
-              covered ? 'bg-ink text-on-ink' : 'bg-well text-ink-2 hover:bg-ink/10',
+        {format.covered && (
+          <div className="grid gap-1.5">
+            <button
+              type="button"
+              aria-pressed={covered}
+              onClick={() => setCovered(!covered)}
+              className={cn(
+                'inline-flex h-11 items-center gap-2 justify-self-start rounded-[12px] px-3.5 text-[13.5px] font-medium transition-colors lg:h-9',
+                covered ? 'bg-ink text-on-ink' : 'bg-well text-ink-2 hover:bg-ink/10',
+              )}
+            >
+              <Icon name={covered ? 'eye' : 'eye-off'} size={15} />
+              Show what {network} covers
+            </button>
+            {covered && (
+              <p className="text-[12.5px] text-muted">
+                Roughly where names, captions and buttons sit. Keep faces and words in the clear
+                middle.
+              </p>
             )}
-          >
-            <Icon name={covered ? 'eye' : 'eye-off'} size={15} />
-            Show what {network} covers
-          </button>
-          {covered && (
-            <p className="text-[12px] text-muted">
-              Approximate: names, captions and buttons sit roughly in the shaded areas, and apps
-              move them around. Keep faces and words in the clear middle.
-            </p>
-          )}
-        </div>
-      )}
+          </div>
+        )}
 
-      {soft && (
-        <Note tone="caution" icon="alert">
-          {fit
-            ? `Your photo is ${sizeLabel(photo.size)}, so here it’s enlarged ${layout.scale.toFixed(1)}× and will look soft.`
-            : `This frame is ${sizeLabel(output)} but gets ${Math.round(layout.source.width)}×${Math.round(layout.source.height)} px of your photo, so it’s enlarged ${layout.scale.toFixed(1)}× and will look soft.`}{' '}
-          {!fit && framing.zoom > 1.01
-            ? 'Zoom out, or use a bigger photo.'
-            : 'A bigger photo would be sharper.'}
-        </Note>
-      )}
+        {soft && (
+          <Note tone="caution" icon="alert">
+            {fit
+              ? `Your photo is ${sizeLabel(photo.size)}, so here it’s enlarged ${layout.scale.toFixed(1)}× and will look soft.`
+              : `This frame is ${sizeLabel(output)} but gets ${Math.round(layout.source.width)}×${Math.round(layout.source.height)} px of your photo, so it’s enlarged ${layout.scale.toFixed(1)}× and will look soft.`}{' '}
+            {!fit && framing.zoom > 1.01
+              ? 'Zoom out, or use a bigger photo.'
+              : 'A bigger photo would be sharper.'}
+          </Note>
+        )}
 
-      <button
-        type="button"
-        onClick={onDownload}
-        disabled={busy}
-        className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-[12px] bg-well px-4 text-[15px] font-medium text-ink transition-colors hover:bg-ink/10 disabled:opacity-45 lg:h-11 lg:text-[14.5px]"
-      >
-        <Icon name="download" size={17} />
-        Download this frame · {TYPES[type].label}
-      </button>
+        {children}
+      </div>
     </div>
   );
 }
@@ -1530,123 +2267,59 @@ function FrameTile({
   format,
   framing,
   type,
-  selected,
   busy,
-  onSelect,
+  onAdjust,
   onDownload,
 }: {
   photo: Photo;
   format: FrameFormat;
   framing: Framing;
   type: OutputType;
-  selected: boolean;
   busy: boolean;
-  onSelect: () => void;
+  onAdjust: () => void;
   onDownload: () => void;
 }) {
-  const canvas = useRef<HTMLCanvasElement>(null);
   const output = outputSize(format, photo.size, framing);
-  const { width, height } = output;
-  const pixels = within(output, 360);
   const soft = layoutFrame(photo.size, output, framing).scale > SOFT_SCALE;
-  const background: Background = photo.transparent
-    ? type === 'jpg'
-      ? 'white'
-      : 'checker'
-    : undefined;
-
-  useEffect(() => {
-    const element = canvas.current;
-    const context = element?.getContext('2d');
-    if (!element || !context) return;
-    context.clearRect(0, 0, element.width, element.height);
-    paintFrame(
-      context,
-      photo,
-      { width, height },
-      framing,
-      { x: 0, y: 0, width: element.width, height: element.height },
-      { preview: true, background },
-    );
-  }, [photo, framing, width, height, background]);
-
-  const detail =
-    framing.mode === 'fit'
-      ? 'Fit'
-      : framing.zoom > 1.005
-        ? `${Math.round(framing.zoom * 100)}%`
-        : 'Crop';
   return (
-    <li className="relative min-w-0 animate-fade">
+    <li className="relative flex min-w-0 animate-fade flex-col rounded-[18px] bg-well shadow-[inset_0_0_0_1px_var(--color-line)]">
       <button
         type="button"
-        aria-pressed={selected}
-        onClick={onSelect}
-        aria-label={`Compose ${format.name}, ${width} by ${height}${soft ? ', will look soft' : ''}`}
-        className={cn(
-          'grid w-full gap-2 rounded-[16px] p-1.5 text-left transition-colors',
-          selected
-            ? 'bg-subtle shadow-[inset_0_0_0_1.5px_var(--accent,var(--color-ink))]'
-            : 'hover:bg-ink/5',
-        )}
+        onClick={onAdjust}
+        aria-label={`Adjust ${format.name}, ${output.width} by ${output.height}${soft ? ', will look soft' : ''}`}
+        className="grid gap-2 rounded-[18px] p-2 pb-1 text-left transition-transform active:scale-[.98]"
       >
-        <span className="flex h-[128px] items-center justify-center rounded-[11px] bg-well p-3">
-          <canvas
-            ref={canvas}
-            width={pixels.width}
-            height={pixels.height}
-            className="block max-h-full max-w-full rounded-[3px] shadow-lift"
+        <span className="flex h-[132px] items-center justify-center rounded-[12px] bg-black/25 p-2.5">
+          <FramePreview
+            photo={photo}
+            format={format}
+            framing={framing}
+            box={{ width: 136, height: 112 }}
+            background={backgroundFor(photo, type)}
           />
         </span>
-        <span className="grid gap-0.5 px-1 pb-1">
-          <span className="flex min-w-0 items-center gap-1.5 text-[13px] font-medium text-ink">
+        <span className="grid gap-0.5 px-1">
+          <span className="flex min-w-0 items-center gap-1.5 text-[13.5px] font-medium text-ink">
             <Icon name={NETWORK_ICONS[format.network]} size={14} className="shrink-0 text-ink-2" />
             <span className="truncate">{format.name}</span>
           </span>
-          <span className="mono-num text-[11px] text-muted">
-            {sizeLabel(output)} · {detail}
-          </span>
+          <span className="mono-num text-[11px] text-muted">{sizeLabel(output)}</span>
         </span>
       </button>
       {soft && (
-        <span className="pointer-events-none absolute top-3 left-3 inline-flex items-center gap-1 rounded-full bg-surface/90 px-2 py-0.5 text-[11px] font-medium text-caution shadow-card">
+        <span className="pointer-events-none absolute top-3.5 left-3.5 inline-flex items-center gap-1 rounded-full bg-surface/90 px-2 py-0.5 text-[11px] font-medium text-caution shadow-card">
           <Icon name="alert" size={11} /> Soft
         </span>
       )}
-      <IconButton
-        icon="download"
-        label={`Download ${format.name}`}
+      <button
+        type="button"
         onClick={onDownload}
         disabled={busy}
-        size="sm"
-        className="absolute top-2.5 right-2.5 bg-surface/85 text-ink-2 shadow-card backdrop-blur"
-      />
-    </li>
-  );
-}
-
-/** Before there's a photo: the shape each chosen size will have. */
-function Placeholder({ format }: { format: FrameFormat }) {
-  const box = fitInside({ width: 112, height: 84 }, format);
-  return (
-    <li className="grid min-w-0 gap-2 p-1.5">
-      <span className="flex h-[128px] items-center justify-center rounded-[11px] bg-well">
-        <span
-          className="mono-num grid place-items-center rounded-[4px] border-[1.5px] border-dashed border-line-strong text-[10.5px] text-faint"
-          style={{ width: box.width, height: box.height }}
-        >
-          {ratioLabel(format.width, format.height)}
-        </span>
-      </span>
-      <span className="grid gap-0.5 px-1">
-        <span className="flex min-w-0 items-center gap-1.5 text-[13px] font-medium text-ink-2">
-          <Icon name={NETWORK_ICONS[format.network]} size={14} className="shrink-0" />
-          <span className="truncate">{format.name}</span>
-        </span>
-        <span className="mono-num text-[11px] text-muted">
-          {format.ratio ? `${format.label} · your photo’s size` : sizeLabel(format)}
-        </span>
-      </span>
+        aria-label={`Download ${format.name}`}
+        className="mx-2 mb-2 inline-flex h-10 items-center justify-center gap-1.5 rounded-[12px] text-[13px] font-medium text-ink-2 transition-colors hover:bg-ink/10 hover:text-ink disabled:opacity-40 lg:h-9"
+      >
+        <Icon name="download" size={14} /> Save this one
+      </button>
     </li>
   );
 }
@@ -1691,143 +2364,5 @@ function SizeChip({
         </span>
       )}
     </button>
-  );
-}
-
-function SizePicker({
-  selected,
-  customs,
-  onToggle,
-  onAdd,
-  onRemove,
-  onAll,
-  onNone,
-}: {
-  selected: string[];
-  customs: FrameFormat[];
-  onToggle: (formatId: string) => void;
-  onAdd: (format: FrameFormat) => void;
-  onRemove: (formatId: string) => void;
-  onAll: () => void;
-  onNone: () => void;
-}) {
-  const id = useId();
-  const [text, setText] = useState('');
-  const [error, setError] = useState('');
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    const result = parseCustom(text);
-    if ('error' in result) return setError(result.error);
-    const known = customs.some((item) => item.id === result.format.id);
-    if (!known && customs.length >= MAX_CUSTOM)
-      return setError(`Up to ${MAX_CUSTOM} custom sizes. Remove one to add another.`);
-    onAdd(result.format);
-    setText('');
-    setError('');
-  };
-
-  return (
-    <section aria-labelledby={`${id}-sizes`} className="grid gap-4">
-      <div className="flex items-center justify-between gap-3">
-        <Label id={`${id}-sizes`}>Sizes · {selected.length} chosen</Label>
-        <div className="flex gap-1">
-          <button
-            type="button"
-            onClick={onAll}
-            className="h-9 rounded-[9px] px-2.5 text-[13px] font-medium text-ink-2 hover:bg-ink/5 hover:text-ink lg:h-8"
-          >
-            All
-          </button>
-          <button
-            type="button"
-            onClick={onNone}
-            disabled={selected.length === 0}
-            className="h-9 rounded-[9px] px-2.5 text-[13px] font-medium text-ink-2 hover:bg-ink/5 hover:text-ink disabled:opacity-40 lg:h-8"
-          >
-            None
-          </button>
-        </div>
-      </div>
-      <ul className="grid gap-3">
-        {NETWORKS.filter((network) => network.id !== 'custom').map((network) => (
-          <li
-            key={network.id}
-            className="grid gap-2 sm:grid-cols-[108px_minmax(0,1fr)] sm:items-center"
-          >
-            <span className="flex items-center gap-2 text-[13px] font-medium text-ink-2">
-              <Icon name={NETWORK_ICONS[network.id]} size={15} />
-              {network.name}
-            </span>
-            <div className="flex flex-wrap gap-1.5">
-              {SOCIAL_FORMATS.filter((format) => format.network === network.id).map((format) => (
-                <SizeChip
-                  key={format.id}
-                  format={format}
-                  on={selected.includes(format.id)}
-                  onToggle={() => onToggle(format.id)}
-                />
-              ))}
-            </div>
-          </li>
-        ))}
-        <li className="grid gap-2 border-t border-line pt-3 sm:grid-cols-[108px_minmax(0,1fr)] sm:items-start">
-          <span className="flex items-center gap-2 text-[13px] font-medium text-ink-2 sm:h-9">
-            <Icon name="crop" size={15} />
-            Custom
-          </span>
-          <div className="grid gap-2">
-            {customs.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {customs.map((format) => (
-                  <span key={format.id} className="inline-flex items-center gap-0.5">
-                    <SizeChip
-                      format={format}
-                      on={selected.includes(format.id)}
-                      onToggle={() => onToggle(format.id)}
-                    />
-                    <IconButton
-                      icon="x"
-                      size="sm"
-                      label={`Remove ${format.label}`}
-                      onClick={() => onRemove(format.id)}
-                    />
-                  </span>
-                ))}
-              </div>
-            )}
-            <form onSubmit={submit} className="flex gap-2">
-              <input
-                aria-label="A custom shape or size"
-                aria-describedby={`${id}-custom-hint`}
-                aria-invalid={error ? true : undefined}
-                placeholder="3:2 or 1200x628"
-                value={text}
-                maxLength={24}
-                onChange={(event) => {
-                  setText(event.target.value);
-                  setError('');
-                }}
-                className="h-11 min-w-0 flex-1 rounded-[11px] bg-subtle px-3 text-[16px] text-ink shadow-[inset_0_0_0_1px_var(--color-line-strong)] outline-none placeholder:text-faint focus:shadow-[inset_0_0_0_1.5px_var(--color-signal)] lg:h-9 lg:text-[14px]"
-              />
-              <button
-                type="submit"
-                disabled={!text.trim()}
-                className="inline-flex h-11 items-center gap-1.5 rounded-[11px] bg-well px-3.5 text-[14px] font-medium text-ink transition-colors hover:bg-ink/10 disabled:opacity-40 lg:h-9 lg:text-[13.5px]"
-              >
-                <Icon name="plus" size={15} /> Add
-              </button>
-            </form>
-            <p
-              id={`${id}-custom-hint`}
-              className={cn('text-[12px]', error ? 'text-critical' : 'text-muted')}
-            >
-              {error ||
-                'A shape (3:2) crops at your photo’s own resolution; a size (1200x628) exports exactly that. Up to 4096 px.'}
-            </p>
-          </div>
-        </li>
-      </ul>
-    </section>
   );
 }

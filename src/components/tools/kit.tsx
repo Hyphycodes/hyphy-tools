@@ -485,6 +485,7 @@ export function Journey({
                 type="button"
                 disabled={!can}
                 aria-current={here ? 'step' : undefined}
+                aria-label={`${index + 1}. ${label}`}
                 onClick={() => onPick?.(index)}
                 className="group flex w-full min-w-0 flex-col gap-2 py-1.5 text-left"
               >
