@@ -87,7 +87,9 @@ test.describe('the tool registry', () => {
     const facts = catalogFacts();
     expect(facts.open).toBe(listedTools.filter((tool) => tool.status !== 'soon').length);
     expect(facts.local).toBeLessThanOrEqual(facts.open);
-    expect(facts.soon).toBeGreaterThan(0);
+    // Every listed tool is open: nothing waits under “On the way”.
+    expect(facts.soon).toBe(listedTools.filter((tool) => tool.status === 'soon').length);
+    expect(facts.soon).toBe(0);
   });
 });
 

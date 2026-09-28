@@ -48,7 +48,7 @@ const runtimes: Record<ToolId, ComponentType | null> = {
     import('@/components/tools/subscriptions-tool').then((m) => m.SubscriptionsTool),
   ),
   receipts: tool(() => import('@/components/tools/receipts-tool').then((m) => m.ReceiptsTool)),
-  mileage: null,
+  mileage: tool(() => import('@/components/tools/mileage-tool').then((m) => m.MileageTool)),
   wishlist: tool(() => import('@/components/tools/wishlist-tool').then((m) => m.WishlistTool)),
   'secret-santa': tool(() => import('@/components/tools/santa-tool').then((m) => m.SantaTool)),
 };

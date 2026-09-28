@@ -10,9 +10,7 @@ const nextConfig: NextConfig = {
   },
   async redirects() {
     // The deployment's own root opens the public Tools marketplace.
-    return [
-      { source: '/', destination: `${BASE_PATH}/tools`, basePath: false, permanent: false },
-    ];
+    return [{ source: '/', destination: `${BASE_PATH}/tools`, basePath: false, permanent: false }];
   },
   async headers() {
     return [
@@ -22,8 +20,8 @@ const nextConfig: NextConfig = {
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'X-Frame-Options', value: 'DENY' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-          // Receipt capture may use the camera later; nothing else needs device access.
-          { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=()' },
+          // Receipts may use the camera and Mileage the location, both on this site only.
+          { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=(self)' },
         ],
       },
     ];

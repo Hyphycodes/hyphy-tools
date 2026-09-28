@@ -99,24 +99,6 @@ export type World = {
   journey: string[];
 };
 
-/** Unfinished tools keep the quiet night; only shared styling reaches them. */
-const later = (glow: string, object: WorldObject, mood: Mood): World => ({
-  surface: 'night',
-  canvas: '#0b0b0a',
-  paper: '#151513',
-  ink: '#ece8df',
-  accentInk: glow,
-  glow,
-  third: glow,
-  pattern: 'dots',
-  object,
-  motion: 'soft',
-  payoff: 'share',
-  mood,
-  action: 'See what’s coming',
-  journey: [],
-});
-
 export const worlds: Record<ToolId, World> = {
   // A warm restaurant: cream receipt paper, lime, a little amber light.
   split: {
@@ -169,7 +151,23 @@ export const worlds: Record<ToolId, World> = {
     action: 'Scan a receipt',
     journey: ['Take a photo', 'Check it', 'Filed'],
   },
-  mileage: later('#8f9bff', 'ledger', 'practical'),
+  // A night road in deep blue, fresh green for going, cream map paper underneath.
+  mileage: {
+    surface: 'light',
+    canvas: '#edf0e4',
+    paper: '#fffef8',
+    ink: '#0f1f3d',
+    accentInk: '#157a45',
+    glow: '#1e3a8a',
+    third: '#bfe6cf',
+    pattern: 'route',
+    object: 'route',
+    motion: 'snappy',
+    payoff: 'count',
+    mood: 'practical',
+    action: 'Start a drive',
+    journey: ['Start drive', 'Stop', 'Logged'],
+  },
   // Sunrise: peach and warm cream, light calendar surfaces.
   when: {
     surface: 'light',
