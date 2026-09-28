@@ -1,7 +1,14 @@
 'use client';
-import { useDeferredValue, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useDeferredValue,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import { cn } from '@/components/ui/cn';
-import { Field, Input, Segmented, Select } from '@/components/ui/form';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { download, downloadText, slugName } from '@/lib/files/download';
 import { zip, type ZipEntry } from '@/lib/files/zip';
@@ -19,6 +26,7 @@ import {
   RULE_TYPES,
   splitName,
   START_RULES,
+  suggestPreset,
   type DiffPart,
   type Order,
   type PresetId,
@@ -28,53 +36,60 @@ import {
   type RuleType,
 } from '@/lib/tools/rename';
 import {
+  ActionBar,
+  Advanced,
   CopyButton,
-  FileDrop,
+  CountUp,
+  DropObject,
   IconButton,
-  Label,
-  Note,
+  Payoff,
+  PillButton,
   SampleButton,
-  StartPanel,
-  Surface,
 } from './kit';
+import { AddMore } from './clean-add-more';
 
 /*
- * Clean: a stack of renaming rules over the files a person chooses, with every new name previewed
- * before anything happens. Browsers can't rename files where they sit, so the result is renamed
- * copies in a zip (plus a CSV of old → new). The files are only ever read on this device.
+ * Clean: messy names in, tidy names out. A likely fix is picked from the names themselves, every
+ * new name flips into place as the rules change, and the result is renamed copies in a zip (plus
+ * a CSV of old → new): browsers can't rename files where they sit. Files are only read here.
  */
 
 const ACCENT = 'var(--accent, #c7b5ff)';
+/** A counting number in the headline's own type (CountUp is monospaced by default). */
+const DISPLAY_NUMBER =
+  '![font-family:inherit] ![font-variation-settings:inherit] ![letter-spacing:inherit]';
 /** Rows shown before "Show all": enough to check, light enough to stay quick. */
 const SHOWN = 200;
+/** Rows that flip one after another; the rest flip together. */
+const STAGGER = 14;
 
 type Item = { id: number; file: File; folder: string };
 
 const RULES: Record<RuleType, { title: string; icon: IconName }> = {
   replace: { title: 'Find & replace', icon: 'replace' },
-  strip: { title: 'Remove odd characters', icon: 'sparkles' },
+  strip: { title: 'Drop odd characters', icon: 'sparkles' },
   spaces: { title: 'Tidy spaces', icon: 'wrench' },
   case: { title: 'Change case', icon: 'type' },
   prefix: { title: 'Add to the start', icon: 'arrow-left' },
   suffix: { title: 'Add to the end', icon: 'arrow-right' },
-  number: { title: 'Number', icon: 'list-ordered' },
+  number: { title: 'Number them', icon: 'list-ordered' },
   date: { title: 'Add the date', icon: 'calendar' },
   extension: { title: 'Extension case', icon: 'file-text' },
 };
 
 const ORDERS: { value: Order; label: string; short: string }[] = [
-  { value: 'name', label: 'By name (2 before 10)', short: 'by name' },
-  { value: 'modified', label: 'By date modified, oldest first', short: 'oldest first' },
-  { value: 'size', label: 'By size, smallest first', short: 'smallest first' },
-  { value: 'added', label: 'In the order they were added', short: 'as added' },
+  { value: 'name', label: 'By name', short: 'by name' },
+  { value: 'modified', label: 'Oldest first', short: 'oldest first' },
+  { value: 'size', label: 'Smallest first', short: 'smallest first' },
+  { value: 'added', label: 'As added', short: 'as added' },
 ];
 
 const SEPARATORS = [
-  { value: ' ', label: 'A space' },
-  { value: '-', label: 'A dash (-)' },
-  { value: '_', label: 'An underscore (_)' },
-  { value: ' - ', label: 'A spaced dash ( - )' },
-  { value: '', label: 'Nothing' },
+  { value: ' ', label: 'Space' },
+  { value: '-', label: '-' },
+  { value: '_', label: '_' },
+  { value: ' - ', label: '␣-␣' },
+  { value: '', label: 'None' },
 ];
 
 const PROBLEMS: Record<Problem, { label: string; detail: string }> = {
@@ -101,30 +116,27 @@ const PROBLEMS: Record<Problem, { label: string; detail: string }> = {
   },
 };
 
-/** What Clean does, before any files are chosen: an example, plainly labelled. */
+/** What Clean does, before any files are chosen. */
 const EXAMPLES = [
   ['IMG_2041.JPG', '2026-05-03 img-2041.jpg'],
   ['Party 🎉 invite FINAL.pdf', 'party-invite-final.pdf'],
   ['notes   from  rosa .TXT', 'notes-from-rosa.txt'],
 ].map(([before, after]) => ({ key: before, ...diffNames(before, after) }));
 
-/** Messy names in, tidy names out: the whole tool, as a picture. */
+/** Messy names flipping into tidy ones: the whole tool, as a picture. */
 function CleanArt() {
   return (
-    <ol aria-label="For example" className="grid gap-2 text-left">
+    <ol aria-hidden="true" className="mx-auto grid max-w-[420px] gap-2 text-left">
       {EXAMPLES.map((example, index) => (
         <li
           key={example.key}
           className={cn(
-            'flex min-w-0 animate-rise items-center gap-2.5 rounded-[14px] bg-well/70 px-2.5 py-2 shadow-[inset_0_0_0_1px_var(--color-line)] sm:gap-3 sm:px-3.5 sm:py-2.5',
-            // Two say it on a phone; the third waits for a wider screen.
+            'flex min-w-0 items-center gap-3 rounded-[14px] bg-ink/[.04] px-3 py-2.5',
             index === 2 && 'max-sm:hidden',
           )}
-          style={{ animationDelay: `${index * 70}ms` }}
         >
           <span
-            aria-hidden="true"
-            className="grid size-8 shrink-0 place-items-center rounded-[9px] text-[#12110d]"
+            className="grid size-8 shrink-0 place-items-center rounded-[9px] text-[var(--on-accent,#12110d)]"
             style={{ background: ACCENT }}
           >
             <Icon name={index === 0 ? 'image' : 'file-text'} size={16} />
@@ -133,21 +145,33 @@ function CleanArt() {
             <span className="truncate text-[12.5px] text-muted line-through decoration-faint/70">
               {example.before.map((part) => part.text).join('')}
             </span>
-            <span className="truncate text-[14px] font-medium text-ink">
-              {example.after.map((part, position) =>
-                part.changed ? (
-                  <span key={position} style={{ color: ACCENT }}>
-                    {part.text}
-                  </span>
-                ) : (
-                  <span key={position}>{part.text}</span>
-                ),
-              )}
+            <span
+              className="fx-flip truncate text-[14.5px] font-medium text-ink"
+              style={{ '--i': 6 + index * 4 } as CSSProperties}
+            >
+              <DiffText parts={example.after} />
             </span>
           </span>
         </li>
       ))}
     </ol>
+  );
+}
+
+/** A new name with what the rules added lit up. */
+function DiffText({ parts }: { parts: DiffPart[] }) {
+  return parts.map((part, index) =>
+    part.changed ? (
+      <ins
+        key={index}
+        className="rounded-[4px] px-px text-[var(--accent-ink)] no-underline"
+        style={{ background: `color-mix(in oklab, ${ACCENT} 34%, transparent)` }}
+      >
+        {part.text}
+      </ins>
+    ) : (
+      <span key={index}>{part.text}</span>
+    ),
   );
 }
 
@@ -271,16 +295,18 @@ function summary(rule: Rule, error?: string) {
 export function CleanTool() {
   const id = useId();
   const [items, setItems] = useState<Item[]>([]);
-  // No rules until one is picked: a rule's settings show only once it's added.
+  // Empty until files arrive: then a likely quick fix is picked from their names.
   const [rules, setRules] = useState<Rule[]>([]);
-  const [open, setOpen] = useState<string[]>([]);
-  const [undo, setUndo] = useState<Rule[] | null>(null);
+  const [preset, setPreset] = useState<PresetId | null>(null);
+  const [suggested, setSuggested] = useState<PresetId | null>(null);
+  const [undo, setUndo] = useState<{ rules: Rule[]; preset: PresetId | null } | null>(null);
   const [keepFolders, setKeepFolders] = useState(true);
   const [filter, setFilter] = useState<'all' | 'changed' | 'attention'>('all');
   const [showAll, setShowAll] = useState(false);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
   const [status, setStatus] = useState('');
+  const [done, setDone] = useState<{ name: string; count: number } | null>(null);
   const nextItem = useRef(0);
   const nextRule = useRef(0);
 
@@ -312,6 +338,15 @@ export function CleanTool() {
   const visibleRows = showAll ? rows : rows.slice(0, SHOWN);
   const problemsHere = new Set(view.rows.flatMap((row) => row.problems));
   const skipped = Object.keys(plan.errors).length;
+
+  /** A fresh batch starts with the quick fix its names suggest. */
+  function startWith(names: string[], batch: string) {
+    if (rules.length && JSON.stringify(rules) !== JSON.stringify(START_RULES)) return;
+    const pick = suggestPreset(names);
+    setRules(presetRules(pick, batch || 'Batch'));
+    setPreset(pick);
+    setSuggested(pick);
+  }
 
   async function add(incoming: File[]) {
     if (busy || !incoming.length) return;
@@ -347,9 +382,15 @@ export function CleanTool() {
       setItems((current) => [...current, ...accepted]);
       setShowAll(false);
       setStatus('');
+      setDone(null);
+      const batchTops = new Set(accepted.map((item) => item.folder.split('/')[0]));
+      startWith(
+        accepted.map((item) => item.file.name),
+        !items.length && batchTops.size === 1 ? [...batchTops][0] : '',
+      );
     }
     const notes: string[] = [];
-    if (accepted.length) notes.push(`Added ${plural(accepted.length, 'file')}.`);
+    if (accepted.length && items.length) notes.push(`Added ${plural(accepted.length, 'file')}.`);
     if (repeats)
       notes.push(`${plural(repeats, 'file')} ${repeats === 1 ? 'was' : 'were'} already here.`);
     if (over)
@@ -360,25 +401,22 @@ export function CleanTool() {
       );
     if (folderEntries.length)
       notes.push(
-        `${list(folderEntries)} ${folderEntries.length === 1 ? 'is a folder' : 'are folders'}: use Choose a folder to add what’s inside.`,
+        `${list(folderEntries)} ${folderEntries.length === 1 ? 'is a folder' : 'are folders'}: use A folder to add what’s inside.`,
       );
     setNote(notes.join(' '));
   }
 
   async function trySample() {
     setBusy(true);
-    setNote('Making sample files…');
+    setNote('');
     try {
       const samples = await sampleFiles();
       setItems(samples.map((sample) => ({ id: nextItem.current++, ...sample })));
-      // A fresh stack does nothing yet: start the sample off with a preset, to show the idea.
-      if (!rules.length || JSON.stringify(rules) === JSON.stringify(START_RULES)) {
-        setRules(presetRules('web'));
-        setOpen([]);
-        setNote(
-          `Added ${SAMPLES.length} sample files, with “Clean for the web” to start. Change any rule and watch the names.`,
-        );
-      } else setNote(`Added ${SAMPLES.length} sample files.`);
+      setDone(null);
+      startWith(
+        samples.map((sample) => sample.file.name),
+        'Sample shoot',
+      );
     } catch {
       setNote('We couldn’t make samples here. Choose a few of your own files instead.');
     } finally {
@@ -386,32 +424,47 @@ export function CleanTool() {
     }
   }
 
-  const changeRule = (next: Rule) =>
-    setRules((current) => current.map((rule) => (rule.id === next.id ? next : rule)));
+  function startOver() {
+    setItems([]);
+    setRules([]);
+    setPreset(null);
+    setSuggested(null);
+    setUndo(null);
+    setNote('');
+    setStatus('');
+    setDone(null);
+    setFilter('all');
+  }
+
+  /** Any hand-made change: the rules are no longer exactly a quick fix. */
+  const edit = (next: Rule[]) => {
+    setRules(next);
+    setPreset(null);
+  };
+  const changeRule = (next: Rule) => edit(rules.map((rule) => (rule.id === next.id ? next : rule)));
   const addRule = (type: RuleType) => {
-    const rule = newRule(type, `r${++nextRule.current}`);
-    setRules((current) => [...current, rule]);
-    setOpen((current) => [...current, rule.id]);
+    edit([...rules, newRule(type, `r${++nextRule.current}`)]);
     setUndo(null);
   };
-  /** A rule chip: tap to add it (its settings open), tap again to take it out. */
+  /** A rule chip: tap to turn it on (added the first time), tap again to turn it off. */
   const toggleRule = (type: RuleType) => {
-    if (!rules.some((rule) => rule.type === type)) return addRule(type);
-    setUndo(rules);
-    setRules((current) => current.filter((rule) => rule.type !== type));
+    const own = rules.filter((rule) => rule.type === type);
+    if (!own.length) return addRule(type);
+    const on = !own.some((rule) => rule.on);
+    edit(rules.map((rule) => (rule.type === type ? { ...rule, on } : rule)));
   };
-  const moveRule = (index: number, by: -1 | 1) =>
-    setRules((current) => {
-      const next = [...current];
-      const [moved] = next.splice(index, 1);
-      next.splice(index + by, 0, moved);
-      return next;
-    });
-  const applyPreset = (preset: PresetId) => {
-    setUndo(rules);
+  const moveRule = (index: number, by: -1 | 1) => {
+    const next = [...rules];
+    const [moved] = next.splice(index, 1);
+    next.splice(index + by, 0, moved);
+    edit(next);
+  };
+  const applyPreset = (pick: PresetId) => {
+    if (pick === preset) return;
+    setUndo({ rules, preset });
     // Number a batch names it after the chosen folder, when there is one.
-    setRules(presetRules(preset, topFolder || 'Batch'));
-    setOpen([]);
+    setRules(presetRules(pick, topFolder || 'Batch'));
+    setPreset(pick);
   };
 
   async function downloadZip() {
@@ -434,14 +487,13 @@ export function CleanTool() {
       const name = topFolder ? `${slugName(topFolder)}-renamed.zip` : 'renamed-files.zip';
       download(await zip(entries), name);
       setStatus(
-        `Downloading ${name}: ${plural(entries.length, 'renamed copy', 'renamed copies')}. Your originals haven’t changed.${
-          unreadable.length
-            ? ` ${list(unreadable)} couldn’t be read (moved or deleted?), so ${
-                unreadable.length === 1 ? 'it’s' : 'they’re'
-              } not in the zip.`
-            : ''
-        }`,
+        unreadable.length
+          ? `${list(unreadable)} couldn’t be read (moved or deleted?), so ${
+              unreadable.length === 1 ? 'it’s' : 'they’re'
+            } not in the zip.`
+          : '',
       );
+      setDone({ name, count: plan.changed });
     } catch (error) {
       setStatus(
         // A file that changes or moves mid-zip surfaces as a DOMException from the browser.
@@ -458,228 +510,195 @@ export function CleanTool() {
 
   if (!items.length)
     return (
-      <StartPanel
-        art={<CleanArt />}
-        title="Tidy up messy file names"
-        lead="Pick the rules, see every new name before anything happens, then download renamed copies."
-        footer="Your originals stay exactly as they are. Nothing is uploaded."
-      >
-        <FileDrop
+      <div className="mx-auto grid w-full max-w-[640px] gap-3 pt-2 pb-6 sm:pt-4">
+        <DropObject
+          shape="files"
+          multiple
           folder
           onFiles={add}
-          disabled={busy}
-          icon="replace"
-          accent={ACCENT}
-          compact
-          title="Choose the files to rename"
-          hint="Or a whole folder: up to 1,000 files."
-        />
-        <SampleButton onClick={trySample} disabled={busy} className="mt-2">
-          No files handy? Try a messy sample
-        </SampleButton>
+          art={<CleanArt />}
+          title="Drop your messy files"
+        >
+          <SampleButton onClick={trySample} disabled={busy}>
+            Try a messy sample
+          </SampleButton>
+        </DropObject>
         {note && (
-          <p role="status" className="mt-2 text-[13px] leading-relaxed text-ink-2">
+          <p role="status" className="text-center text-[13.5px] leading-relaxed text-ink-2">
             {note}
           </p>
         )}
-      </StartPanel>
+      </div>
     );
 
-  return (
-    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:items-start">
-      <Surface className="grid grid-cols-1 gap-4 lg:col-start-1 lg:row-start-1">
-        <>
-          <div className="flex items-center gap-3">
-            <span
-              className="grid size-11 shrink-0 place-items-center rounded-[12px] text-[#12110d]"
-              style={{ background: ACCENT }}
-            >
-              <Icon name="files" size={20} />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-[15px] font-semibold text-ink">
-                {plural(items.length, 'file')} · {formatBytes(totalBytes)}
-              </p>
-              <p className="truncate text-[13px] text-muted">
-                {folders.size
-                  ? `${topFolder ? `From “${topFolder}”` : 'From several folders'} · ${plural(folders.size, 'folder')}`
-                  : 'Chosen one by one'}
-              </p>
-            </div>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => {
-                setItems([]);
-                setNote('');
-                setStatus('');
-              }}
-              className="h-11 shrink-0 rounded-[11px] px-3.5 text-[14px] font-medium text-ink-2 hover:bg-ink/5 hover:text-ink disabled:opacity-45 lg:h-9 lg:text-[13.5px]"
-            >
-              Start over
-            </button>
-          </div>
-          {items.length < MAX_FILES && (
-            <FileDrop folder compact onFiles={add} disabled={busy} icon="plus" title="Add more" />
-          )}
-        </>
-        {note && (
-          <p role="status" className="text-[13px] leading-relaxed text-ink-2">
-            {note}
-          </p>
-        )}
-        {items.length > 0 && (
-          <section aria-labelledby={`${id}-presets`} className="grid grid-cols-1 gap-2.5">
-            <div className="flex min-h-6 items-center justify-between gap-3">
-              <Label id={`${id}-presets`}>Pick a quick fix</Label>
-              {undo && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRules(undo);
-                    setUndo(null);
-                  }}
-                  className="inline-flex h-11 items-center gap-1.5 rounded-[9px] px-2.5 text-[13px] font-medium text-ink-2 hover:bg-ink/5 hover:text-ink lg:h-9"
-                >
-                  <Icon name="undo" size={14} /> Undo
-                </button>
-              )}
-            </div>
-            <div className="grid gap-2 sm:grid-cols-3">
-              {PRESETS.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  onClick={() => applyPreset(preset.id)}
-                  className="grid min-h-11 min-w-0 content-start gap-0.5 rounded-[14px] bg-well px-3.5 py-3 text-left transition-colors hover:bg-ink/10"
-                >
-                  <span className="text-[14px] font-semibold text-ink">{preset.name}</span>
-                  <span className="truncate text-[12px] text-muted">{preset.example}</span>
-                </button>
+  if (done)
+    return (
+      <div className="mx-auto w-full max-w-[720px] pt-2 pb-6">
+        <Payoff
+          headline={
+            <>
+              <Icon name="check" size={16} strokeWidth={3} /> {done.name}
+            </>
+          }
+          value={<CountUp value={done.count} duration={500} className={DISPLAY_NUMBER} />}
+          caption={done.count === 1 ? 'filename cleaned' : 'filenames cleaned'}
+          action={{ label: 'Download again', icon: 'download', onClick: downloadZip }}
+          secondary={
+            <PillButton icon="sliders" onClick={() => setDone(null)}>
+              Change the rules
+            </PillButton>
+          }
+          onReset={startOver}
+          resetLabel="Clean more files"
+        >
+          <ol className="mx-auto grid max-w-[520px] gap-1.5 text-left">
+            {view.rows
+              .filter((row) => row.changed)
+              .slice(0, 5)
+              .map((row, index) => (
+                <FlipRow key={row.index} row={row} index={index + 3} compact />
               ))}
-            </div>
-          </section>
-        )}
-      </Surface>
+          </ol>
+          {status && <p className="mt-3 text-[13px] text-caution">{status}</p>}
+        </Payoff>
+      </div>
+    );
 
-      {items.length > 0 && (
-        <Surface className="grid grid-cols-1 gap-6 max-lg:order-last lg:col-start-1 lg:row-start-2">
-          <section aria-labelledby={`${id}-rules`} className="grid grid-cols-1 gap-3">
-            <div className="flex min-h-6 flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-              <Label id={`${id}-rules`}>Or choose what to change</Label>
-              {rules.length > 1 && (
-                <span className="text-[12.5px] text-muted">Changes run top to bottom</span>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {RULE_TYPES.map((type) => {
-                const on = rules.some((rule) => rule.type === type);
-                return (
-                  <button
-                    key={type}
-                    type="button"
-                    aria-pressed={on}
-                    onClick={() => toggleRule(type)}
-                    className={cn(
-                      'inline-flex min-h-11 items-center gap-1.5 rounded-full px-3.5 text-[14px] font-medium transition-[background-color,color,transform] active:scale-[.97] lg:min-h-9 lg:text-[13.5px]',
-                      on ? 'text-[#12110d]' : 'bg-well text-ink-2 hover:bg-ink/10 hover:text-ink',
-                    )}
-                    style={on ? { background: ACCENT } : undefined}
-                  >
-                    <Icon name={on ? 'check' : RULES[type].icon} size={15} />
-                    {RULES[type].title}
-                  </button>
-                );
-              })}
-            </div>
-            {rules.length > 0 ? (
-              <ol className="grid grid-cols-1 gap-2">
-                {rules.map((rule, index) => (
-                  <RuleCard
-                    key={rule.id}
-                    rule={rule}
-                    index={index}
-                    count={rules.length}
-                    open={open.includes(rule.id)}
-                    error={plan.errors[rule.id]}
-                    baseId={`${id}-${rule.id}`}
-                    onToggle={() =>
-                      setOpen((current) =>
-                        current.includes(rule.id)
-                          ? current.filter((item) => item !== rule.id)
-                          : [...current, rule.id],
-                      )
-                    }
-                    onChange={changeRule}
-                    onMove={(by) => moveRule(index, by)}
-                    onRemove={() =>
-                      setRules((current) => current.filter((item) => item.id !== rule.id))
-                    }
-                  />
-                ))}
-              </ol>
-            ) : (
-              <p className="rounded-[14px] bg-subtle px-4 py-3.5 text-[13.5px] text-muted shadow-[inset_0_0_0_1px_var(--color-line)]">
-                Tap a change above and its settings open here. Or pick a quick fix.
-              </p>
-            )}
-            {rules.some((rule) => rule.type === 'replace') && (
-              <button
-                type="button"
-                onClick={() => addRule('replace')}
-                className="inline-flex h-11 items-center gap-1.5 justify-self-start rounded-[10px] px-2.5 text-[13.5px] font-medium text-ink-2 hover:bg-ink/5 hover:text-ink lg:h-9"
-              >
-                <Icon name="plus" size={14} /> Another find & replace
-              </button>
-            )}
-            <p className="text-[12.5px] leading-relaxed text-muted">
-              Changes touch the name, never the extension (.jpg, .pdf), except Extension case.
-            </p>
-          </section>
-        </Surface>
+  const activeTypes = RULE_TYPES.filter((type) =>
+    rules.some((rule) => rule.type === type && rule.on),
+  );
+  const onRules = rules.filter((rule) => rule.on);
+
+  return (
+    <div className="flex flex-col gap-5 pb-2 lg:grid lg:grid-cols-[minmax(0,.92fr)_minmax(0,1.08fr)] lg:items-start lg:gap-x-8">
+      {/* What's here */}
+      <div className="order-1 flex min-w-0 items-center gap-3 lg:col-start-1 lg:row-start-1">
+        <span
+          className="grid size-11 shrink-0 place-items-center rounded-[13px] text-[var(--on-accent,#12110d)]"
+          style={{ background: ACCENT }}
+        >
+          <Icon name="files" size={20} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[15px] font-semibold text-ink">
+            {plural(items.length, 'file')} · {formatBytes(totalBytes)}
+          </p>
+          <p className="truncate text-[13px] text-muted">
+            {folders.size
+              ? `${topFolder ? `From “${topFolder}”` : 'From several folders'} · ${plural(folders.size, 'folder')}`
+              : 'Chosen one by one'}
+          </p>
+        </div>
+        {items.length < MAX_FILES && <AddMore onFiles={add} disabled={busy} />}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={startOver}
+          className="h-11 shrink-0 rounded-full px-3.5 text-[14px] font-medium text-ink-2 hover:bg-ink/[.06] hover:text-ink disabled:opacity-45 lg:h-10 lg:text-[13.5px]"
+        >
+          Start over
+        </button>
+      </div>
+      {note && (
+        <p role="status" className="order-1 text-[13px] leading-relaxed text-ink-2 lg:col-start-1">
+          {note}
+        </p>
       )}
 
-      <aside
-        id={`${id}-preview`}
-        aria-label="New names"
-        className="grid min-w-0 scroll-mt-24 gap-4 lg:sticky lg:top-24 lg:col-start-2 lg:row-span-2 lg:row-start-1"
+      {/* Quick fixes: outcomes, the likely one already on */}
+      <section
+        aria-labelledby={`${id}-presets`}
+        className="order-2 grid min-w-0 gap-2.5 lg:col-start-1"
       >
-        <Surface className="grid grid-cols-1 gap-4">
-          <>
-            <div className="flex items-end justify-between gap-3" aria-live="polite">
-              <div className="min-w-0">
-                <p className="label">Preview</p>
-                <p className="mt-1.5 text-[15px] text-muted">
+        <div className="flex min-h-7 items-center justify-between gap-3">
+          <h2 id={`${id}-presets`} className="text-[15px] font-semibold text-ink">
+            Quick fixes
+          </h2>
+          {undo && (
+            <button
+              type="button"
+              onClick={() => {
+                setRules(undo.rules);
+                setPreset(undo.preset);
+                setUndo(null);
+              }}
+              className="inline-flex h-10 items-center gap-1.5 rounded-full px-3 text-[13.5px] font-medium text-ink-2 hover:bg-ink/[.06] hover:text-ink"
+            >
+              <Icon name="undo" size={14} /> Undo
+            </button>
+          )}
+        </div>
+        <div
+          role="radiogroup"
+          aria-label="Quick fixes"
+          className="scroller -mx-3 flex snap-x gap-2 overflow-x-auto px-3 pb-1 sm:mx-0 sm:grid sm:grid-cols-3 sm:overflow-visible sm:px-0"
+        >
+          {PRESETS.map((option) => {
+            const on = option.id === preset;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                onClick={() => applyPreset(option.id)}
+                className={cn(
+                  'fx-move relative grid min-h-[76px] w-[62vw] max-w-[240px] shrink-0 snap-start content-start gap-1 rounded-[16px] px-3.5 py-3 text-left active:scale-[.97] sm:w-auto sm:max-w-none',
+                  on
+                    ? 'bg-surface shadow-[inset_0_0_0_2px_var(--accent-ink),0_14px_28px_-18px_var(--accent)]'
+                    : 'bg-ink/[.045] shadow-[inset_0_0_0_1px_var(--color-line)] hover:bg-ink/[.07]',
+                )}
+              >
+                <span className="flex items-center gap-1.5 pr-5 text-[14px] font-semibold text-ink">
+                  {option.name}
+                </span>
+                <span className="mono-num truncate text-[11.5px] text-muted">{option.example}</span>
+                {on ? (
                   <span
-                    className="mr-1.5 font-display text-[36px] leading-none font-extrabold tracking-[-0.04em] text-ink"
-                    style={{ fontVariationSettings: "'wdth' 110" }}
+                    aria-hidden="true"
+                    className="fx-pop absolute top-2.5 right-2.5 grid size-5 place-items-center rounded-full text-[var(--on-accent,#12110d)]"
+                    style={{ background: ACCENT }}
                   >
-                    {view.changed}
-                  </span>
-                  of {plural(view.rows.length, 'name')} change
-                </p>
-              </div>
-              <p className="shrink-0 text-right text-[12.5px] leading-relaxed text-muted">
-                {plural(view.rows.length - view.changed, 'stays', 'stay')} as{' '}
-                {view.rows.length - view.changed === 1 ? 'it is' : 'they are'}
-                <br />
-                {view.attention ? (
-                  <span className="text-caution">
-                    {view.attention} {view.attention === 1 ? 'needs' : 'need'} attention
+                    <Icon name="check" size={12} strokeWidth={3} />
                   </span>
                 ) : (
-                  'No problems'
+                  option.id === suggested && (
+                    <span className="absolute top-2.5 right-2.5 text-[10.5px] font-bold tracking-[.06em] text-[var(--accent-ink)] uppercase">
+                      Best
+                    </span>
+                  )
                 )}
-              </p>
-            </div>
+              </button>
+            );
+          })}
+        </div>
+      </section>
 
-            <div role="group" aria-label="Show" className="flex flex-wrap gap-1.5">
+      {/* The object: every name, flipping from old to new */}
+      <section
+        aria-label="New names"
+        className="order-3 grid min-w-0 gap-3 lg:sticky lg:top-24 lg:col-start-2 lg:row-span-4 lg:row-start-1"
+      >
+        <div className="rounded-[26px] bg-surface p-3 shadow-lift sm:p-4">
+          <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-2 px-1.5 pt-1">
+            <p aria-live="polite" className="min-w-0">
+              <span
+                className="font-display text-[44px] leading-[.9] font-extrabold tracking-[-0.045em] text-ink sm:text-[52px]"
+                style={{ fontVariationSettings: "'wdth' 112" }}
+              >
+                <CountUp value={view.changed} duration={350} className={DISPLAY_NUMBER} />
+              </span>
+              <span className="ml-2 text-[15px] font-medium text-ink-2">
+                of {plural(view.rows.length, 'name')} cleaned
+              </span>
+            </p>
+            <div role="group" aria-label="Show" className="flex gap-1">
               {(
                 [
-                  ['all', `All ${view.rows.length}`],
-                  ['changed', `Changed ${view.changed}`],
-                  ['attention', `Needs attention ${view.attention}`],
-                ] as const
+                  ['all', 'All'],
+                  ['changed', 'Changed'],
+                  ...(view.attention ? [['attention', `Check ${view.attention}`]] : []),
+                ] as ['all' | 'changed' | 'attention', string][]
               ).map(([value, label]) => (
                 <button
                   key={value}
@@ -690,180 +709,281 @@ export function CleanTool() {
                     setShowAll(false);
                   }}
                   className={cn(
-                    'h-11 rounded-full px-3.5 text-[13px] font-medium transition-colors lg:h-9 lg:px-3',
-                    filter === value ? 'bg-ink text-on-ink' : 'bg-well text-ink-2 hover:bg-ink/10',
+                    'h-10 rounded-full px-3 text-[13px] font-medium transition-colors lg:h-9',
+                    filter === value
+                      ? 'bg-ink text-on-ink'
+                      : value === 'attention'
+                        ? 'bg-caution-soft text-caution'
+                        : 'bg-ink/[.06] text-ink-2 hover:bg-ink/10',
                   )}
                 >
                   {label}
                 </button>
               ))}
             </div>
+          </div>
 
-            {skipped > 0 && (
-              <Note icon="alert" tone="caution">
-                A find & replace pattern doesn’t work yet, so that rule is skipped. Open it to see
-                why.
-              </Note>
-            )}
+          {skipped > 0 && (
+            <p className="mx-1.5 mt-3 flex items-start gap-2 rounded-[12px] bg-caution-soft px-3 py-2 text-[13px] text-caution">
+              <Icon name="alert" size={14} className="mt-[3px] shrink-0" />A find & replace pattern
+              doesn’t work yet, so it’s skipped.
+            </p>
+          )}
 
-            <div className="max-h-[min(62vh,560px)] overflow-y-auto rounded-[16px] bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)] lg:max-h-[calc(100dvh-27rem)] lg:min-h-[220px]">
-              {visibleRows.length ? (
-                <ol className="row-divide">
-                  {visibleRows.map((row) => (
-                    <PreviewRow key={row.index} row={row} showFolder={folders.size > 0} />
-                  ))}
-                </ol>
-              ) : (
-                <p className="px-4 py-6 text-center text-[13.5px] text-muted">
-                  {filter === 'changed'
-                    ? 'No name changes yet. Pick a quick fix or choose what to change.'
-                    : 'Nothing needs attention.'}
-                </p>
-              )}
-              {rows.length > visibleRows.length && (
-                <button
-                  type="button"
-                  onClick={() => setShowAll(true)}
-                  className="flex h-11 w-full items-center justify-center gap-1.5 border-t border-line text-[13.5px] font-medium text-ink-2 hover:bg-ink/5 hover:text-ink"
-                >
-                  Show all {rows.length.toLocaleString('en-US')}
-                </button>
-              )}
-            </div>
-
-            {problemsHere.size > 0 && (
-              <ul className="grid gap-1.5 text-[12.5px] leading-relaxed text-muted">
-                {[...problemsHere].map((problem) => (
-                  <li key={problem} className="flex gap-2">
-                    <Icon name="alert" size={14} className="mt-[3px] shrink-0 text-caution" />
-                    <span>
-                      <span className="font-medium text-ink-2">{PROBLEMS[problem].label}:</span>{' '}
-                      {PROBLEMS[problem].detail}
-                    </span>
-                  </li>
+          <div className="mt-3 max-h-[min(54vh,520px)] overflow-y-auto rounded-[18px] bg-ink/[.03] lg:max-h-[calc(100dvh-22rem)] lg:min-h-[240px]">
+            {visibleRows.length ? (
+              <ol className="row-divide">
+                {visibleRows.map((row, index) => (
+                  <FlipRow
+                    // A new name is a new face: the row flips over to it.
+                    key={`${row.index}:${row.after}`}
+                    row={row}
+                    index={Math.min(index, STAGGER)}
+                    showFolder={folders.size > 0 && row.folder !== topFolder}
+                  />
                 ))}
-              </ul>
+              </ol>
+            ) : (
+              <p className="px-4 py-8 text-center text-[14px] text-muted">
+                {filter === 'changed' ? 'Nothing changes yet. Pick a quick fix.' : 'All clear.'}
+              </p>
             )}
-
-            <div className="grid gap-3 border-t border-line pt-4">
-              {folders.size > 0 && (
-                <Check checked={keepFolders} onChange={setKeepFolders}>
-                  Keep the folders in the zip
-                  <span className="block text-[12.5px] text-muted">
-                    {keepFolders
-                      ? 'Each copy goes in the same folder as its original.'
-                      : 'Every copy sits side by side; names that clash get (2).'}
-                  </span>
-                </Check>
-              )}
+            {rows.length > visibleRows.length && (
               <button
                 type="button"
-                onClick={downloadZip}
-                disabled={busy}
-                className="inline-flex h-14 items-center justify-center gap-2 rounded-[16px] px-5 text-[16.5px] font-semibold text-[#12110d] shadow-[0_14px_32px_-16px_var(--accent,transparent)] transition-[transform,opacity] active:scale-[.985] disabled:opacity-45 sm:h-13 sm:text-[16px]"
-                style={{ background: ACCENT }}
+                onClick={() => setShowAll(true)}
+                className="flex h-11 w-full items-center justify-center gap-1.5 border-t border-line text-[13.5px] font-medium text-ink-2 hover:bg-ink/5 hover:text-ink"
               >
-                {busy ? (
-                  <Icon name="loader" size={19} className="animate-spin" />
-                ) : (
-                  <Icon name="download" size={19} />
-                )}
-                Download renamed copies
+                Show all {rows.length.toLocaleString('en-US')}
               </button>
-              <div className="grid grid-cols-2 gap-2">
-                <CopyButton
-                  text={csvText}
-                  label="Copy the list"
-                  what="Rename list copied, as CSV"
-                  className="!h-11 lg:!h-10"
-                />
-                <button
-                  type="button"
-                  onClick={() => downloadText(csvText, 'rename-list.csv', 'text/csv')}
-                  className="inline-flex h-11 items-center justify-center gap-2 rounded-[11px] bg-well px-3.5 text-[14px] font-medium text-ink-2 transition-colors hover:bg-ink/10 hover:text-ink lg:h-10 lg:text-[13.5px]"
-                >
-                  <Icon name="file-text" size={15} /> List (CSV)
-                </button>
-              </div>
-              <p role="status" className="min-h-5 text-[13px] leading-relaxed text-ink-2">
-                {status}
-              </p>
-              <p className="text-[12.5px] leading-relaxed text-muted">
-                You get renamed copies in one zip; your originals stay exactly as they are. The list
-                has every old and new name.
-              </p>
-            </div>
-          </>
-        </Surface>
-      </aside>
-    </div>
-  );
-}
-
-/** An old name and its new one, with what was removed and what was added marked. */
-function Names({
-  before,
-  after,
-  changed = true,
-}: {
-  before: DiffPart[];
-  after: DiffPart[];
-  changed?: boolean;
-}) {
-  return (
-    <div className="grid gap-x-3 gap-y-0.5 sm:grid-cols-[minmax(0,1fr)_14px_minmax(0,1fr)] sm:items-baseline">
-      <span className="min-w-0 text-[13px] text-muted whitespace-pre-wrap [overflow-wrap:anywhere]">
-        {before.map((part, index) =>
-          part.changed && changed ? (
-            <del
-              key={index}
-              className="rounded-[3px] bg-critical-soft text-ink-2 decoration-critical/60"
-            >
-              {part.text}
-            </del>
-          ) : (
-            <span key={index}>{part.text}</span>
-          ),
-        )}
-      </span>
-      <Icon name="arrow-right" size={13} className="hidden text-faint sm:block" />
-      <span className="sr-only">becomes</span>
-      <span className="flex min-w-0 gap-1.5">
-        <Icon name="arrow-right" size={13} className="mt-[4px] shrink-0 text-faint sm:hidden" />
-        {changed ? (
-          <span className="min-w-0 text-[14px] text-ink whitespace-pre-wrap [overflow-wrap:anywhere]">
-            {after.map((part, index) =>
-              part.changed ? (
-                <ins
-                  key={index}
-                  className="rounded-[3px] text-ink underline decoration-[var(--accent,#c7b5ff)] decoration-2 underline-offset-[3px]"
-                  style={{ background: `color-mix(in oklab, ${ACCENT} 24%, transparent)` }}
-                >
-                  {part.text}
-                </ins>
-              ) : (
-                <span key={index}>{part.text}</span>
-              ),
             )}
-          </span>
-        ) : (
-          <span className="text-[13px] text-faint">No change</span>
+          </div>
+
+          {problemsHere.size > 0 && (
+            <ul className="mt-3 grid gap-1.5 px-1.5 text-[12.5px] leading-relaxed text-muted">
+              {[...problemsHere].map((problem) => (
+                <li key={problem} className="flex gap-2">
+                  <Icon name="alert" size={14} className="mt-[3px] shrink-0 text-caution" />
+                  <span>
+                    <span className="font-medium text-ink-2">{PROBLEMS[problem].label}:</span>{' '}
+                    {PROBLEMS[problem].detail}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <ActionBar className="-mx-3 !mt-3 from-surface px-3 sm:mx-0 sm:px-0">
+            <button
+              type="button"
+              onClick={downloadZip}
+              disabled={busy}
+              className="fx-move inline-flex h-14 w-full items-center justify-center gap-2 rounded-full px-5 text-[16.5px] font-semibold text-[var(--on-accent,#12110d)] shadow-[0_14px_32px_-16px_var(--accent,transparent)] active:scale-[.97] disabled:opacity-45"
+              style={{ background: ACCENT }}
+            >
+              <Icon
+                name={busy ? 'loader' : 'download'}
+                size={19}
+                className={cn(busy && 'animate-spin')}
+              />
+              Download renamed copies
+            </button>
+          </ActionBar>
+          <div className="mt-2 flex flex-wrap items-center justify-center gap-1">
+            <CopyButton
+              text={csvText}
+              label="Copy the list"
+              what="Rename list copied, as CSV"
+              className="!h-10 !rounded-full !bg-transparent hover:!bg-ink/[.06]"
+            />
+            <button
+              type="button"
+              onClick={() => downloadText(csvText, 'rename-list.csv', 'text/csv')}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-full px-3.5 text-[14px] font-medium text-ink-2 transition-colors hover:bg-ink/[.06] hover:text-ink lg:text-[13.5px]"
+            >
+              <Icon name="file-text" size={15} /> List (CSV)
+            </button>
+          </div>
+          <p
+            role="status"
+            className="px-1.5 text-center text-[13px] leading-relaxed text-ink-2 empty:hidden"
+          >
+            {status}
+          </p>
+        </div>
+      </section>
+
+      {/* Fine-tune: every rule a chip, its choices right under it */}
+      <section
+        aria-labelledby={`${id}-rules`}
+        className="order-4 grid min-w-0 gap-3 lg:col-start-1 lg:row-start-3"
+      >
+        <h2 id={`${id}-rules`} className="text-[15px] font-semibold text-ink">
+          Fine-tune
+        </h2>
+        <div className="flex flex-wrap gap-1.5">
+          {RULE_TYPES.map((type) => {
+            const on = activeTypes.includes(type);
+            return (
+              <button
+                key={type}
+                type="button"
+                aria-pressed={on}
+                onClick={() => toggleRule(type)}
+                className={cn(
+                  'fx-move inline-flex min-h-11 items-center gap-1.5 rounded-full px-3.5 text-[14px] font-medium active:scale-[.95] lg:min-h-10 lg:text-[13.5px]',
+                  on
+                    ? 'text-[var(--on-accent,#12110d)] shadow-[0_8px_18px_-12px_var(--accent)]'
+                    : 'bg-ink/[.06] text-ink-2 hover:bg-ink/10 hover:text-ink',
+                )}
+                style={on ? { background: ACCENT } : undefined}
+              >
+                <Icon name={on ? 'check' : RULES[type].icon} size={15} />
+                {RULES[type].title}
+              </button>
+            );
+          })}
+        </div>
+
+        {onRules.length > 0 && (
+          <ul className="grid gap-2">
+            {onRules.map((rule) => (
+              <RuleCard
+                key={rule.id}
+                rule={rule}
+                error={plan.errors[rule.id]}
+                baseId={`${id}-${rule.id}`}
+                onChange={changeRule}
+                onRemove={
+                  rule.type === 'replace' &&
+                  rules.filter((item) => item.type === 'replace').length > 1
+                    ? () => edit(rules.filter((item) => item.id !== rule.id))
+                    : undefined
+                }
+                onAnother={rule.type === 'replace' ? () => addRule('replace') : undefined}
+              />
+            ))}
+          </ul>
         )}
-      </span>
+
+        <Advanced summary={rules.length > 1 ? 'Order, folders' : undefined}>
+          <div className="grid gap-4">
+            {rules.length > 1 && (
+              <div className="grid gap-1.5">
+                <p className="text-[13.5px] font-medium text-ink-2">
+                  Order: changes run top to bottom
+                </p>
+                <ol className="grid gap-1">
+                  {rules.map((rule, index) => (
+                    <li
+                      key={rule.id}
+                      className={cn(
+                        'flex min-h-11 items-center gap-2 rounded-[12px] bg-ink/[.04] pl-3',
+                        !rule.on && 'opacity-55',
+                      )}
+                    >
+                      <span className="mono-num text-[11px] text-faint">{index + 1}</span>
+                      <span className="min-w-0 flex-1 truncate text-[14px] text-ink">
+                        {RULES[rule.type].title}
+                        {!rule.on && <span className="ml-1.5 text-[12px] text-muted">· off</span>}
+                      </span>
+                      <IconButton
+                        icon="arrow-up"
+                        label={`Move ${RULES[rule.type].title} up`}
+                        disabled={index === 0}
+                        onClick={() => moveRule(index, -1)}
+                        className="max-lg:!size-11"
+                      />
+                      <IconButton
+                        icon="arrow-down"
+                        label={`Move ${RULES[rule.type].title} down`}
+                        disabled={index === rules.length - 1}
+                        onClick={() => moveRule(index, 1)}
+                        className="max-lg:!size-11"
+                      />
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
+            {folders.size > 0 && (
+              <Toggle
+                on={keepFolders}
+                onChange={setKeepFolders}
+                label="Keep the folders in the zip"
+                hint={
+                  keepFolders
+                    ? 'Each copy goes in the same folder as its original.'
+                    : 'Every copy side by side; names that clash get (2).'
+                }
+              />
+            )}
+            <p className="text-[12.5px] leading-relaxed text-muted">
+              Rules change the name, never the extension (.jpg, .pdf), except Extension case.
+            </p>
+          </div>
+        </Advanced>
+      </section>
     </div>
   );
 }
 
-function PreviewRow({ row, showFolder }: { row: RenameRow; showFolder: boolean }) {
+/** An old name flipping over to its new one: what went struck, what came lit. */
+function FlipRow({
+  row,
+  index,
+  showFolder = false,
+  compact = false,
+}: {
+  row: RenameRow;
+  index: number;
+  showFolder?: boolean;
+  compact?: boolean;
+}) {
   const diff = useMemo(() => diffNames(row.before, row.after), [row.before, row.after]);
   return (
-    <li className="grid gap-1 px-3.5 py-2.5">
+    <li
+      className={cn(
+        'grid min-w-0 gap-0.5 px-3.5 py-2.5',
+        compact && 'rounded-[14px] bg-ink/[.04] py-2',
+      )}
+    >
       {showFolder && row.folder && (
         <span className="flex items-center gap-1 truncate text-[11.5px] text-faint">
           <Icon name="folder-open" size={12} className="shrink-0" /> {row.folder}
         </span>
       )}
-      <Names before={diff.before} after={diff.after} changed={row.changed} />
+      <span className="min-w-0 text-[12.5px] whitespace-pre-wrap text-muted [overflow-wrap:anywhere]">
+        {row.changed ? (
+          <>
+            <span className="sr-only">From </span>
+            {diff.before.map((part, position) =>
+              part.changed ? (
+                <del
+                  key={position}
+                  className="rounded-[3px] bg-critical-soft px-px text-ink-2 decoration-critical/60"
+                >
+                  {part.text}
+                </del>
+              ) : (
+                <span key={position}>{part.text}</span>
+              ),
+            )}
+          </>
+        ) : (
+          <span className="text-faint">Stays as it is</span>
+        )}
+      </span>
+      <span
+        className={cn(
+          'min-w-0 text-[14.5px] whitespace-pre-wrap text-ink [overflow-wrap:anywhere]',
+          row.changed && 'fx-flip font-medium',
+        )}
+        style={{ '--i': index } as CSSProperties}
+      >
+        {row.changed && <span className="sr-only">to </span>}
+        {row.changed ? <DiffText parts={diff.after} /> : row.before}
+      </span>
       {row.problems.length > 0 && (
         <span className="flex flex-wrap gap-1 pt-0.5">
           {row.problems.map((problem) => (
@@ -881,75 +1001,164 @@ function PreviewRow({ row, showFolder }: { row: RenameRow; showFolder: boolean }
   );
 }
 
-function Check({
-  checked,
-  onChange,
-  children,
-}: {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  children: ReactNode;
-}) {
-  return (
-    <label className="flex min-h-11 cursor-pointer items-start gap-2.5 py-1 text-[14px] text-ink-2 lg:min-h-9 lg:text-[13.5px]">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-        className="mt-[3px] size-[18px] shrink-0 accent-[var(--color-ink)]"
-      />
-      <span>{children}</span>
-    </label>
-  );
-}
-
-/** On or off, without losing the rule's settings. */
-function Switch({
+/** A switch with its words beside it. */
+function Toggle({
   on,
   onChange,
   label,
+  hint,
 }: {
   on: boolean;
   onChange: (on: boolean) => void;
-  label: string;
+  label: ReactNode;
+  hint?: ReactNode;
 }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={on}
-      aria-label={label}
-      title={on ? 'On' : 'Off'}
       onClick={() => onChange(!on)}
-      className="grid h-11 w-14 shrink-0 place-items-center rounded-[12px] hover:bg-ink/5"
+      className="flex min-h-11 w-full items-center gap-3 rounded-[12px] text-left"
     >
       <span
-        className={cn(
-          'relative h-6 w-10 rounded-full transition-colors',
-          on ? 'bg-ink' : 'bg-well shadow-[inset_0_0_0_1px_var(--color-line-strong)]',
-        )}
+        className={cn('fx-move relative h-6 w-10 shrink-0 rounded-full', on ? '' : 'bg-ink/[.12]')}
+        style={on ? { background: 'var(--accent-ink)' } : undefined}
       >
         <span
           className={cn(
-            'absolute top-1 left-1 size-4 rounded-full transition-transform',
-            on ? 'translate-x-4 bg-on-ink' : 'bg-muted',
+            'fx-move absolute top-1 left-1 size-4 rounded-full bg-surface shadow-card',
+            on && 'translate-x-4',
           )}
         />
+      </span>
+      <span className="min-w-0 text-[14px] text-ink">
+        {label}
+        {hint && <span className="block text-[12.5px] text-muted">{hint}</span>}
       </span>
     </button>
   );
 }
 
-/** A whole number typed freely, kept within bounds. */
-function NumberField({
+/** Pick one, tapped: a compact segmented row. */
+function Pills<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: { value: T; label: ReactNode }[];
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label={label}
+      className="flex max-w-full flex-wrap gap-1 rounded-[16px] bg-ink/[.05] p-1"
+    >
+      {options.map((option) => {
+        const on = option.value === value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            onClick={() => onChange(option.value)}
+            className={cn(
+              'fx-move min-h-10 min-w-11 rounded-[12px] px-3 text-[13.5px] font-medium lg:min-h-9',
+              on ? 'bg-surface text-ink shadow-card' : 'text-muted hover:text-ink',
+            )}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** A small on/off chip for a rule's option ("é → e", "Match case"). */
+function OptionChip({
+  on,
+  onChange,
+  children,
+}: {
+  on: boolean;
+  onChange: (on: boolean) => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      onClick={() => onChange(!on)}
+      className={cn(
+        'fx-move inline-flex min-h-10 items-center gap-1.5 rounded-full px-3 text-[13.5px] font-medium active:scale-[.95]',
+        on
+          ? 'bg-ink text-on-ink'
+          : 'bg-ink/[.05] text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line)] hover:text-ink',
+      )}
+    >
+      <Icon name={on ? 'check' : 'plus'} size={14} />
+      {children}
+    </button>
+  );
+}
+
+function TextBox({
   id,
+  label,
+  value,
+  placeholder,
+  mono,
+  invalid,
+  describedBy,
+  maxLength = 100,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  placeholder?: string;
+  mono?: boolean;
+  invalid?: boolean;
+  describedBy?: string;
+  maxLength?: number;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label htmlFor={id} className="grid min-w-0 gap-1">
+      <span className="text-[12.5px] font-medium text-muted">{label}</span>
+      <input
+        id={id}
+        value={value}
+        maxLength={maxLength}
+        spellCheck={false}
+        autoComplete="off"
+        placeholder={placeholder}
+        aria-invalid={invalid || undefined}
+        aria-describedby={describedBy}
+        onChange={(event) => onChange(event.target.value)}
+        className={cn(
+          'h-11 w-full min-w-0 rounded-[12px] bg-surface px-3 text-[16px] text-ink shadow-[inset_0_0_0_1px_var(--color-line-strong)] outline-none placeholder:text-faint focus:shadow-[inset_0_0_0_2px_var(--accent-ink)] lg:h-10 lg:text-[14px]',
+          mono && 'font-mono',
+        )}
+      />
+    </label>
+  );
+}
+
+/** A whole number, nudged with − and + (typing still works). */
+function Nudge({
   label,
   value,
   min,
   max,
   onChange,
 }: {
-  id: string;
   label: string;
   value: number;
   min: number;
@@ -958,138 +1167,99 @@ function NumberField({
 }) {
   const [text, setText] = useState<string | null>(null);
   return (
-    <Field label={label} htmlFor={id}>
-      <Input
-        id={id}
-        inputMode="numeric"
-        autoComplete="off"
-        value={text ?? String(value)}
-        onFocus={() => setText(String(value))}
-        onBlur={() => setText(null)}
-        onChange={(event) => {
-          setText(event.target.value);
-          const parsed = Number.parseInt(event.target.value, 10);
-          if (Number.isFinite(parsed)) onChange(Math.min(max, Math.max(min, parsed)));
-        }}
-        className="num"
-      />
-    </Field>
-  );
-}
-
-function Choice<T extends string>({
-  legend,
-  name,
-  value,
-  options,
-  onChange,
-}: {
-  legend: string;
-  name: string;
-  value: T;
-  options: { value: T; label: ReactNode }[];
-  onChange: (value: T) => void;
-}) {
-  return (
-    <fieldset className="grid min-w-0 gap-1.5">
-      <legend className="mb-1.5 text-[13.5px] font-medium text-ink-2">{legend}</legend>
-      <Segmented name={name} value={value} options={options} onChange={onChange} />
-    </fieldset>
-  );
-}
-
-function RuleCard({
-  rule,
-  index,
-  count,
-  open,
-  error,
-  baseId,
-  onToggle,
-  onChange,
-  onMove,
-  onRemove,
-}: {
-  rule: Rule;
-  index: number;
-  count: number;
-  open: boolean;
-  error?: string;
-  baseId: string;
-  onToggle: () => void;
-  onChange: (rule: Rule) => void;
-  onMove: (by: -1 | 1) => void;
-  onRemove: () => void;
-}) {
-  const { title, icon } = RULES[rule.type];
-  return (
-    <li className="rounded-[16px] bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)]">
-      <div className="flex items-center gap-1 p-1">
+    <div role="group" aria-label={label} className="grid gap-1">
+      <span className="text-[12.5px] font-medium text-muted">{label}</span>
+      <span className="flex items-center rounded-[12px] bg-ink/[.05] p-0.5">
         <button
           type="button"
-          aria-expanded={open}
-          aria-controls={`${baseId}-body`}
-          onClick={onToggle}
-          className="flex min-h-12 min-w-0 flex-1 items-center gap-3 rounded-[12px] px-2.5 py-1.5 text-left transition-colors hover:bg-ink/5"
+          aria-label={`${label}: less`}
+          disabled={value <= min}
+          onClick={() => onChange(Math.max(min, value - 1))}
+          className="grid size-10 place-items-center rounded-[10px] text-ink-2 hover:bg-surface disabled:opacity-35"
         >
-          <span
-            className={cn(
-              'grid size-8 shrink-0 place-items-center rounded-[10px] bg-well text-ink-2',
-              !rule.on && 'opacity-50',
-            )}
-          >
-            <Icon name={icon} size={16} />
-          </span>
-          <span className={cn('min-w-0 flex-1', !rule.on && 'opacity-60')}>
-            <span className="block text-[14.5px] font-medium text-ink">
-              <span className="mono-num mr-1.5 text-[11px] text-faint">{index + 1}</span>
-              {title}
-              {!rule.on && <span className="ml-1.5 text-[12px] font-normal text-muted">· off</span>}
-            </span>
+          <Icon name="minus" size={15} />
+        </button>
+        <input
+          aria-label={label}
+          inputMode="numeric"
+          autoComplete="off"
+          value={text ?? String(value)}
+          onFocus={() => setText(String(value))}
+          onBlur={() => setText(null)}
+          onChange={(event) => {
+            setText(event.target.value);
+            const parsed = Number.parseInt(event.target.value, 10);
+            if (Number.isFinite(parsed)) onChange(Math.min(max, Math.max(min, parsed)));
+          }}
+          className="mono-num h-10 w-full min-w-0 bg-transparent text-center text-[15px] text-ink outline-none"
+        />
+        <button
+          type="button"
+          aria-label={`${label}: more`}
+          disabled={value >= max}
+          onClick={() => onChange(Math.min(max, value + 1))}
+          className="grid size-10 place-items-center rounded-[10px] text-ink-2 hover:bg-surface disabled:opacity-35"
+        >
+          <Icon name="plus" size={15} />
+        </button>
+      </span>
+    </div>
+  );
+}
+
+const INLINE: RuleType[] = ['strip', 'spaces', 'case', 'extension'];
+
+/** An active rule: its name, what it does now, and its choices right there. */
+function RuleCard({
+  rule,
+  error,
+  baseId,
+  onChange,
+  onRemove,
+  onAnother,
+}: {
+  rule: Rule;
+  error?: string;
+  baseId: string;
+  onChange: (rule: Rule) => void;
+  onRemove?: () => void;
+  onAnother?: () => void;
+}) {
+  const { title, icon } = RULES[rule.type];
+  // A rule that's one tap of a choice sits on one line; the choice says what it does.
+  const inline = INLINE.includes(rule.type);
+  return (
+    <li
+      className={cn(
+        'fx-pop grid gap-2.5 rounded-[18px] bg-surface/70 p-3 shadow-[inset_0_0_0_1px_var(--color-line)]',
+        inline && 'sm:flex sm:items-center sm:justify-between sm:gap-3 sm:py-2',
+      )}
+    >
+      <div className="flex min-w-0 items-center gap-2.5">
+        <span className="grid size-8 shrink-0 place-items-center rounded-[10px] bg-ink/[.06] text-ink-2">
+          <Icon name={icon} size={16} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[14px] font-semibold text-ink">{title}</span>
+          {!inline && (
             <span
               className={cn('block truncate text-[12.5px]', error ? 'text-critical' : 'text-muted')}
             >
               {summary(rule, error)}
             </span>
-          </span>
-          <Icon
-            name="chevron-down"
-            size={16}
-            className={cn('shrink-0 text-muted transition-transform', open && 'rotate-180')}
-          />
-        </button>
-        <Switch on={rule.on} onChange={(on) => onChange({ ...rule, on })} label={`Use ${title}`} />
+          )}
+        </span>
+        {onRemove && <IconButton icon="x" label={`Remove this ${title}`} onClick={onRemove} />}
       </div>
-      {open && (
-        <div
-          id={`${baseId}-body`}
-          className="grid animate-fade grid-cols-1 gap-3.5 border-t border-line px-3 pt-3.5 pb-1.5 sm:px-4"
+      <RuleFields rule={rule} error={error} baseId={baseId} onChange={onChange} />
+      {onAnother && (
+        <button
+          type="button"
+          onClick={onAnother}
+          className="inline-flex h-10 items-center gap-1.5 justify-self-start rounded-full px-2.5 text-[13.5px] font-medium text-ink-2 hover:bg-ink/[.06] hover:text-ink"
         >
-          <RuleFields rule={rule} error={error} baseId={baseId} onChange={onChange} />
-          <div className="-mx-1 flex items-center gap-1 border-t border-line pt-1.5">
-            <IconButton
-              icon="arrow-up"
-              label={`Move ${title} up`}
-              disabled={index === 0}
-              onClick={() => onMove(-1)}
-              className="max-lg:!size-11"
-            />
-            <IconButton
-              icon="arrow-down"
-              label={`Move ${title} down`}
-              disabled={index === count - 1}
-              onClick={() => onMove(1)}
-              className="max-lg:!size-11"
-            />
-            <button
-              type="button"
-              onClick={onRemove}
-              className="ml-auto inline-flex h-11 items-center gap-1.5 rounded-[10px] px-3 text-[13.5px] font-medium text-muted transition-colors hover:bg-critical-soft hover:text-critical lg:h-9"
-            >
-              <Icon name="trash" size={15} /> Remove
-            </button>
-          </div>
-        </div>
+          <Icon name="plus" size={14} /> Another find & replace
+        </button>
       )}
     </li>
   );
@@ -1110,41 +1280,27 @@ function RuleFields({
     case 'replace':
       return (
         <>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label={rule.pattern ? 'Find (pattern)' : 'Find'} htmlFor={`${baseId}-find`}>
-              <Input
-                id={`${baseId}-find`}
-                value={rule.find}
-                maxLength={200}
-                spellCheck={false}
-                autoComplete="off"
-                placeholder={rule.pattern ? '^IMG_(\\d+)' : 'IMG_'}
-                aria-invalid={error ? true : undefined}
-                aria-describedby={error ? `${baseId}-error` : undefined}
-                onChange={(event) => onChange({ ...rule, find: event.target.value })}
-                className={cn(rule.pattern && 'font-mono')}
-              />
-            </Field>
-            <Field
-              label="Replace with"
-              htmlFor={`${baseId}-with`}
-              hint={
-                rule.pattern
-                  ? 'Use $1, $2… for what each bracket found.'
-                  : 'Leave it empty to remove what’s found.'
-              }
-            >
-              <Input
-                id={`${baseId}-with`}
-                value={rule.with}
-                maxLength={200}
-                spellCheck={false}
-                autoComplete="off"
-                placeholder={rule.pattern ? 'Photo $1' : 'Nothing'}
-                onChange={(event) => onChange({ ...rule, with: event.target.value })}
-                className={cn(rule.pattern && 'font-mono')}
-              />
-            </Field>
+          <div className="grid grid-cols-2 gap-2">
+            <TextBox
+              id={`${baseId}-find`}
+              label={rule.pattern ? 'Find (pattern)' : 'Find'}
+              value={rule.find}
+              maxLength={200}
+              mono={rule.pattern}
+              placeholder={rule.pattern ? '^IMG_(\\d+)' : 'IMG_'}
+              invalid={!!error}
+              describedBy={error ? `${baseId}-error` : undefined}
+              onChange={(find) => onChange({ ...rule, find })}
+            />
+            <TextBox
+              id={`${baseId}-with`}
+              label="With"
+              value={rule.with}
+              maxLength={200}
+              mono={rule.pattern}
+              placeholder={rule.pattern ? 'Photo $1' : 'Nothing'}
+              onChange={(value) => onChange({ ...rule, with: value })}
+            />
           </div>
           {error && (
             <p
@@ -1155,55 +1311,47 @@ function RuleFields({
               {error}
             </p>
           )}
-          <div className="flex flex-wrap gap-x-6">
-            <Check
-              checked={rule.matchCase}
+          <div className="flex flex-wrap gap-1.5">
+            <OptionChip
+              on={rule.matchCase}
               onChange={(matchCase) => onChange({ ...rule, matchCase })}
             >
               Match case
-            </Check>
-            <Check checked={rule.pattern} onChange={(pattern) => onChange({ ...rule, pattern })}>
-              Pattern <span className="text-muted">(regular expression, for experts)</span>
-            </Check>
+            </OptionChip>
+            <OptionChip on={rule.pattern} onChange={(pattern) => onChange({ ...rule, pattern })}>
+              Pattern (regex)
+            </OptionChip>
           </div>
+          {rule.pattern && (
+            <p className="text-[12.5px] text-muted">Use $1, $2… for what each bracket found.</p>
+          )}
         </>
       );
     case 'strip':
       return (
-        <>
-          <p className="text-[13px] leading-relaxed text-muted">
-            Removes emoji, symbols and invisible characters. Keeps letters (accents too), digits,
-            spaces and <span className="mono-num text-ink-2">- _ . ( )</span>
-          </p>
-          <Check checked={rule.plain} onChange={(plain) => onChange({ ...rule, plain })}>
-            Also turn accented letters into plain ones (é → e)
-          </Check>
-        </>
+        <div className="flex flex-wrap gap-1.5">
+          <OptionChip on={rule.plain} onChange={(plain) => onChange({ ...rule, plain })}>
+            Plain letters too: é → e
+          </OptionChip>
+        </div>
       );
     case 'spaces':
       return (
-        <>
-          <Choice
-            legend="Spaces"
-            name={`${baseId}-to`}
-            value={rule.to}
-            onChange={(to) => onChange({ ...rule, to })}
-            options={[
-              { value: ' ', label: 'Keep' },
-              { value: '-', label: 'Into -' },
-              { value: '_', label: 'Into _' },
-            ]}
-          />
-          <p className="text-[12.5px] text-muted">
-            Always trims the ends and turns runs of spaces into one.
-          </p>
-        </>
+        <Pills
+          label="Spaces"
+          value={rule.to}
+          onChange={(to) => onChange({ ...rule, to })}
+          options={[
+            { value: ' ', label: 'Keep spaces' },
+            { value: '-', label: 'Into -' },
+            { value: '_', label: 'Into _' },
+          ]}
+        />
       );
     case 'case':
       return (
-        <Choice
-          legend="Make names"
-          name={`${baseId}-to`}
+        <Pills
+          label="Make names"
           value={rule.to}
           onChange={(to) => onChange({ ...rule, to })}
           options={[
@@ -1217,79 +1365,27 @@ function RuleFields({
     case 'prefix':
     case 'suffix':
       return (
-        <Field
-          label={
-            rule.type === 'prefix' ? 'Text to add before each name' : 'Text to add after each name'
-          }
-          htmlFor={`${baseId}-text`}
-          hint={
-            rule.type === 'suffix' ? 'It goes before the extension: photo-final.jpg.' : undefined
-          }
-        >
-          <Input
-            id={`${baseId}-text`}
-            value={rule.text}
-            maxLength={100}
-            autoComplete="off"
-            placeholder={rule.type === 'prefix' ? 'Kitchen ' : ' final'}
-            onChange={(event) => onChange({ ...rule, text: event.target.value })}
-          />
-        </Field>
+        <TextBox
+          id={`${baseId}-text`}
+          label={rule.type === 'prefix' ? 'Before each name' : 'After each name'}
+          value={rule.text}
+          placeholder={rule.type === 'prefix' ? 'Kitchen ' : ' final'}
+          onChange={(text) => onChange({ ...rule, text })}
+        />
       );
     case 'number':
       return (
         <>
-          <Field
-            label="New name"
-            htmlFor={`${baseId}-name`}
-            optional
-            hint="Type one to give every file the same name plus its number: Kitchen 01, Kitchen 02… Leave it empty to number the names as they are."
-          >
-            <Input
-              id={`${baseId}-name`}
-              value={rule.name}
-              maxLength={100}
-              autoComplete="off"
-              placeholder="Keep each name"
-              onChange={(event) => onChange({ ...rule, name: event.target.value })}
-            />
-          </Field>
-          <div className="grid grid-cols-3 gap-2.5">
-            <NumberField
-              id={`${baseId}-start`}
-              label="Start at"
-              value={rule.start}
-              min={0}
-              max={999_999}
-              onChange={(start) => onChange({ ...rule, start })}
-            />
-            <NumberField
-              id={`${baseId}-step`}
-              label="Count by"
-              value={rule.step}
-              min={1}
-              max={1000}
-              onChange={(step) => onChange({ ...rule, step })}
-            />
-            <Field label="Digits" htmlFor={`${baseId}-digits`}>
-              <Select
-                id={`${baseId}-digits`}
-                value={String(rule.digits)}
-                onChange={(event) => onChange({ ...rule, digits: Number(event.target.value) })}
-              >
-                <option value="0">Auto</option>
-                <option value="1">1</option>
-                <option value="2">01</option>
-                <option value="3">001</option>
-                <option value="4">0001</option>
-                <option value="5">00001</option>
-              </Select>
-            </Field>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,.8fr)]">
-            <Choice
-              legend="Where"
-              name={`${baseId}-at`}
+          <TextBox
+            id={`${baseId}-name`}
+            label="One name for all (optional)"
+            value={rule.name}
+            placeholder="Keep each name"
+            onChange={(name) => onChange({ ...rule, name })}
+          />
+          <div className="flex flex-wrap gap-2">
+            <Pills
+              label="Where"
               value={rule.at}
               onChange={(at) => onChange({ ...rule, at })}
               options={[
@@ -1297,78 +1393,91 @@ function RuleFields({
                 { value: 'end', label: 'After' },
               ]}
             />
-            <Field label="Between name and number" htmlFor={`${baseId}-separator`}>
-              <Select
-                id={`${baseId}-separator`}
-                value={rule.separator}
-                onChange={(event) => onChange({ ...rule, separator: event.target.value })}
-              >
-                {SEPARATORS.map((option) => (
-                  <option key={option.label} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          </div>
-          <Field
-            label="Number them"
-            htmlFor={`${baseId}-order`}
-            hint="The preview lists files in this order too."
-          >
-            <Select
-              id={`${baseId}-order`}
+            <Pills
+              label="Number them"
               value={rule.order}
-              onChange={(event) => onChange({ ...rule, order: event.target.value as Order })}
-            >
-              {ORDERS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
+              onChange={(order) => onChange({ ...rule, order })}
+              options={ORDERS.map((option) => ({ value: option.value, label: option.label }))}
+            />
+          </div>
+          <Advanced>
+            <div className="grid gap-3">
+              <div className="grid grid-cols-2 gap-2">
+                <Nudge
+                  label="Start at"
+                  value={rule.start}
+                  min={0}
+                  max={999_999}
+                  onChange={(start) => onChange({ ...rule, start })}
+                />
+                <Nudge
+                  label="Count by"
+                  value={rule.step}
+                  min={1}
+                  max={1000}
+                  onChange={(step) => onChange({ ...rule, step })}
+                />
+              </div>
+              <div className="grid gap-1">
+                <span className="text-[12.5px] font-medium text-muted">Digits</span>
+                <Pills
+                  label="Digits"
+                  value={String(rule.digits)}
+                  onChange={(digits) => onChange({ ...rule, digits: Number(digits) })}
+                  options={[
+                    { value: '0', label: 'Auto' },
+                    { value: '1', label: '1' },
+                    { value: '2', label: '01' },
+                    { value: '3', label: '001' },
+                    { value: '4', label: '0001' },
+                    { value: '5', label: '00001' },
+                  ]}
+                />
+              </div>
+              <div className="grid gap-1">
+                <span className="text-[12.5px] font-medium text-muted">
+                  Between name and number
+                </span>
+                <Pills
+                  label="Between name and number"
+                  value={rule.separator}
+                  onChange={(separator) => onChange({ ...rule, separator })}
+                  options={SEPARATORS}
+                />
+              </div>
+            </div>
+          </Advanced>
         </>
       );
     case 'date':
       return (
         <>
-          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,.8fr)]">
-            <Choice
-              legend="Where"
-              name={`${baseId}-at`}
+          <div className="flex flex-wrap gap-2">
+            <Pills
+              label="Where"
               value={rule.at}
               onChange={(at) => onChange({ ...rule, at })}
               options={[
-                { value: 'start', label: 'Before' },
-                { value: 'end', label: 'After' },
+                { value: 'start', label: 'Date first' },
+                { value: 'end', label: 'Date last' },
               ]}
             />
-            <Field label="Between name and date" htmlFor={`${baseId}-separator`}>
-              <Select
-                id={`${baseId}-separator`}
-                value={rule.separator}
-                onChange={(event) => onChange({ ...rule, separator: event.target.value })}
-              >
-                {SEPARATORS.map((option) => (
-                  <option key={option.label} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </Select>
-            </Field>
+            <Pills
+              label="Between name and date"
+              value={rule.separator}
+              onChange={(separator) => onChange({ ...rule, separator })}
+              options={SEPARATORS}
+            />
           </div>
           <p className="text-[12.5px] leading-relaxed text-muted">
-            Each file’s last-modified date, as your device reports it (2026-05-03). For photos
-            that’s not always the day they were taken.
+            The date each file was last changed. For photos that’s not always the day taken.
           </p>
         </>
       );
     case 'extension':
       return (
-        <Choice
-          legend="Extensions"
-          name={`${baseId}-to`}
+        <Pills
+          label="Extensions"
           value={rule.to}
           onChange={(to) => onChange({ ...rule, to })}
           options={[

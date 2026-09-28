@@ -693,3 +693,65 @@ export function sheetSvg(sheet: ReturnType<typeof swatchSheet>) {
     '</svg>',
   ].join('\n');
 }
+
+/* ---------------- lighting the room ---------------- */
+
+/** How vivid a color reads: its OKLab chroma, favouring the mid tones over near-black and white. */
+export function vividness(rgb: Rgb) {
+  const { l, a, b } = rgbToOklab(rgb);
+  const chroma = Math.hypot(a, b);
+  const tone = 1 - Math.min(1, Math.abs(l - 0.68) / 0.45);
+  return chroma * (0.35 + 0.65 * tone);
+}
+
+const hueOf = (rgb: Rgb) => {
+  const { a, b } = rgbToOklab(rgb);
+  return (Math.atan2(b, a) * 180) / Math.PI;
+};
+const hueGap = (x: Rgb, y: Rgb) => {
+  const gap = Math.abs(hueOf(x) - hueOf(y)) % 360;
+  return gap > 180 ? 360 - gap : gap;
+};
+
+/** Darkened (in OKLab lightness) until it reads as text on white at `minimum` contrast. */
+export function inkFor(color: Rgb, minimum = 4.8): Rgb {
+  const lab = rgbToOklab(color);
+  let ink = color;
+  for (let l = lab.l; contrastRatio(ink, WHITE) < minimum && l > 0.05; l -= 0.02)
+    ink = oklabToRgb({ ...lab, l });
+  return ink;
+}
+
+export type RoomColors = {
+  accent: string;
+  glow: string;
+  third: string;
+  /** The accent dark enough to read as text on white. */
+  accentInk: string;
+  /** Text on the accent. */
+  onAccent: string;
+};
+
+/**
+ * The colors a palette lights its room with: the most vivid one as the accent, the most vivid of
+ * a clearly different hue as the glow, and the next as the third. Null for a palette with nothing
+ * vivid in it (greys, black and white): the room keeps its own colors.
+ */
+export function roomColors(colors: Rgb[]): RoomColors | null {
+  const ranked = colors
+    .map((rgb) => ({ rgb, score: vividness(rgb) }))
+    .sort((x, y) => y.score - x.score);
+  if (!ranked.length || ranked[0].score < 0.045) return null;
+  const accent = ranked[0].rgb;
+  const rest = ranked.slice(1);
+  const glow = (rest.find((item) => item.score >= 0.03 && hueGap(item.rgb, accent) > 40) ?? rest[0])
+    ?.rgb;
+  const third = rest.find((item) => item.rgb !== glow)?.rgb;
+  return {
+    accent: rgbToHex(accent),
+    glow: rgbToHex(glow ?? accent),
+    third: rgbToHex(third ?? glow ?? accent),
+    accentInk: rgbToHex(inkFor(accent)),
+    onAccent: textOn(accent).text === 'white' ? '#ffffff' : '#12110d',
+  };
+}

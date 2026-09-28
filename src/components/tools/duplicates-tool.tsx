@@ -1,8 +1,7 @@
 'use client';
-import { useEffect, useId, useMemo, useRef, useState, type DragEvent } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { cn } from '@/components/ui/cn';
-import { Segmented } from '@/components/ui/form';
-import { Icon } from '@/components/ui/icon';
+import { Icon, type IconName } from '@/components/ui/icon';
 import { downloadText } from '@/lib/files/download';
 import { plural } from '@/lib/platform/format';
 import {
@@ -21,16 +20,21 @@ import {
   type ScanFile,
 } from '@/lib/tools/duplicates';
 import { folderOf, splitName } from '@/lib/tools/rename';
-import { FileDrop, Note, SampleButton, StartPanel, Surface } from './kit';
+import { AddMore } from './clean-add-more';
+import { CountUp, MoreOptions, Payoff, SampleButton } from './kit';
 
 /*
  * Duplicates: exact copies among the files or folder a person chooses. Sizes are compared first;
- * only files that share a size are read, one at a time, and fingerprinted on this device. The
- * result is a list with a suggested copy to keep in each group. Nothing is changed or deleted:
- * a web page can't, and this one doesn't try.
+ * only files that share a size are read, one at a time, and fingerprinted on this device. Each set
+ * of copies is shown as matching cards drawn together, the one to keep lit and the extras marked;
+ * a tap on a card keeps that one instead. Nothing is changed or deleted: a web page can't, and
+ * this one doesn't try. The list of copies downloads as a CSV.
  */
 
-const ACCENT = 'var(--accent, #9fb2ff)';
+const ACCENT = 'var(--accent, #ffa24c)';
+/** A counting number in the headline's own type (CountUp is monospaced by default). */
+const DISPLAY_NUMBER =
+  '![font-family:inherit] ![font-variation-settings:inherit] ![letter-spacing:inherit]';
 /** Groups (and name clashes) shown at a time; the rest are a tap away. */
 const PAGE = 20;
 
@@ -113,43 +117,183 @@ function sampleFiles() {
   });
 }
 
-/** A folder with the same file in it three times: two of them extra. */
-function DuplicatesArt() {
+/** A file's kind, as a little colored tile: photos, documents, sound, the rest. */
+const KINDS: { test: RegExp; icon: IconName; tint: string }[] = [
+  {
+    test: /^(jpe?g|png|gif|webp|heic|heif|avif|tiff?|bmp|raw|cr2|nef|dng)$/i,
+    icon: 'image',
+    tint: '#ffcf8a',
+  },
+  { test: /^(pdf)$/i, icon: 'pdf', tint: '#ffb3a1' },
+  { test: /^(mp3|m4a|wav|aac|flac|ogg)$/i, icon: 'music', tint: '#d9c8ff' },
+  { test: /^(mp4|mov|m4v|avi|mkv|webm)$/i, icon: 'video', tint: '#a9d8ff' },
+  { test: /^(txt|md|docx?|rtf|pages|odt|csv|xlsx?|numbers)$/i, icon: 'file-text', tint: '#c9e7b5' },
+];
+function kindOf(name: string) {
+  const extension = splitName(name).extension;
+  const kind = KINDS.find((item) => item.test.test(extension));
+  return { extension, icon: kind?.icon ?? ('files' as IconName), tint: kind?.tint ?? '#e7c7a3' };
+}
+
+/** Two matching files, drawn together: the whole tool, as a picture. */
+function PairArt() {
   return (
-    <div aria-hidden="true" className="relative mx-auto h-[118px] w-[250px]">
-      <span className="absolute inset-x-6 top-5 bottom-0 rounded-[18px] bg-well shadow-[inset_0_0_0_1px_var(--color-line)]" />
-      <span className="absolute top-2 left-6 h-6 w-20 rounded-t-[12px] bg-well" />
-      {[0, 1, 2].map((index) => (
+    <div
+      aria-hidden="true"
+      className="relative mx-auto flex h-[132px] w-[248px] items-center justify-center"
+    >
+      {[0, 1].map((side) => (
         <span
-          key={index}
+          key={side}
           className={cn(
-            'absolute top-9 grid h-[66px] w-[54px] place-items-center rounded-[10px] bg-white shadow-lift',
-            index > 0 && 'opacity-80',
+            'relative grid h-[112px] w-[86px] place-items-center rounded-[14px] bg-surface shadow-lift',
+            side === 0 ? 'fx-pair-l -rotate-6' : 'fx-pair-r rotate-6 opacity-90',
           )}
-          style={{
-            left: `${52 + index * 52}px`,
-            transform: `rotate(${[-6, 0, 6][index]}deg)`,
-          }}
+          style={{ animationDelay: '120ms' }}
         >
           <span
-            className="block size-7 rounded-[7px]"
-            style={{ background: 'linear-gradient(160deg,#f6b77a,#8a6a4f)' }}
+            className="block size-12 rounded-[10px]"
+            style={{ background: 'linear-gradient(160deg,#ffcf8a,#ff8a3d 60%,#b35300)' }}
           />
-          {index > 0 && (
+          <span className="absolute bottom-3 left-3 h-1.5 w-10 rounded-full bg-ink/15" />
+          {side === 1 && (
             <span
-              className="absolute -top-2 -right-2 grid size-6 place-items-center rounded-full text-[#12110d] shadow-lift"
+              className="absolute -top-2.5 -right-2.5 grid size-7 place-items-center rounded-full text-[var(--on-accent,#12110d)] shadow-lift"
               style={{ background: ACCENT }}
             >
-              <Icon name="copy" size={12} />
+              <Icon name="copy" size={14} />
             </span>
           )}
         </span>
       ))}
+      <span
+        className="fx-pop absolute grid size-9 place-items-center rounded-full bg-ink text-[18px] font-bold text-on-ink shadow-lift"
+        style={{ animationDelay: '380ms' }}
+      >
+        =
+      </span>
     </div>
   );
 }
 
-const hasFiles = (event: DragEvent) => Array.from(event.dataTransfer.types).includes('Files');
+/**
+ * The way in: a folder, above all. Shaped like the other tools' drop objects; files or a folder
+ * dragged anywhere over the page light it up and count.
+ */
+function FolderDrop({
+  onFiles,
+  onSample,
+}: {
+  onFiles: (files: File[]) => void;
+  onSample: () => void;
+}) {
+  const folderInput = useRef<HTMLInputElement>(null);
+  const filesInput = useRef<HTMLInputElement>(null);
+  const take = useRef(onFiles);
+  const [lit, setLit] = useState(false);
+  useEffect(() => {
+    take.current = onFiles;
+  });
+  useEffect(() => {
+    let depth = 0;
+    const has = (event: DragEvent) => !!event.dataTransfer?.types.includes('Files');
+    const enter = (event: DragEvent) => {
+      if (!has(event)) return;
+      depth += 1;
+      setLit(true);
+    };
+    const leave = () => {
+      depth = Math.max(0, depth - 1);
+      if (!depth) setLit(false);
+    };
+    const over = (event: DragEvent) => {
+      if (has(event)) event.preventDefault();
+    };
+    const drop = (event: DragEvent) => {
+      depth = 0;
+      setLit(false);
+      if (!event.dataTransfer?.files.length) return;
+      event.preventDefault();
+      take.current(Array.from(event.dataTransfer.files));
+    };
+    window.addEventListener('dragenter', enter);
+    window.addEventListener('dragleave', leave);
+    window.addEventListener('dragover', over);
+    window.addEventListener('drop', drop);
+    return () => {
+      window.removeEventListener('dragenter', enter);
+      window.removeEventListener('dragleave', leave);
+      window.removeEventListener('dragover', over);
+      window.removeEventListener('drop', drop);
+    };
+  }, []);
+  const pick = (list: FileList | null) => {
+    const files = Array.from(list ?? []);
+    if (files.length) onFiles(files);
+  };
+  return (
+    <div className="flex min-w-0 flex-col items-center">
+      <div
+        data-shape="files"
+        className={cn(
+          'drop-object fx-move relative flex w-full flex-col items-center justify-center text-center',
+          lit && 'is-lit',
+        )}
+      >
+        <PairArt />
+        <p className="mt-4 font-display text-[26px] leading-[1.02] font-bold tracking-[-0.03em] text-balance text-ink sm:text-[32px]">
+          {lit ? 'Let go to check' : 'Which folder?'}
+        </p>
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+          <button
+            type="button"
+            onClick={() => folderInput.current?.click()}
+            className="inline-flex h-13 items-center gap-2 rounded-full px-6 text-[16px] font-semibold text-[var(--on-accent,#12110d)] shadow-[0_14px_30px_-16px_var(--accent)] transition-transform active:scale-[.97]"
+            style={{ background: ACCENT }}
+          >
+            <Icon name="folder-open" size={18} /> Choose a folder
+          </button>
+          <button
+            type="button"
+            onClick={() => filesInput.current?.click()}
+            className="inline-flex h-13 items-center gap-2 rounded-full bg-ink/[.06] px-5 text-[15px] font-medium text-ink-2 hover:bg-ink/10 hover:text-ink"
+          >
+            <Icon name="files" size={17} /> Some files
+          </button>
+        </div>
+      </div>
+      <input
+        ref={folderInput}
+        type="file"
+        multiple
+        className="sr-only"
+        tabIndex={-1}
+        aria-label="Choose a folder"
+        // A folder picker: every file inside, with its path.
+        {...({ webkitdirectory: '' } as Record<string, string>)}
+        onChange={(event) => {
+          pick(event.target.files);
+          event.target.value = '';
+        }}
+      />
+      <input
+        ref={filesInput}
+        type="file"
+        multiple
+        className="sr-only"
+        tabIndex={-1}
+        aria-label="Choose files"
+        onChange={(event) => {
+          pick(event.target.files);
+          event.target.value = '';
+        }}
+      />
+      <SampleButton onClick={onSample} className="mt-3">
+        Try a sample folder
+      </SampleButton>
+    </div>
+  );
+}
 
 export function DuplicatesTool() {
   const id = useId();
@@ -167,8 +311,6 @@ export function DuplicatesTool() {
   const scan = useRef<AbortController | null>(null);
   const nextId = useRef(0);
   const painted = useRef(0);
-  const folderInput = useRef<HTMLInputElement>(null);
-  const filesInput = useRef<HTMLInputElement>(null);
 
   // Leaving the page stops a scan that's still reading.
   useEffect(() => {
@@ -295,81 +437,13 @@ export function DuplicatesTool() {
 
   if (!entries.length)
     return (
-      <div
-        onDragOver={(event) => {
-          if (!hasFiles(event)) return;
-          event.preventDefault();
-          event.dataTransfer.dropEffect = 'copy';
-        }}
-        onDrop={(event) => {
-          if (!hasFiles(event)) return;
-          event.preventDefault();
-          take(Array.from(event.dataTransfer.files));
-        }}
-      >
-        <StartPanel
-          art={<DuplicatesArt />}
-          title="Find the copies taking up space"
-          lead="Choose a folder and every exact copy turns up, even under another name."
-          footer={
-            <Note icon="shield-check" className="text-left">
-              Nothing is moved or deleted. You get a list with the one to keep already suggested,
-              and you decide.
-            </Note>
-          }
-        >
-          <div className="grid gap-2 sm:mx-auto sm:max-w-[360px]">
-            <button
-              type="button"
-              onClick={() => folderInput.current?.click()}
-              className="inline-flex h-14 items-center justify-center gap-2 rounded-[16px] px-5 text-[16.5px] font-semibold text-[#12110d] shadow-[0_14px_32px_-16px_var(--accent,transparent)] transition-transform active:scale-[.985] sm:h-13 sm:text-[16px]"
-              style={{ background: ACCENT }}
-            >
-              <Icon name="folder-open" size={19} /> Choose a folder
-            </button>
-            <button
-              type="button"
-              onClick={() => filesInput.current?.click()}
-              className="inline-flex h-12 items-center justify-center gap-2 rounded-[14px] px-4 text-[15px] font-medium text-ink-2 transition-colors hover:bg-ink/5 hover:text-ink"
-            >
-              Or pick some files
-            </button>
-          </div>
-          <input
-            ref={folderInput}
-            type="file"
-            multiple
-            className="sr-only"
-            tabIndex={-1}
-            aria-label="Choose a folder"
-            // A folder picker: every file inside, with its path.
-            {...({ webkitdirectory: '' } as Record<string, string>)}
-            onChange={(event) => {
-              take(Array.from(event.target.files ?? []));
-              event.target.value = '';
-            }}
-          />
-          <input
-            ref={filesInput}
-            type="file"
-            multiple
-            className="sr-only"
-            tabIndex={-1}
-            aria-label="Choose files"
-            onChange={(event) => {
-              take(Array.from(event.target.files ?? []));
-              event.target.value = '';
-            }}
-          />
-          <SampleButton onClick={() => add(sampleFiles())} className="mt-3">
-            Try a sample folder with copies in it
-          </SampleButton>
-          {note && (
-            <p role="status" className="mt-2 text-[13px] leading-relaxed text-ink-2">
-              {note}
-            </p>
-          )}
-        </StartPanel>
+      <div className="mx-auto grid w-full max-w-[600px] gap-3 pt-2 pb-6 sm:pt-4">
+        <FolderDrop onFiles={take} onSample={() => add(sampleFiles())} />
+        {note && (
+          <p role="status" className="text-center text-[13.5px] leading-relaxed text-ink-2">
+            {note}
+          </p>
+        )}
       </div>
     );
 
@@ -379,481 +453,478 @@ export function DuplicatesTool() {
       : 0;
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:items-start">
-      <Surface className="grid grid-cols-1 gap-4 lg:col-start-1 lg:row-start-1">
-        <>
-          <div className="flex items-center gap-3">
-            <span
-              className="grid size-11 shrink-0 place-items-center rounded-[12px] text-[#12110d]"
-              style={{ background: ACCENT }}
-            >
-              <Icon name="folder-search" size={20} />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-[15px] font-semibold text-ink">
-                {plural(entries.length, 'file')} · {formatSize(totalBytes)}
-              </p>
-              <p className="truncate text-[13px] text-muted">
-                {onlyNames
-                  ? 'Chosen one by one'
-                  : `${tops.size === 1 ? `From “${[...tops][0]}”` : 'From several folders'} · ${plural(folders.size, 'folder')}`}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={startOver}
-              className="h-11 shrink-0 rounded-[11px] px-3.5 text-[14px] font-medium text-ink-2 hover:bg-ink/5 hover:text-ink lg:h-9 lg:text-[13.5px]"
-            >
-              Start over
-            </button>
-          </div>
-          <FileDrop
-            folder
-            compact
-            disabled={phase === 'running'}
-            onFiles={(files) =>
-              add(files.map((file) => ({ file, path: file.webkitRelativePath || file.name })))
-            }
-            icon="plus"
-            title="Add another folder or more files"
-          />
-        </>
-        {note && (
-          <p role="status" className="text-[13px] leading-relaxed text-ink-2">
-            {note}
+    <div className="mx-auto grid w-full max-w-[980px] gap-5 pb-4">
+      {/* What's here */}
+      <div className="flex min-w-0 items-center gap-3">
+        <span
+          className="grid size-11 shrink-0 place-items-center rounded-[13px] text-[var(--on-accent,#12110d)]"
+          style={{ background: ACCENT }}
+        >
+          <Icon name="folder-search" size={20} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[15px] font-semibold text-ink">
+            {plural(entries.length, 'file')} · {formatSize(totalBytes)}
           </p>
-        )}
-      </Surface>
-
-      <aside
-        aria-label="Summary"
-        className={cn(
-          'min-w-0 grid-cols-1 gap-4 lg:sticky lg:top-24 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:grid lg:self-start',
-          phase === 'idle' ? 'hidden' : 'grid',
-        )}
-      >
-        <Surface className="grid grid-cols-1 gap-4">
-          {phase === 'idle' && (
-            <>
-              <p className="label">How it finds copies</p>
-              <ol className="grid gap-3.5">
-                {[
-                  'Choose a folder, or a pile of files.',
-                  'Each file’s contents are compared, so a copy is found even under another name.',
-                  'You get a list of copies, with the one to keep already suggested.',
-                ].map((step, index) => (
-                  <li key={step} className="flex gap-3 text-[14px] leading-snug text-ink-2">
-                    <span
-                      className="mono-num grid size-6 shrink-0 place-items-center rounded-full text-[11px] font-semibold text-[#12110d]"
-                      style={{ background: ACCENT }}
-                    >
-                      {index + 1}
-                    </span>
-                    {step}
-                  </li>
-                ))}
-              </ol>
-              <Note icon="shield-check">
-                It never deletes anything. You get a clear list, with a suggested copy to keep in
-                each group, and you decide.
-              </Note>
-            </>
-          )}
-
-          {phase === 'running' && (
-            <div className="grid grid-cols-1 gap-3" aria-live="polite">
-              <p className="label">Looking for copies</p>
-              <p className="text-[13.5px] leading-relaxed text-ink-2">
-                Checking {plural(entries.length, 'file')}.
-                {sizes.skipped.length > 0 &&
-                  ` ${plural(sizes.skipped.length, 'is', 'are')} too big to check here (over 2 GB).`}
-              </p>
-              <div
-                role="progressbar"
-                aria-label="Reading files"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={percent}
-                aria-valuetext={
-                  progress ? `${progress.done} of ${progress.total} files` : 'Starting'
-                }
-                className="h-2.5 overflow-hidden rounded-full bg-well"
-              >
-                <div
-                  className="h-full rounded-full transition-[width] duration-200"
-                  style={{ width: `${percent}%`, background: ACCENT }}
-                />
-              </div>
-              <p className="mono-num text-[13px] text-ink-2">
-                {progress
-                  ? `${progress.done.toLocaleString('en-US')} of ${plural(progress.total, 'file')} · ${formatSize(progress.bytesDone)} of ${formatSize(progress.bytesTotal)}`
-                  : 'Starting…'}
-              </p>
-              {progress?.current && (
-                <p className="truncate text-[12.5px] text-muted">Reading {progress.current.path}</p>
-              )}
-              {progress?.current && progress.current.size >= LARGE_FILE && (
-                <Note icon="alert" tone="caution">
-                  A big one: “{progress.current.name}” is {formatSize(progress.current.size)}.
-                  Reading it can take a minute and a lot of memory, and this page may feel slow
-                  until it’s done.
-                </Note>
-              )}
-              <button
-                type="button"
-                disabled={stopping}
-                onClick={() => {
-                  setStopping(true);
-                  scan.current?.abort();
-                }}
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-[11px] bg-well px-4 text-[14.5px] font-medium text-ink-2 hover:bg-ink/10 hover:text-ink disabled:opacity-60 lg:h-10 lg:text-[13.5px]"
-              >
-                <Icon name="x" size={15} />
-                {stopping ? 'Stopping after this file…' : 'Stop'}
-              </button>
-            </div>
-          )}
-
-          {checked && (
-            <>
-              <div aria-live="polite">
-                <p className="label">Exact copies</p>
-                {total.groups ? (
-                  <>
-                    <p
-                      className="mt-2 font-display text-[44px] leading-none font-extrabold tracking-[-0.04em] text-ink"
-                      style={{ fontVariationSettings: "'wdth' 110" }}
-                    >
-                      {formatSize(total.wasted)}
-                    </p>
-                    <p className="mt-2 text-[14.5px] text-ink-2">
-                      {plural(total.copies, 'extra copy', 'extra copies')} ·{' '}
-                      {formatSize(total.wasted)} you could free
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <p className="mt-2 text-[20px] font-semibold text-ink">No exact copies</p>
-                    <p className="mt-1 text-[14px] text-ink-2">
-                      {phase === 'stopped'
-                        ? 'None among the files checked so far.'
-                        : `Every one of the ${plural(entries.length, 'file')} is one of a kind.`}
-                    </p>
-                  </>
-                )}
-                <p className="mt-2 text-[12.5px] leading-relaxed text-muted">
-                  {total.groups ? `In ${plural(total.groups, 'group')}, among ` : 'Checked '}
-                  {plural(entries.length, 'file')} ({formatSize(totalBytes)}).
-                </p>
-              </div>
-
-              {phase === 'stopped' && (
-                <Note icon="alert" tone="caution">
-                  <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <span>
-                      Stopped early, with {read.toLocaleString('en-US')} of{' '}
-                      {plural(sizes.candidates.length, 'file')} checked. The results cover only
-                      those.
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => run(entries, hashes)}
-                      className="inline-flex min-h-11 items-center font-semibold underline underline-offset-2 lg:min-h-0"
-                    >
-                      Carry on
-                    </button>
-                  </span>
-                </Note>
-              )}
-
-              {total.groups > 0 && (
-                <>
-                  <fieldset className="grid gap-1.5">
-                    <legend className="mb-1.5 text-[13.5px] font-medium text-ink-2">
-                      Suggest keeping
-                    </legend>
-                    <Segmented
-                      name={`${id}-keep`}
-                      value={keepRule}
-                      onChange={(rule) => {
-                        setKeepRule(rule);
-                        setPicks({});
-                      }}
-                      options={[
-                        { value: 'oldest', label: 'The oldest' },
-                        { value: 'shortest', label: 'The shortest path' },
-                      ]}
-                    />
-                    <p className="text-[12.5px] text-muted">
-                      A suggestion for every group. Change any of them below.
-                    </p>
-                  </fieldset>
-                  <button
-                    type="button"
-                    onClick={downloadReport}
-                    className="inline-flex h-14 items-center justify-center gap-2 rounded-[16px] px-5 text-[16.5px] font-semibold text-[#12110d] shadow-[0_14px_32px_-16px_var(--accent,transparent)] transition-transform active:scale-[.985] sm:h-13 sm:text-[16px]"
-                    style={{ background: ACCENT }}
-                  >
-                    <Icon name="download" size={19} /> Download the list of copies
-                  </button>
-                  <div className="grid gap-2 border-t border-line pt-4">
-                    <p className="text-[14px] font-semibold text-ink">What to do next</p>
-                    <ol className="grid list-decimal gap-1.5 pl-5 text-[13.5px] leading-relaxed text-ink-2 marker:text-muted">
-                      <li>Nothing has been moved or deleted.</li>
-                      <li>Download the list of copies, so you have every path in one place.</li>
-                      <li>
-                        {onlyNames
-                          ? 'Find each file marked “Extra copy” on your computer'
-                          : 'Open each folder on your computer'}{' '}
-                        and move the files marked “Extra copy” to the Trash (the Recycle Bin on
-                        Windows). Leave the ones marked “Keep”.
-                      </li>
-                      <li>Empty the Trash once you’re sure.</li>
-                    </ol>
-                  </div>
-                </>
-              )}
-            </>
-          )}
-        </Surface>
-      </aside>
-
-      {checked && (
-        <div className="grid min-w-0 gap-5 lg:col-start-1 lg:row-start-2">
-          {(unreadable.length > 0 || sizes.skipped.length > 0 || sizes.empty > 0) && (
-            <div className="grid gap-2">
-              {unreadable.length > 0 && (
-                <Note icon="alert" tone="caution">
-                  {list(unreadable.map((entry) => quote(entry.name)))} couldn’t be read (moved,
-                  deleted or locked?), so {unreadable.length === 1 ? 'it isn’t' : 'they aren’t'} in
-                  the results.
-                </Note>
-              )}
-              {sizes.skipped.length > 0 && (
-                <Note icon="alert" tone="caution">
-                  Too big to check here (over 2 GB):{' '}
-                  {list(
-                    sizes.skipped.map(
-                      (entry) => `${quote(entry.name)} (${formatSize(entry.size)})`,
-                    ),
-                  )}
-                  . Each shares its size with another file, so{' '}
-                  {sizes.skipped.length === 1 ? 'it' : 'any of them'} could be a copy: compare those
-                  by hand.
-                </Note>
-              )}
-              {sizes.empty > 0 && (
-                <Note icon="circle">
-                  {plural(sizes.empty, 'empty file')} (0 bytes) left out: they take no space.
-                </Note>
-              )}
-            </div>
-          )}
-
-          {groups.length > 0 && (
-            <Surface
-              as="section"
-              aria-labelledby={`${id}-groups`}
-              className="grid grid-cols-1 gap-4"
-            >
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h2 id={`${id}-groups`} className="text-[17px] font-semibold text-ink">
-                  Exact copies · {plural(groups.length, 'group')}
-                </h2>
-                <p className="text-[12.5px] text-muted">Most space first</p>
-              </div>
-              <ol className="grid gap-3">
-                {groups.slice(0, groupsShown).map((group) => (
-                  <GroupCard
-                    key={group.hash}
-                    group={group}
-                    name={`${id}-${group.hash.slice(0, 16)}`}
-                    keep={keepFor(group)}
-                    suggested={suggestKeep(group.files, keepRule).id}
-                    keepRule={keepRule}
-                    onKeep={(fileId) =>
-                      setPicks((current) => ({ ...current, [group.hash]: fileId }))
-                    }
-                  />
-                ))}
-              </ol>
-              {groups.length > groupsShown && (
-                <button
-                  type="button"
-                  onClick={() => setGroupsShown((shown) => shown + PAGE)}
-                  className="inline-flex h-11 items-center justify-center gap-1.5 rounded-[11px] bg-well text-[14px] font-medium text-ink-2 hover:bg-ink/10 hover:text-ink lg:h-10"
-                >
-                  Show {Math.min(PAGE, groups.length - groupsShown)} more of{' '}
-                  {groups.length - groupsShown} left
-                </button>
-              )}
-            </Surface>
-          )}
-
-          {clashes.length > 0 && (
-            <Surface
-              as="section"
-              aria-labelledby={`${id}-clashes`}
-              className="grid grid-cols-1 gap-4"
-            >
-              <div className="flex items-start gap-3">
-                <span className="grid size-10 shrink-0 place-items-center rounded-[12px] bg-well text-ink-2">
-                  <Icon name="files" size={18} />
-                </span>
-                <div className="min-w-0">
-                  <h2 id={`${id}-clashes`} className="text-[17px] font-semibold text-ink">
-                    Same name, different contents
-                  </h2>
-                  <p className="mt-1 text-[13.5px] leading-relaxed text-muted">
-                    Not copies: these share a name, but what’s inside differs. Worth a look before
-                    you tidy up, since one may be newer than the other.
-                  </p>
-                </div>
-              </div>
-              <ul className="grid gap-3">
-                {clashes.slice(0, clashesShown).map((clash) => (
-                  <li
-                    key={clash.files.map((file) => file.id).join('-')}
-                    className="rounded-[16px] bg-subtle p-3 shadow-[inset_0_0_0_1px_var(--color-line)] sm:p-4"
-                  >
-                    <p className="px-1 text-[14.5px] font-semibold text-ink [overflow-wrap:anywhere]">
-                      {clash.name}{' '}
-                      <span className="font-normal text-muted">
-                        · {plural(clash.files.length, 'file')}, {clash.versions} different
-                      </span>
-                    </p>
-                    <ul className="mt-2 grid gap-1">
-                      {clash.files.map((file) => (
-                        <li
-                          key={file.id}
-                          className="flex items-start gap-3 rounded-[12px] px-1 py-1.5"
-                        >
-                          <span
-                            className="mono-num mt-0.5 grid size-6 shrink-0 place-items-center rounded-full bg-well text-[11px] font-semibold text-ink-2"
-                            title={file.version ? `Version ${file.version}` : 'Couldn’t be checked'}
-                          >
-                            {file.version ?? '?'}
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-[13.5px] text-ink [overflow-wrap:anywhere]">
-                              {folderOf(file.path) || 'Chosen on its own'}
-                            </span>
-                            <span className="block text-[12.5px] text-muted">
-                              {formatSize(file.size)} · {when.format(file.modified)}
-                            </span>
-                          </span>
-                          {file.id === clash.newest && (
-                            <span className="shrink-0 rounded-full bg-positive-soft px-2 py-0.5 text-[11.5px] font-semibold text-positive">
-                              Newest
-                            </span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  </li>
-                ))}
-              </ul>
-              {clashes.length > clashesShown && (
-                <button
-                  type="button"
-                  onClick={() => setClashesShown((shown) => shown + PAGE)}
-                  className="inline-flex h-11 items-center justify-center rounded-[11px] bg-well text-[14px] font-medium text-ink-2 hover:bg-ink/10 hover:text-ink lg:h-10"
-                >
-                  Show more
-                </button>
-              )}
-              <p className="text-[12.5px] text-muted">
-                Files with the same letter have the same contents. A “?” couldn’t be checked.
-              </p>
-            </Surface>
-          )}
-
-          <p className="px-1 text-[12.5px] text-faint">
-            Finds exact copies only. Photos that only look alike come later.
+          <p className="truncate text-[13px] text-muted">
+            {onlyNames
+              ? 'Chosen one by one'
+              : `${tops.size === 1 ? `From “${[...tops][0]}”` : 'From several folders'} · ${plural(folders.size, 'folder')}`}
           </p>
         </div>
+        <AddMore onFiles={take} disabled={phase === 'running'} />
+        <button
+          type="button"
+          onClick={startOver}
+          className="h-11 shrink-0 rounded-full px-3.5 text-[14px] font-medium text-ink-2 hover:bg-ink/[.06] hover:text-ink lg:h-10 lg:text-[13.5px]"
+        >
+          Start over
+        </button>
+      </div>
+      {note && (
+        <p role="status" className="-mt-2 text-[13px] leading-relaxed text-ink-2">
+          {note}
+        </p>
+      )}
+
+      {phase === 'running' && (
+        <section
+          aria-live="polite"
+          className="fx-pop grid justify-items-center gap-4 rounded-[28px] bg-surface px-5 py-8 text-center shadow-lift sm:py-10"
+        >
+          <Comparing />
+          <p className="font-display text-[28px] leading-none font-bold tracking-[-0.03em] text-ink sm:text-[34px]">
+            Looking for copies
+          </p>
+          <div
+            role="progressbar"
+            aria-label="Reading files"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={percent}
+            aria-valuetext={progress ? `${progress.done} of ${progress.total} files` : 'Starting'}
+            className="h-3 w-full max-w-[420px] overflow-hidden rounded-full bg-ink/[.07]"
+          >
+            <div
+              className="h-full rounded-full transition-[width] duration-200"
+              style={{ width: `${Math.max(4, percent)}%`, background: ACCENT }}
+            />
+          </div>
+          <p className="mono-num text-[13px] text-ink-2">
+            {progress
+              ? `${progress.done.toLocaleString('en-US')} of ${plural(progress.total, 'file')} · ${formatSize(progress.bytesDone)} of ${formatSize(progress.bytesTotal)}`
+              : 'Starting…'}
+          </p>
+          {progress?.current && (
+            <p className="max-w-full truncate text-[12.5px] text-muted">
+              Reading {progress.current.path}
+            </p>
+          )}
+          {sizes.skipped.length > 0 && (
+            <p className="text-[12.5px] text-muted">
+              {plural(sizes.skipped.length, 'is', 'are')} too big to check here (over 2 GB).
+            </p>
+          )}
+          {progress?.current && progress.current.size >= LARGE_FILE && (
+            <p className="max-w-[440px] rounded-[12px] bg-caution-soft px-3 py-2 text-[13px] text-caution">
+              A big one: “{progress.current.name}” is {formatSize(progress.current.size)}. Reading
+              it can take a minute, and the page may feel slow until it’s done.
+            </p>
+          )}
+          <button
+            type="button"
+            disabled={stopping}
+            onClick={() => {
+              setStopping(true);
+              scan.current?.abort();
+            }}
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-ink/[.06] px-5 text-[14.5px] font-medium text-ink-2 hover:bg-ink/10 hover:text-ink disabled:opacity-60"
+          >
+            <Icon name="x" size={15} />
+            {stopping ? 'Stopping after this file…' : 'Stop'}
+          </button>
+        </section>
+      )}
+
+      {checked && (
+        <Payoff
+          headline={
+            total.groups ? (
+              <>
+                <Icon name="check" size={16} strokeWidth={3} />
+                {plural(total.copies, 'copy', 'copies')} found
+              </>
+            ) : (
+              <>
+                <Icon name="check" size={16} strokeWidth={3} />
+                {plural(entries.length, 'file')} checked
+              </>
+            )
+          }
+          value={
+            total.groups ? (
+              <CountUp
+                value={total.wasted}
+                format={formatSize}
+                duration={600}
+                className={DISPLAY_NUMBER}
+              />
+            ) : (
+              'No copies'
+            )
+          }
+          caption={
+            total.groups
+              ? 'to free up'
+              : phase === 'stopped'
+                ? 'None among the files checked so far.'
+                : 'Every file here is one of a kind.'
+          }
+          action={
+            total.groups
+              ? { label: 'Download the list of copies', icon: 'download', onClick: downloadReport }
+              : undefined
+          }
+        >
+          {phase === 'stopped' && (
+            <p className="mx-auto flex max-w-[520px] flex-wrap items-center justify-center gap-x-3 gap-y-1 rounded-[14px] bg-caution-soft px-4 py-2.5 text-[13.5px] text-caution">
+              <span>
+                Stopped early: {read.toLocaleString('en-US')} of{' '}
+                {plural(sizes.candidates.length, 'file')} checked.
+              </span>
+              <button
+                type="button"
+                onClick={() => run(entries, hashes)}
+                className="inline-flex min-h-11 items-center font-semibold underline underline-offset-2"
+              >
+                Carry on
+              </button>
+            </p>
+          )}
+          {total.groups > 0 && (
+            <p className="text-[14px] text-ink-2">
+              In {plural(total.groups, 'set')}. Nothing has been deleted: you choose.
+            </p>
+          )}
+        </Payoff>
+      )}
+
+      {checked && (unreadable.length > 0 || sizes.skipped.length > 0 || sizes.empty > 0) && (
+        <ul className="grid gap-1.5 text-[13px] leading-relaxed">
+          {unreadable.length > 0 && (
+            <li className="flex gap-2 text-caution">
+              <Icon name="alert" size={14} className="mt-[3px] shrink-0" />
+              <span>
+                {list(unreadable.map((entry) => quote(entry.name)))} couldn’t be read (moved,
+                deleted or locked?), so {unreadable.length === 1 ? 'it isn’t' : 'they aren’t'} in
+                the results.
+              </span>
+            </li>
+          )}
+          {sizes.skipped.length > 0 && (
+            <li className="flex gap-2 text-caution">
+              <Icon name="alert" size={14} className="mt-[3px] shrink-0" />
+              <span>
+                Too big to check here (over 2 GB):{' '}
+                {list(
+                  sizes.skipped.map((entry) => `${quote(entry.name)} (${formatSize(entry.size)})`),
+                )}
+                . {sizes.skipped.length === 1 ? 'It shares' : 'Each shares'} a size with another
+                file, so compare {sizes.skipped.length === 1 ? 'it' : 'those'} by hand.
+              </span>
+            </li>
+          )}
+          {sizes.empty > 0 && (
+            <li className="flex gap-2 text-muted">
+              <Icon name="circle" size={14} className="mt-[3px] shrink-0" />
+              <span>
+                {plural(sizes.empty, 'empty file')} (0 bytes) left out: they take no space.
+              </span>
+            </li>
+          )}
+        </ul>
+      )}
+
+      {checked && groups.length > 0 && (
+        <section aria-labelledby={`${id}-groups`} className="grid min-w-0 gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+            <h2 id={`${id}-groups`} className="text-[17px] font-semibold text-ink">
+              Tap the one to keep
+            </h2>
+            <div
+              role="radiogroup"
+              aria-label="Suggest keeping"
+              className="flex items-center gap-1 rounded-full bg-ink/[.06] p-1"
+            >
+              {(
+                [
+                  ['oldest', 'Oldest'],
+                  ['shortest', 'Shortest path'],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={keepRule === value}
+                  onClick={() => {
+                    setKeepRule(value);
+                    setPicks({});
+                  }}
+                  className={cn(
+                    'fx-move h-10 rounded-full px-3.5 text-[13.5px] font-medium lg:h-9',
+                    keepRule === value
+                      ? 'bg-surface text-ink shadow-card'
+                      : 'text-muted hover:text-ink',
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <ol className="grid gap-3">
+            {groups.slice(0, groupsShown).map((group, index) => (
+              <GroupCard
+                key={group.hash}
+                group={group}
+                index={index}
+                keep={keepFor(group)}
+                suggested={suggestKeep(group.files, keepRule).id}
+                keepRule={keepRule}
+                onKeep={(fileId) => setPicks((current) => ({ ...current, [group.hash]: fileId }))}
+              />
+            ))}
+          </ol>
+          {groups.length > groupsShown && (
+            <button
+              type="button"
+              onClick={() => setGroupsShown((shown) => shown + PAGE)}
+              className="inline-flex h-11 items-center justify-center gap-1.5 rounded-full bg-ink/[.06] text-[14px] font-medium text-ink-2 hover:bg-ink/10 hover:text-ink"
+            >
+              Show {Math.min(PAGE, groups.length - groupsShown)} more of{' '}
+              {groups.length - groupsShown} left
+            </button>
+          )}
+          <MoreOptions label="How to clean up">
+            <ol className="grid list-decimal gap-1.5 pl-5 text-[14px] leading-relaxed text-ink-2 marker:text-muted">
+              <li>Download the list of copies, so you have every path in one place.</li>
+              <li>
+                {onlyNames
+                  ? 'Find each file marked “Extra copy” on your computer'
+                  : 'Open each folder on your computer'}{' '}
+                and move the files marked “Extra copy” to the Trash (the Recycle Bin on Windows).
+                Leave the ones marked “Keep”.
+              </li>
+              <li>Empty the Trash once you’re sure.</li>
+            </ol>
+          </MoreOptions>
+        </section>
+      )}
+
+      {checked && clashes.length > 0 && (
+        <section aria-labelledby={`${id}-clashes`} className="grid min-w-0 gap-3">
+          <div>
+            <h2 id={`${id}-clashes`} className="text-[17px] font-semibold text-ink">
+              Same name, different contents
+            </h2>
+            <p className="mt-0.5 text-[13.5px] text-muted">Not copies. One may be newer.</p>
+          </div>
+          <ul className="grid gap-2.5 sm:grid-cols-2">
+            {clashes.slice(0, clashesShown).map((clash) => (
+              <li
+                key={clash.files.map((file) => file.id).join('-')}
+                className="rounded-[20px] bg-surface p-3 shadow-[inset_0_0_0_1px_var(--color-line)]"
+              >
+                <p className="px-1 text-[14.5px] font-semibold text-ink [overflow-wrap:anywhere]">
+                  {clash.name}{' '}
+                  <span className="font-normal text-muted">· {clash.versions} versions</span>
+                </p>
+                <ul className="mt-1.5 grid gap-0.5">
+                  {clash.files.map((file) => (
+                    <li
+                      key={file.id}
+                      className="flex items-start gap-2.5 rounded-[12px] px-1 py-1.5"
+                    >
+                      <span
+                        className="mono-num mt-0.5 grid size-6 shrink-0 place-items-center rounded-full bg-ink/[.07] text-[11px] font-semibold text-ink-2"
+                        title={file.version ? `Version ${file.version}` : 'Couldn’t be checked'}
+                      >
+                        {file.version ?? '?'}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[13.5px] text-ink [overflow-wrap:anywhere]">
+                          {folderOf(file.path) || 'Chosen on its own'}
+                        </span>
+                        <span className="block text-[12.5px] text-muted">
+                          {formatSize(file.size)} · {when.format(file.modified)}
+                        </span>
+                      </span>
+                      {file.id === clash.newest && (
+                        <span className="shrink-0 rounded-full bg-positive-soft px-2 py-0.5 text-[11.5px] font-semibold text-positive">
+                          Newest
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+          {clashes.length > clashesShown && (
+            <button
+              type="button"
+              onClick={() => setClashesShown((shown) => shown + PAGE)}
+              className="inline-flex h-11 items-center justify-center rounded-full bg-ink/[.06] text-[14px] font-medium text-ink-2 hover:bg-ink/10 hover:text-ink"
+            >
+              Show more
+            </button>
+          )}
+          <p className="text-[12.5px] text-muted">
+            The same letter means the same contents. A “?” couldn’t be checked.
+          </p>
+        </section>
+      )}
+
+      {checked && (
+        <p className="px-1 text-[12.5px] text-faint">
+          Finds exact copies only. Photos that only look alike come later.
+        </p>
       )}
     </div>
   );
 }
 
+/** Two cards meeting while the files are compared. */
+function Comparing() {
+  return (
+    <span aria-hidden="true" className="flex items-center gap-1.5">
+      {[0, 1].map((side) => (
+        <span
+          key={side}
+          className={cn(
+            'grid h-14 w-11 place-items-center rounded-[9px] bg-ink/[.06] shadow-[inset_0_0_0_1px_var(--color-line)]',
+            side === 0 ? 'fx-pair-l' : 'fx-pair-r',
+          )}
+        >
+          <span className="size-5 rounded-[5px]" style={{ background: ACCENT }} />
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/**
+ * One set of copies, drawn together: the kept card lit, the extras dashed and marked. Tap a card to
+ * keep that one instead.
+ */
 function GroupCard({
   group,
-  name,
+  index,
   keep,
   suggested,
   keepRule,
   onKeep,
 }: {
   group: DuplicateGroup;
-  name: string;
+  index: number;
   keep: number;
   suggested: number;
   keepRule: KeepRule;
   onKeep: (fileId: number) => void;
 }) {
+  const kind = kindOf(group.files[0].name);
+  // The suggested keeper leads and its copies are drawn to it; a tap moves "Keep", not the cards.
+  const files = [...group.files].sort(
+    (a, b) => Number(b.id === suggested) - Number(a.id === suggested),
+  );
   return (
-    <li className="rounded-[18px] bg-subtle p-2.5 shadow-[inset_0_0_0_1px_var(--color-line)] sm:p-3">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 px-1.5 pt-1">
-        <p className="text-[14.5px] font-semibold text-ink">
-          {plural(group.files.length, 'copy', 'copies')} · {formatSize(group.size)} each
+    <li
+      className="fx-rise rounded-[24px] bg-surface p-2.5 shadow-card sm:p-3"
+      style={{ '--i': Math.min(index, 8) } as CSSProperties}
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 px-1.5 pt-0.5 pb-2">
+        <p className="text-[14px] font-semibold text-ink">
+          {plural(group.files.length, 'copy', 'copies')}{' '}
+          <span className="font-normal text-muted">· {formatSize(group.size)} each</span>
         </p>
-        <p className="mono-num text-[12px] text-muted">
-          <span className="text-ink-2">{formatSize(group.wasted)}</span> extra
+        <p className="mono-num text-[13px] font-semibold text-[var(--accent-ink)]">
+          {formatSize(group.wasted)} to free
         </p>
       </div>
-      <fieldset className="mt-2 grid gap-1">
-        <legend className="sr-only">Which copy to keep</legend>
-        {group.files.map((file) => {
+      <div
+        role="radiogroup"
+        aria-label="Which copy to keep"
+        className="grid grid-cols-2 gap-2 sm:grid-cols-[repeat(auto-fill,minmax(210px,1fr))]"
+      >
+        {files.map((file, position) => {
           const kept = file.id === keep;
           return (
-            <label
+            <button
               key={file.id}
+              type="button"
+              role="radio"
+              aria-checked={kept}
+              onClick={() => onKeep(file.id)}
               className={cn(
-                'flex min-h-12 cursor-pointer items-start gap-3 rounded-[12px] px-2.5 py-2 transition-colors',
+                'fx-move relative flex min-h-[124px] min-w-0 flex-col items-start gap-2 rounded-[18px] p-3 text-left active:scale-[.97]',
+                position % 2 ? 'fx-pair-r' : 'fx-pair-l',
                 kept
-                  ? 'bg-surface shadow-[inset_0_0_0_1px_var(--color-line-strong)]'
-                  : 'hover:bg-ink/5',
+                  ? 'fx-ping bg-surface shadow-[inset_0_0_0_2px_var(--accent-ink),0_12px_26px_-16px_var(--accent)]'
+                  : 'bg-ink/[.035] outline-[1.5px] outline-offset-[-1.5px] outline-[var(--color-line-strong)] outline-dashed hover:bg-ink/[.06]',
               )}
             >
-              <input
-                type="radio"
-                name={name}
-                checked={kept}
-                onChange={() => onKeep(file.id)}
-                className="mt-[3px] size-[18px] shrink-0 accent-[#9fb2ff]"
-              />
-              <span className="min-w-0 flex-1">
-                <span className="block text-[14px] font-medium text-ink [overflow-wrap:anywhere]">
+              <span className="flex w-full items-center gap-2">
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    'grid size-9 shrink-0 place-items-center rounded-[10px] text-[#2a1b0e]',
+                    !kept && 'opacity-60',
+                  )}
+                  style={{ background: kind.tint }}
+                >
+                  <Icon name={kind.icon} size={17} />
+                </span>
+                <span
+                  className={cn(
+                    'ml-auto inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-bold',
+                    kept ? 'text-[var(--on-accent,#12110d)]' : 'bg-ink/[.07] text-muted',
+                  )}
+                  style={kept ? { background: ACCENT } : undefined}
+                >
+                  <Icon name={kept ? 'check' : 'trash'} size={12} strokeWidth={kept ? 3 : 2} />
+                  {kept ? 'Keep' : 'Extra copy'}
+                </span>
+              </span>
+              <span className="grid min-w-0 gap-0.5">
+                <span
+                  className={cn(
+                    'line-clamp-2 text-[14px] font-semibold [overflow-wrap:anywhere]',
+                    kept ? 'text-ink' : 'text-ink-2',
+                  )}
+                >
                   {file.name}
                 </span>
-                <span className="block text-[12.5px] text-muted [overflow-wrap:anywhere]">
-                  {folderOf(file.path) || 'Chosen on its own'} · {when.format(file.modified)}
+                <span className="flex min-w-0 items-center gap-1 text-[12px] text-muted">
+                  <Icon name="folder-open" size={12} className="shrink-0" />
+                  <span className="truncate">{folderOf(file.path) || 'Chosen on its own'}</span>
                 </span>
+                <span className="text-[12px] text-muted">{when.format(file.modified)}</span>
               </span>
-              <span
-                className={cn(
-                  'mt-px shrink-0 rounded-full px-2 py-0.5 text-[11.5px] font-semibold',
-                  kept ? 'text-[#12110d]' : 'bg-well text-muted',
-                )}
-                style={kept ? { background: ACCENT } : undefined}
-              >
-                {kept ? 'Keep' : 'Extra copy'}
-              </span>
-            </label>
+            </button>
           );
         })}
-      </fieldset>
-      <p className="px-1.5 pt-2 pb-0.5 text-[12px] text-muted">
+      </div>
+      <p className="px-1.5 pt-2 text-[12.5px] text-muted">
         {keep === suggested ? (
-          `Suggested: ${keepRule === 'oldest' ? 'the oldest copy' : 'the copy with the shortest path'}.`
+          `Keeping ${keepRule === 'oldest' ? 'the oldest' : 'the shortest path'}.`
         ) : (
           <>
             Your pick.{' '}
             <button
               type="button"
               onClick={() => onKeep(suggested)}
-              className="font-medium text-ink-2 underline underline-offset-2 hover:text-ink"
+              className="inline-flex min-h-11 items-center font-medium text-ink-2 underline underline-offset-2 hover:text-ink lg:min-h-0"
             >
               Back to the suggestion
             </button>

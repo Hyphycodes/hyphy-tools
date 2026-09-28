@@ -107,6 +107,20 @@ export const PRESETS: { id: PresetId; name: string; example: string }[] = [
   { id: 'number', name: 'Number a batch', example: 'Batch 01.jpg, Batch 02.jpg' },
 ];
 
+/** Names straight off a camera or a phone: IMG_2041, DSC_0042, PXL_2026…, Screenshot 2026-05-04. */
+const CAMERA_NAME =
+  /^(img|dsc[nf]?|pxl|mvimg|vid|mov|gopr|dji|p\d{3}|screenshot|screen shot|photo|whatsapp image)(?=[\s_-]?\d|[\s_-])/i;
+
+/**
+ * The quick fix most likely wanted for these names: mostly camera and screenshot names get their
+ * dates, anything else is cleaned for the web. A guess to start from; every rule stays editable.
+ */
+export function suggestPreset(names: string[]): PresetId {
+  if (!names.length) return 'web';
+  const camera = names.filter((name) => CAMERA_NAME.test(name)).length;
+  return camera / names.length >= 0.6 ? 'dates' : 'web';
+}
+
 /** A preset's rules: a starting point, every rule still editable. */
 export function presetRules(preset: PresetId, batchName = 'Batch'): Rule[] {
   const id = (index: number) => `${preset}-${index}`;

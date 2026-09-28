@@ -2,7 +2,8 @@ import { cn } from '@/components/ui/cn';
 
 /*
  * Palette's pictures, drawn inline: a photo coming apart into swatches (the first screen) and
- * two small previews of the samples. Motion is transform/opacity only and stops for reduced motion.
+ * two small previews of the samples. The pixels fly out once (and drift while an image opens);
+ * motion is transform/opacity only and stops for reduced motion.
  */
 
 const SCENE = ['#2b1b4d', '#5a2462', '#8a2f6e', '#b8415f', '#e2555a', '#f7a24e', '#ffd166'];
@@ -36,11 +37,12 @@ export function PaletteArt({ busy = false }: { busy?: boolean }) {
       className={cn('palette-art mx-auto block h-auto w-full max-w-[460px]', busy && 'is-busy')}
     >
       <style>{`
-        .palette-art .px { animation: palette-drift 3.2s ease-in-out infinite alternate; transform-box: fill-box; }
-        .palette-art .bar { animation: palette-sway 4.8s ease-in-out infinite alternate; transform-box: view-box; transform-origin: 410px 214px; }
-        .palette-art.is-busy .px { animation-duration: .9s; }
+        .palette-art .px { animation: palette-out .7s cubic-bezier(.34,1.45,.64,1) both; transform-box: fill-box; }
+        .palette-art .bar { transform: rotate(var(--a)); animation: palette-fan .6s cubic-bezier(.34,1.45,.64,1) .25s both; transform-box: view-box; transform-origin: 410px 214px; }
+        .palette-art.is-busy .px { animation: palette-drift .9s ease-in-out infinite alternate; }
+        @keyframes palette-out { from { transform: translate(-34px, 4px) scale(.4); opacity: 0 } }
         @keyframes palette-drift { from { transform: translate(0, 0); opacity: .95 } to { transform: translate(7px, -5px); opacity: .55 } }
-        @keyframes palette-sway { from { transform: rotate(var(--a)) } to { transform: rotate(calc(var(--a) * 1.18)) } }
+        @keyframes palette-fan { from { transform: rotate(0deg) } }
         @media (prefers-reduced-motion: reduce) { .palette-art .px, .palette-art .bar { animation: none } }
       `}</style>
       <defs>
@@ -84,7 +86,7 @@ export function PaletteArt({ busy = false }: { busy?: boolean }) {
           height={pixel.size}
           rx={2}
           fill={pixel.fill}
-          style={{ animationDelay: `-${pixel.delay}ms` }}
+          style={{ animationDelay: `${Math.round(pixel.delay / 4)}ms` }}
         />
       ))}
 

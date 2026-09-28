@@ -9,6 +9,7 @@ import {
   type CSSProperties,
   type FormEvent,
   type PointerEvent,
+  type RefObject,
 } from 'react';
 import { cn } from '@/components/ui/cn';
 import { Icon } from '@/components/ui/icon';
@@ -30,6 +31,7 @@ import {
   paletteJson,
   readablePairs,
   rgbToHex,
+  roomColors,
   sampleColors,
   shareNear,
   SHEET_FONTS,
@@ -38,9 +40,10 @@ import {
   tailwindTheme,
   textOn,
   type ColorSample,
+  type RoomColors,
   type Swatch,
 } from '@/lib/tools/palette';
-import { FileDrop, IconButton, Label, MoreOptions, StartPanel, Surface, useCopy } from './kit';
+import { ActionBar, Advanced, CountUp, DropObject, IconButton, Stage } from './kit';
 import { LogoThumb, PaletteArt, SunsetThumb } from './palette-art';
 import { colorName } from './palette-names';
 
@@ -322,14 +325,82 @@ function sampleLogo() {
   return toFile(canvas, 'sample-logo.png', 'image/png');
 }
 
+/* ---------------- the room ---------------- */
+
+const ROOM_VARS = {
+  '--accent': 'accent',
+  '--glow': 'glow',
+  '--third': 'third',
+  '--accent-ink': 'accentInk',
+  '--on-accent': 'onAccent',
+} as const satisfies Record<string, keyof RoomColors>;
+
+/**
+ * The picture lights the room: its most vivid color becomes the page's accent, a second its glow.
+ * Set on the tool's world (`.tool-world`) and put back as it was on a new image, a reset or on
+ * leaving. Outside a tool page (inside a Space) there's no world to light, so nothing happens.
+ */
+function useRoom(anchor: RefObject<HTMLElement | null>, room: RoomColors | null) {
+  const key = room ? Object.values(room).join(' ') : '';
+  useEffect(() => {
+    const world = anchor.current?.closest<HTMLElement>('.tool-world');
+    if (!world || !room) return;
+    const before = Object.keys(ROOM_VARS).map(
+      (name) => [name, world.style.getPropertyValue(name)] as const,
+    );
+    for (const [name, field] of Object.entries(ROOM_VARS))
+      world.style.setProperty(name, room[field]);
+    world.dataset.lit = '';
+    return () => {
+      for (const [name, value] of before)
+        if (value) world.style.setProperty(name, value);
+        else world.style.removeProperty(name);
+      delete world.dataset.lit;
+    };
+    // `key` stands for `room`: the same colors needn't repaint the room.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, anchor]);
+}
+
+/** One tap, one copy, confirmed on the thing tapped (and to screen readers), not in a toast. */
+function useTapCopy() {
+  const toast = useToast();
+  const [copied, setCopied] = useState<{ key: string; text: string } | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const copy = async (key: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      clearTimeout(timer.current);
+      setCopied({ key, text });
+      timer.current = setTimeout(() => setCopied(null), 1500);
+      return true;
+    } catch {
+      toast({ title: 'Couldn’t copy. Select the text and copy it instead.', icon: 'alert' });
+      return false;
+    }
+  };
+  return { copy, copied: copied?.key ?? null, text: copied?.text ?? '' };
+}
+
 /* ---------------- the tool ---------------- */
 
+const FORMATS = [
+  { value: 'hex', label: 'HEX' },
+  { value: 'rgb', label: 'RGB' },
+  { value: 'hsl', label: 'HSL' },
+] as const;
+type ColorFormat = (typeof FORMATS)[number]['value'];
+
+const valueIn = (format: ColorFormat, entry: Swatch) =>
+  format === 'rgb' ? formatRgb(entry.rgb) : format === 'hsl' ? formatHsl(entry.rgb) : entry.hex;
+
 export function PaletteTool() {
-  const id = useId();
   const toast = useToast();
   const [image, setImage] = useState<Loaded | null>(null);
   const [opening, setOpening] = useState(false);
   const [count, setCount] = useState(DEFAULT_COLORS);
+  const [format, setFormat] = useState<ColorFormat>('hex');
   const [hidden, setHidden] = useState<string[]>([]);
   const [added, setAdded] = useState<Added[]>([]);
   const [focus, setFocus] = useState<string | null>(null);
@@ -339,8 +410,10 @@ export function PaletteTool() {
   const [flash, setFlash] = useState(false);
   const current = useRef<Loaded | null>(null);
   const opener = useRef<(files: File[]) => void>(() => {});
+  const root = useRef<HTMLDivElement>(null);
   const imagePanel = useRef<HTMLDivElement>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const { copy, copied, text: copiedText } = useTapCopy();
 
   const found = useMemo(() => (image ? extractPalette(image.sample, count) : []), [image, count]);
   const palette = useMemo(() => {
@@ -362,6 +435,9 @@ export function PaletteTool() {
     return list;
   }, [found, hidden, added, image]);
   const pairs = useMemo(() => readablePairs(palette.map((entry) => entry.rgb)), [palette]);
+  // The room takes its light from the colors found in the picture.
+  const room = useMemo(() => roomColors(found.map((swatch) => swatch.rgb)), [found]);
+  useRoom(root, room);
 
   useEffect(() => {
     const holder = current;
@@ -374,7 +450,7 @@ export function PaletteTool() {
 
   async function load(file: File) {
     setOpening(true);
-    setMessage(`Mixing the colors of ${file.name}…`);
+    setMessage('');
     try {
       const next = await openImage(file);
       release(current.current);
@@ -405,10 +481,12 @@ export function PaletteTool() {
     void load(file);
   }
 
-  // An image pasted anywhere on the page (⌘V / Ctrl+V) opens too.
+  // An image pasted anywhere on the page (⌘V / Ctrl+V) opens too; once one is open, so does an
+  // image dropped anywhere (before that, the drop target catches it).
   useLayoutEffect(() => {
     opener.current = open;
   });
+  const loaded = image !== null;
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
       const file = Array.from(event.clipboardData?.files ?? []).find((item) =>
@@ -418,9 +496,25 @@ export function PaletteTool() {
       event.preventDefault();
       opener.current([file]);
     };
+    const onOver = (event: DragEvent) => {
+      if (event.dataTransfer?.types.includes('Files')) event.preventDefault();
+    };
+    const onDrop = (event: DragEvent) => {
+      if (!event.dataTransfer?.files.length) return;
+      event.preventDefault();
+      opener.current(Array.from(event.dataTransfer.files));
+    };
     window.addEventListener('paste', onPaste);
-    return () => window.removeEventListener('paste', onPaste);
-  }, []);
+    if (loaded) {
+      window.addEventListener('dragover', onOver);
+      window.addEventListener('drop', onDrop);
+    }
+    return () => {
+      window.removeEventListener('paste', onPaste);
+      window.removeEventListener('dragover', onOver);
+      window.removeEventListener('drop', onDrop);
+    };
+  }, [loaded]);
 
   async function trySample(make: () => Promise<File>) {
     if (opening) return;
@@ -455,7 +549,6 @@ export function PaletteTool() {
       return;
     }
     setAdded([...added, color]);
-    toast({ title: `Added ${colorName(color.rgb).toLowerCase()} · ${color.hex}`, icon: 'pipette' });
   }
 
   function pickAt(at: Point) {
@@ -478,7 +571,7 @@ export function PaletteTool() {
     else setAdded(added.filter((color) => color.hex !== entry.hex));
   }
 
-  /** "Add from the image": bring the image into view and point at it. */
+  /** "From the image": bring the image into view and point at it. */
   function pointAtImage() {
     imagePanel.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     setNudge((value) => value + 1);
@@ -489,34 +582,16 @@ export function PaletteTool() {
 
   if (!image)
     return (
-      <StartPanel
-        art={<PaletteArt busy={opening} />}
-        eyebrow="Photo to palette"
-        title="Every picture has a palette"
-        lead="Drop in a photo or a logo. Its main colors come out, ready to copy."
-        footer={
-          <p role="status" className="min-h-5">
-            {opening ? 'Mixing the colors…' : message}
-          </p>
-        }
-      >
-        <FileDrop
-          onFiles={open}
+      <div ref={root} className="mx-auto grid w-full max-w-[640px] gap-3 pt-2 pb-6 sm:pt-4">
+        <DropObject
+          shape="photo"
           accept={ACCEPT}
-          multiple={false}
-          icon="image"
-          accent={ACCENT}
-          title="Drop an image"
-          disabled={opening}
-          hint="Or paste one. It stays on this device."
-          compact
-        />
-        <div className="mt-6">
-          <p className="mb-2.5 flex items-center justify-center gap-1.5 text-[14px] font-medium text-ink-2">
-            <Icon name="sparkles" size={15} className="text-signal-ink" />
-            No image handy? Try a sample
-          </p>
-          <div className="grid grid-cols-2 gap-2.5">
+          onFiles={open}
+          art={<PaletteArt busy={opening} />}
+          title={opening ? 'Pulling the colors…' : 'Drop an image'}
+          hint="Or paste one."
+        >
+          <div className="mt-3 grid w-full grid-cols-2 gap-2.5">
             {SAMPLES.map((sample) => (
               <button
                 key={sample.label}
@@ -524,18 +599,19 @@ export function PaletteTool() {
                 onClick={() => trySample(sample.make)}
                 disabled={opening}
                 aria-label={`Try a sample ${sample.label.toLowerCase()}`}
-                className="group min-w-0 overflow-hidden rounded-[18px] bg-well text-left shadow-[inset_0_0_0_1px_var(--color-line)] transition-[transform,box-shadow] hover:shadow-[inset_0_0_0_1.5px_var(--accent,var(--color-ink))] active:scale-[.98] disabled:opacity-50"
+                className="fx-move group min-w-0 overflow-hidden rounded-[18px] bg-surface text-left shadow-[inset_0_0_0_1px_var(--color-line)] hover:-translate-y-0.5 hover:shadow-[inset_0_0_0_1.5px_var(--accent-ink)] active:scale-[.98] disabled:opacity-50"
               >
-                <sample.Thumb className="block aspect-[16/10] w-full sm:aspect-[16/7]" />
-                <span className="flex items-center justify-between gap-2 px-3 py-2.5">
-                  <span className="truncate text-[14.5px] font-semibold text-ink">
-                    {sample.label}
+                <sample.Thumb className="block aspect-[16/8] w-full" />
+                <span className="flex min-h-11 items-center justify-between gap-2 px-3 py-2">
+                  <span className="truncate text-[14px] font-semibold text-ink">
+                    <span className="font-normal text-muted">Try a </span>
+                    {sample.label.toLowerCase()}
                   </span>
                   <span aria-hidden="true" className="flex shrink-0 -space-x-1.5">
                     {sample.colors.map((hex) => (
                       <span
                         key={hex}
-                        className="size-4 rounded-full shadow-[0_0_0_2px_var(--color-well)]"
+                        className="size-4 rounded-full shadow-[0_0_0_2px_var(--color-surface)]"
                         style={{ background: hex }}
                       />
                     ))}
@@ -544,22 +620,57 @@ export function PaletteTool() {
               </button>
             ))}
           </div>
-        </div>
-      </StartPanel>
+        </DropObject>
+        <p role="status" className="min-h-5 text-center text-[13.5px] text-ink-2 empty:hidden">
+          {message}
+        </p>
+      </div>
     );
 
   const stem = slugName(image.name.replace(/\.[^.]+$/, ''), 'image');
   const shortfall = found.length < count;
   const picked = added.some((color) => !color.typed);
+  const allText = palette.map((entry) => valueIn(format, entry)).join('\n');
 
   return (
-    <div className="flex flex-col gap-5 lg:grid lg:grid-cols-[minmax(0,.9fr)_minmax(0,1.1fr)] lg:items-start">
+    <div
+      ref={root}
+      className="grid gap-x-8 gap-y-5 pb-4 lg:grid-cols-[minmax(0,1.12fr)_minmax(0,1fr)] lg:grid-rows-[auto_auto_1fr] lg:items-start"
+    >
+      <style>{ROOM_FADE}</style>
+      <p className="sr-only" aria-live="polite">
+        {copied ? `Copied ${copiedText}` : ''}
+      </p>
+
+      {/* The payoff: how many colors came out of the picture. */}
+      <header className="min-w-0 lg:col-start-2 lg:row-start-1 lg:pt-4">
+        <p className="fx-pop inline-flex max-w-full items-center gap-2 rounded-full bg-ink/[.06] py-1.5 pr-3.5 pl-2 text-[13.5px] font-medium text-ink-2">
+          <span
+            className="grid size-5 shrink-0 place-items-center rounded-full text-[var(--on-accent,#12110d)]"
+            style={{ background: ACCENT }}
+          >
+            <Icon name="check" size={12} strokeWidth={3} />
+          </span>
+          <span className="truncate">From {image.name}</span>
+        </p>
+        <h2
+          aria-live="polite"
+          className="fx-stamp mt-3 font-display text-[52px] leading-[.9] font-extrabold tracking-[-0.045em] text-ink sm:text-[76px]"
+          style={{ fontVariationSettings: "'wdth' 112" }}
+        >
+          <CountUp value={palette.length} duration={500} className={DISPLAY_NUMBER} />{' '}
+          {palette.length === 1 ? 'color' : 'colors'}
+          <span className="block text-[var(--accent-ink)]">pulled</span>
+        </h2>
+        <p className="mt-3 text-[15.5px] text-ink-2">Tap a color to copy it.</p>
+      </header>
+
+      {/* The object: the picture, and its colors coming out of it. */}
       <div
         ref={imagePanel}
-        className="order-2 min-w-0 scroll-mt-24 lg:sticky lg:top-24 lg:order-none"
+        className="min-w-0 scroll-mt-24 lg:col-start-1 lg:row-span-3 lg:row-start-1"
       >
-        <Surface className="grid gap-3">
-          <ImageBar image={image} busy={opening} onReplace={open} onRemove={clear} />
+        <Stage material="paper" className="z-10 grid gap-2.5 !p-2.5 sm:!p-3">
           <Picker
             image={image}
             palette={palette}
@@ -569,132 +680,126 @@ export function PaletteTool() {
             onPick={pickAt}
             onFocus={setFocus}
           />
-          <p role="status" className="min-h-5 text-[13px] text-muted empty:hidden">
-            {message}
+          {palette.length > 0 && <ShareBar palette={palette} focus={focus} />}
+          <ImageBar image={image} busy={opening} onReplace={open} onRemove={clear} />
+        </Stage>
+
+        {palette.length === 0 && (
+          <p className="mt-4 rounded-[16px] bg-ink/[.05] px-4 py-5 text-center text-[14px] text-muted">
+            This image is entirely see-through, so there are no colors to find. Add one of your own.
           </p>
-        </Surface>
-      </div>
+        )}
 
-      <div className="contents lg:grid lg:min-w-0 lg:gap-5">
-        <Surface className="order-1 grid gap-4 !p-4 sm:!p-6" aria-labelledby={`${id}-colors`}>
-          <div className="flex items-end justify-between gap-3">
-            <div className="min-w-0">
-              <Label id={`${id}-colors`}>Your palette</Label>
-              <p
-                aria-live="polite"
-                className="mt-1 font-display text-[32px] leading-none font-extrabold tracking-[-0.04em] text-ink"
-                style={{ fontVariationSettings: "'wdth' 110" }}
-              >
-                {palette.length} {palette.length === 1 ? 'color' : 'colors'}
-              </p>
-            </div>
-            <Stepper count={count} onChange={setCount} />
-          </div>
-
-          {palette.length > 0 ? (
-            <div
-              role="img"
-              aria-label={`How much of the image each color covers: ${palette
-                .map((entry) => `${entry.hex} ${formatShare(entry.share)}`)
-                .join(', ')}`}
-              className="flex h-3 gap-[2px] overflow-hidden rounded-full"
-            >
-              {palette.map((entry) => (
-                <span
-                  key={entry.key}
-                  className={cn(
-                    'h-full min-w-2 transition-[flex-grow,opacity] duration-300',
-                    focus && focus !== entry.key && 'opacity-50',
-                  )}
-                  style={{ background: entry.hex, flexGrow: Math.max(entry.share, 0.025) }}
-                />
-              ))}
-            </div>
-          ) : (
-            <p className="rounded-[14px] bg-subtle px-4 py-6 text-center text-[14px] text-muted">
-              This image is entirely see-through, so there are no colors to find. Add one of your
-              own below.
-            </p>
-          )}
-
-          <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3">
-            {palette.map((entry, index) => (
-              <SwatchCard
-                key={entry.key}
-                entry={entry}
-                big={index === 0}
-                focused={focus === entry.key}
-                onFocus={setFocus}
-                onRemove={() => remove(entry)}
-              />
-            ))}
-            <li className="min-w-0">
-              <div className="flex h-40 flex-col justify-center gap-1 rounded-[20px] border-[1.5px] border-dashed border-line-strong p-2">
-                <p className="px-2.5 pb-1 text-[13px] font-medium text-muted">Add a color</p>
-                <button
-                  type="button"
-                  onClick={pointAtImage}
-                  className="flex min-h-11 items-center gap-2 rounded-[12px] px-2.5 text-left text-[14px] font-medium text-ink transition-colors hover:bg-well"
-                >
-                  <Icon name="pipette" size={16} className="shrink-0 text-signal-ink" />
-                  From the image
-                </button>
-                <button
-                  type="button"
-                  aria-expanded={typing}
-                  onClick={() => setTyping(!typing)}
-                  className="flex min-h-11 items-center gap-2 rounded-[12px] px-2.5 text-left text-[14px] font-medium text-ink transition-colors hover:bg-well"
-                >
-                  <Icon name="hash" size={16} className="shrink-0 text-signal-ink" />
-                  Type a code
-                </button>
-              </div>
-            </li>
-          </ul>
-
-          {typing && (
-            <AddColor
-              onClose={() => setTyping(false)}
-              onAdd={(color) =>
-                add({ ...color, share: shareNear(image.sample, color.rgb), at: null, typed: true })
-              }
+        <ul
+          key={image.name + image.size.width + image.size.height}
+          aria-label="The colors"
+          className="mt-3 grid gap-1.5 sm:grid-cols-[repeat(auto-fit,minmax(76px,1fr))] sm:gap-2"
+        >
+          {palette.map((entry, index) => (
+            <SwatchChip
+              key={entry.key}
+              entry={entry}
+              index={index}
+              value={valueIn(format, entry)}
+              copied={copied === entry.key}
+              focused={focus === entry.key}
+              onCopy={() => copy(entry.key, valueIn(format, entry))}
+              onFocus={setFocus}
+              onRemove={() => remove(entry)}
             />
-          )}
-
-          {(shortfall || hidden.length > 0) && (
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-muted">
-              {shortfall && (
-                <span>
-                  This image has{' '}
-                  {found.length === 1 ? 'one main color' : `${found.length} main colors`}, so that’s
-                  all there is to show.
-                </span>
-              )}
-              {hidden.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setHidden([])}
-                  className="min-h-11 font-medium text-ink-2 underline underline-offset-2 hover:text-ink lg:min-h-0"
-                >
-                  Bring back {hidden.length} removed
-                </button>
-              )}
+          ))}
+          <li className="fx-emerge min-w-0" style={{ '--i': palette.length } as CSSProperties}>
+            <div className="grid h-full grid-cols-2 gap-1 rounded-[18px] border-[1.5px] border-dashed border-line-strong p-1 sm:min-h-[176px] sm:grid-cols-1 sm:content-center">
+              <button
+                type="button"
+                onClick={pointAtImage}
+                className="flex min-h-12 items-center justify-center gap-2 rounded-[13px] px-2 text-[14px] font-medium text-ink-2 transition-colors hover:bg-ink/[.06] hover:text-ink sm:flex-col sm:gap-1"
+              >
+                <Icon name="pipette" size={18} className="shrink-0 text-[var(--accent-ink)]" />
+                Pick one
+              </button>
+              <button
+                type="button"
+                aria-expanded={typing}
+                onClick={() => setTyping(!typing)}
+                className="flex min-h-12 items-center justify-center gap-2 rounded-[13px] px-2 text-[14px] font-medium text-ink-2 transition-colors hover:bg-ink/[.06] hover:text-ink sm:flex-col sm:gap-1"
+              >
+                <Icon name="hash" size={18} className="shrink-0 text-[var(--accent-ink)]" />
+                Type a code
+              </button>
             </div>
-          )}
-        </Surface>
+          </li>
+        </ul>
 
-        {palette.length > 0 && (
-          <>
-            <Pairs className="order-3" palette={palette} pairs={pairs} />
-            <Exports className="order-4" palette={palette} stem={stem} />
-          </>
+        {typing && (
+          <AddColor
+            onClose={() => setTyping(false)}
+            onAdd={(color) =>
+              add({ ...color, share: shareNear(image.sample, color.rgb), at: null, typed: true })
+            }
+          />
+        )}
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <FormatSwitch value={format} onChange={setFormat} />
+          <Stepper count={count} onChange={setCount} />
+        </div>
+
+        <p role="status" className="mt-2 text-[13px] text-muted empty:hidden">
+          {message}
+        </p>
+        {(shortfall || hidden.length > 0) && (
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted">
+            {shortfall && (
+              <span>
+                {found.length === 1
+                  ? 'This image has just one main color.'
+                  : `This image has ${found.length} main colors.`}
+              </span>
+            )}
+            {hidden.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setHidden([])}
+                className="min-h-11 font-medium text-ink-2 underline underline-offset-2 hover:text-ink"
+              >
+                Bring back {hidden.length} removed
+              </button>
+            )}
+          </div>
         )}
       </div>
+
+      {palette.length > 0 && (
+        <>
+          <Exports
+            className="lg:col-start-2 lg:row-start-2"
+            palette={palette}
+            stem={stem}
+            format={format}
+            allText={allText}
+            copy={copy}
+            copied={copied}
+          />
+          <Pairs className="lg:col-start-2 lg:row-start-3" palette={palette} pairs={pairs} />
+        </>
+      )}
     </div>
   );
 }
 
 const ACCENT = 'var(--accent, #ff7ab6)';
+/** A counting number in the headline's own type (CountUp is monospaced by default). */
+const DISPLAY_NUMBER =
+  '![font-family:inherit] ![font-variation-settings:inherit] ![letter-spacing:inherit]';
+
+/** The room's light eases from one picture's colors to the next rather than jumping. */
+const ROOM_FADE = `
+@property --accent { syntax: '<color>'; inherits: true; initial-value: #ff7ab6; }
+@property --glow { syntax: '<color>'; inherits: true; initial-value: #ffd166; }
+.tool-world { transition: --accent .6s ease, --glow .6s ease; }
+@media (prefers-reduced-motion: reduce) { .tool-world { transition: none; } }
+`;
 
 const SAMPLES = [
   {
@@ -721,16 +826,13 @@ function ImageBar({
 }) {
   const id = useId();
   return (
-    <div className="flex items-center gap-3">
-      <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-well text-ink-2">
-        <Icon name="image" size={19} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-[14px] font-medium text-ink">{image.name}</p>
-        <p className="mono-num truncate text-[11.5px] text-muted">
+    <div className="flex items-center gap-2 px-1">
+      <p className="min-w-0 flex-1 truncate text-[13px] text-muted">
+        <span className="font-medium text-ink-2">{image.name}</span>
+        <span className="mono-num ml-2 text-[11.5px]">
           {image.size.width}×{image.size.height}
-        </p>
-      </div>
+        </span>
+      </p>
       <input
         id={`${id}-replace`}
         type="file"
@@ -745,13 +847,35 @@ function ImageBar({
       <label
         htmlFor={`${id}-replace`}
         className={cn(
-          'inline-flex h-11 items-center gap-1.5 rounded-[11px] bg-well px-3 text-[14px] font-medium text-ink-2 transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-signal hover:bg-ink/10 hover:text-ink lg:h-9 lg:text-[13.5px]',
+          'inline-flex h-11 shrink-0 cursor-pointer items-center gap-1.5 rounded-full bg-ink/[.06] px-3.5 text-[14px] font-medium text-ink-2 transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[var(--accent-ink)] hover:bg-ink/10 hover:text-ink lg:h-10 lg:text-[13.5px]',
           busy && 'pointer-events-none opacity-45',
         )}
       >
-        <Icon name="replace" size={15} /> New image
+        <Icon name={busy ? 'loader' : 'replace'} size={15} className={cn(busy && 'animate-spin')} />
+        New image
       </label>
       <IconButton icon="x" label="Remove the image" onClick={onRemove} disabled={busy} />
+    </div>
+  );
+}
+
+/** How much of the picture each color covers: the strip the swatches come out of. */
+function ShareBar({ palette, focus }: { palette: Entry[]; focus: string | null }) {
+  return (
+    <div
+      role="img"
+      aria-label={`How much of the image each color covers: ${palette
+        .map((entry) => `${entry.hex} ${formatShare(entry.share)}`)
+        .join(', ')}`}
+      className="flex h-2 gap-[2px] overflow-hidden rounded-full"
+    >
+      {palette.map((entry) => (
+        <span
+          key={entry.key}
+          className={cn('fx-move h-full min-w-2', focus && focus !== entry.key && 'opacity-40')}
+          style={{ background: entry.hex, flexGrow: Math.max(entry.share, 0.025) }}
+        />
+      ))}
     </div>
   );
 }
@@ -806,9 +930,9 @@ function Picker({
   };
 
   return (
-    <div className="grid place-items-center rounded-[16px] bg-subtle p-2.5 shadow-[inset_0_0_0_1px_var(--color-line)] sm:p-3">
+    <div className="grid place-items-center overflow-hidden rounded-[18px] bg-ink/[.04]">
       <div
-        className="relative max-w-full overflow-hidden rounded-[10px]"
+        className="fx-pop relative max-w-full overflow-hidden"
         style={{
           backgroundImage: 'repeating-conic-gradient(#dcd8d0 0% 25%, #ffffff 0% 50%)',
           backgroundSize: '16px 16px',
@@ -837,7 +961,7 @@ function Picker({
             if (!start || Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10) return;
             onPick(where(event));
           }}
-          className="block h-auto max-h-[min(62vh,560px)] w-auto max-w-full cursor-crosshair touch-manipulation"
+          className="block h-auto max-h-[min(46vh,420px)] w-auto max-w-full cursor-crosshair touch-manipulation lg:max-h-[min(58vh,520px)]"
         />
         {palette.map(
           (entry) =>
@@ -848,7 +972,7 @@ function Picker({
                 onPointerEnter={() => onFocus(entry.key)}
                 onPointerLeave={() => onFocus(null)}
                 className={cn(
-                  'absolute -translate-x-1/2 -translate-y-1/2 rounded-full shadow-[0_0_0_2px_#fff,0_2px_8px_rgb(0_0_0/.45)] transition-[width,height] duration-200',
+                  'fx-move absolute -translate-x-1/2 -translate-y-1/2 rounded-full shadow-[0_0_0_2px_#fff,0_2px_8px_rgb(0_0_0/.45)]',
                   focus === entry.key ? 'z-10 size-7' : 'size-3.5',
                 )}
                 style={{
@@ -863,15 +987,15 @@ function Picker({
           <span
             key={nudge}
             aria-hidden="true"
-            className="pointer-events-none absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 animate-pop items-center gap-2 rounded-full bg-[#12110d]/85 py-2 pr-3.5 pl-2 text-[13.5px] font-medium whitespace-nowrap text-white shadow-[0_8px_24px_-8px_rgb(0_0_0/.6)]"
+            className="fx-pop pointer-events-none absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full bg-[#12110d]/80 py-1.5 pr-3.5 pl-1.5 text-[13px] font-medium whitespace-nowrap text-white shadow-[0_8px_24px_-8px_rgb(0_0_0/.6)]"
           >
             <span
-              className="grid size-6 place-items-center rounded-full text-[#12110d]"
+              className="grid size-6 place-items-center rounded-full text-[var(--on-accent,#12110d)]"
               style={{ background: ACCENT }}
             >
               <Icon name="pipette" size={13} />
             </span>
-            Tap anywhere to add a color
+            Tap the picture to add a color
           </span>
         )}
         {hover && (
@@ -895,7 +1019,7 @@ function Picker({
                     } as CSSProperties)
               }
             />
-            <span className="mono-num rounded-full bg-night px-2 py-0.5 text-[11px] text-white">
+            <span className="mono-num rounded-full bg-[#12110d] px-2 py-0.5 text-[11px] text-white">
               {hover.hex ?? 'See-through'}
             </span>
           </span>
@@ -905,12 +1029,47 @@ function Picker({
   );
 }
 
+function FormatSwitch({
+  value,
+  onChange,
+}: {
+  value: ColorFormat;
+  onChange: (value: ColorFormat) => void;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Show colors as"
+      className="flex shrink-0 rounded-full bg-ink/[.06] p-1"
+    >
+      {FORMATS.map((option) => {
+        const on = option.value === value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            onClick={() => onChange(option.value)}
+            className={cn(
+              'fx-move mono-num h-10 min-w-[52px] rounded-full px-3 text-[12.5px] font-semibold tracking-[.04em] lg:h-9',
+              on ? 'bg-surface text-ink shadow-card' : 'text-muted hover:text-ink',
+            )}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function Stepper({ count, onChange }: { count: number; onChange: (count: number) => void }) {
   return (
     <div
       role="group"
       aria-label="How many colors to find"
-      className="flex shrink-0 items-center rounded-full bg-well p-1"
+      className="flex shrink-0 items-center rounded-full bg-ink/[.06] p-1"
     >
       <button
         type="button"
@@ -921,7 +1080,7 @@ function Stepper({ count, onChange }: { count: number; onChange: (count: number)
       >
         <Icon name="minus" size={16} />
       </button>
-      <span className="mono-num w-[62px] text-center text-[13px] text-ink" aria-live="polite">
+      <span className="mono-num w-[64px] text-center text-[12.5px] text-ink-2" aria-live="polite">
         Up to {count}
       </span>
       <button
@@ -940,24 +1099,30 @@ function Stepper({ count, onChange }: { count: number; onChange: (count: number)
 /** Text that reads on a color: near-white or near-black. */
 const inkOn = (entry: Swatch) => (textOn(entry.rgb).text === 'white' ? '#FFFFFF' : '#12110d');
 
-/** A big color you can tap to copy, with its nickname and how much of the image it covers. */
-function SwatchCard({
+/**
+ * A color, big, out of the picture: tap it to copy. The swatch itself says it took ("Copied"),
+ * a stripe on a phone and a tall chip on a larger screen.
+ */
+function SwatchChip({
   entry,
-  big,
+  index,
+  value,
+  copied,
   focused,
+  onCopy,
   onFocus,
   onRemove,
 }: {
   entry: Entry;
-  big: boolean;
+  index: number;
+  value: string;
+  copied: boolean;
   focused: boolean;
+  onCopy: () => void;
   onFocus: (key: string | null) => void;
   onRemove: () => void;
 }) {
-  const { copy, copied } = useCopy();
-  const done = copied === entry.hex;
   const ink = inkOn(entry);
-  const light = ink === '#FFFFFF';
   const name = colorName(entry.rgb);
   const share =
     entry.kind === 'typed' && entry.share === 0
@@ -967,69 +1132,60 @@ function SwatchCard({
     <li
       onPointerEnter={() => onFocus(entry.key)}
       onPointerLeave={() => onFocus(null)}
-      className={cn('relative min-w-0 animate-rise', big && 'col-span-2')}
+      className="fx-emerge relative min-w-0"
+      style={{ '--i': index } as CSSProperties}
     >
       <button
         type="button"
-        onClick={() => copy(entry.hex, `Copied ${name.toLowerCase()} · ${entry.hex}`)}
-        aria-label={`${name}, ${entry.hex}, ${share}. Copy`}
+        onClick={onCopy}
+        aria-label={`${name}, ${value}, ${share}. Copy`}
         className={cn(
-          'flex w-full flex-col justify-between rounded-[20px] p-4 text-left shadow-[inset_0_0_0_1px_rgb(0_0_0/.14)] transition-[transform,box-shadow] duration-200 active:scale-[.98]',
-          big ? 'h-48 sm:h-52' : 'h-40',
+          'fx-move relative flex h-[68px] w-full items-center justify-between gap-3 overflow-hidden rounded-[18px] py-2 pr-14 pl-4 text-left shadow-[inset_0_0_0_1px_rgb(0_0_0/.12)] active:scale-[.97] sm:h-[176px] sm:flex-col sm:items-start sm:p-3 sm:pr-3 sm:hover:-translate-y-1',
           focused &&
-            'shadow-[inset_0_0_0_1px_rgb(0_0_0/.14),0_0_0_3px_var(--color-surface),0_0_0_5px_var(--accent,var(--color-ink))]',
+            'shadow-[inset_0_0_0_1px_rgb(0_0_0/.12),0_0_0_3px_var(--color-canvas),0_0_0_5px_var(--accent-ink)]',
+          copied && 'fx-ping',
         )}
         style={{ background: entry.hex, color: ink }}
       >
-        <span className="min-w-0 pr-8">
+        <span className="min-w-0 sm:w-full sm:pr-4">
           <span
-            className={cn(
-              'block font-display leading-[1.02] font-bold tracking-[-0.025em] text-balance',
-              big ? 'text-[30px] sm:text-[34px]' : 'text-[18px]',
-            )}
-            style={{ fontVariationSettings: "'wdth' 108" }}
+            className="block truncate font-display text-[17px] leading-tight font-bold tracking-[-0.02em] sm:overflow-visible sm:text-[14.5px] sm:whitespace-normal"
+            style={{ fontVariationSettings: "'wdth' 106" }}
           >
             {name}
           </span>
-          {entry.kind !== 'found' && (
-            <span className="mt-1.5 inline-flex items-center gap-1 text-[12px] font-medium opacity-80">
-              <Icon name={entry.kind === 'picked' ? 'pipette' : 'hash'} size={12} />
-              {entry.kind === 'picked' ? 'Picked' : 'Added'}
-            </span>
-          )}
-        </span>
-        <span className="flex items-end justify-between gap-2">
-          <span className="min-w-0">
-            <span
-              className={cn(
-                'mono-num block font-semibold tracking-[0.01em]',
-                big ? 'text-[20px]' : 'text-[15px]',
-              )}
-            >
-              {entry.hex}
-            </span>
-            <span className="mt-0.5 block text-[12px] leading-tight opacity-75">{share}</span>
-          </span>
-          <span
-            key={done ? 'done' : 'copy'}
-            aria-hidden="true"
-            className={cn(
-              'shrink-0 animate-pop place-items-center rounded-full',
-              big ? 'flex h-9 items-center gap-1.5 px-3 text-[13px] font-semibold' : 'grid size-8',
+          <span className="mt-0.5 flex items-center gap-1 text-[12px] leading-tight opacity-75">
+            {entry.kind !== 'found' && (
+              <Icon name={entry.kind === 'picked' ? 'pipette' : 'hash'} size={11} />
             )}
-            style={{ background: light ? 'rgb(255 255 255 / .18)' : 'rgb(0 0 0 / .08)' }}
-          >
-            <Icon name={done ? 'check' : 'copy'} size={15} />
-            {big && (done ? 'Copied' : 'Copy')}
+            {share}
           </span>
         </span>
+        <span className="mono-num shrink-0 text-[13px] font-semibold tracking-[0.01em] sm:text-[12.5px] sm:[overflow-wrap:anywhere]">
+          {value}
+        </span>
+        {copied && (
+          <span
+            aria-hidden="true"
+            className="fx-pop absolute inset-0 flex items-center justify-center gap-2 text-[15px] font-bold sm:flex-col sm:gap-1.5"
+            style={{ background: entry.hex }}
+          >
+            <span
+              className="grid size-8 place-items-center rounded-full"
+              style={{ background: ink, color: entry.hex }}
+            >
+              <Icon name="check" size={17} strokeWidth={3} />
+            </span>
+            Copied
+          </span>
+        )}
       </button>
       <button
         type="button"
         onClick={onRemove}
         aria-label={`Remove ${entry.hex}`}
         title="Remove"
-        className="absolute top-1.5 right-1.5 grid size-10 place-items-center rounded-full opacity-60 transition-opacity hover:opacity-100 focus-visible:opacity-100"
+        className="absolute top-1/2 right-1.5 grid size-11 -translate-y-1/2 place-items-center rounded-full opacity-55 transition-opacity hover:opacity-100 focus-visible:opacity-100 sm:-top-0.5 sm:-right-0.5 sm:size-9 sm:translate-y-0"
         style={{ color: ink }}
       >
         <Icon name="x" size={16} />
@@ -1052,24 +1208,15 @@ function AddColor({ onAdd, onClose }: { onAdd: (color: Swatch) => void; onClose:
   };
   const preview = hexToRgb(text);
   return (
-    <form
-      onSubmit={submit}
-      className="grid animate-pop gap-2 rounded-[18px] bg-subtle p-3.5 shadow-[inset_0_0_0_1px_var(--color-line)]"
-    >
-      <div className="flex items-start justify-between gap-2">
-        <label htmlFor={`${id}-hex`} className="pt-1 text-[14px] font-medium text-ink">
-          Type a color code{' '}
-          <span className="block text-[13px] font-normal text-muted">
-            Your brand color, say, to see it next to these.
-          </span>
-        </label>
-        <IconButton icon="x" label="Close" onClick={onClose} size="sm" />
-      </div>
+    <form onSubmit={submit} className="fx-pop mt-2 grid gap-2">
+      <label htmlFor={`${id}-hex`} className="sr-only">
+        A color code
+      </label>
       <div className="flex gap-2">
         <div className="relative min-w-0 flex-1">
           <span
             aria-hidden="true"
-            className="absolute top-1/2 left-3 size-5 -translate-y-1/2 rounded-full shadow-[inset_0_0_0_1px_var(--color-line-strong)]"
+            className="absolute top-1/2 left-3 size-6 -translate-y-1/2 rounded-full shadow-[inset_0_0_0_1px_var(--color-line-strong)]"
             style={{ background: preview ? rgbToHex(preview) : 'transparent' }}
           />
           <input
@@ -1088,20 +1235,21 @@ function AddColor({ onAdd, onClose }: { onAdd: (color: Swatch) => void; onClose:
               setText(event.target.value);
               setError('');
             }}
-            className="mono-num h-12 w-full rounded-[12px] bg-surface pr-3 pl-10 text-[16px] text-ink uppercase shadow-[inset_0_0_0_1px_var(--color-line-strong)] outline-none placeholder:text-faint placeholder:normal-case focus:shadow-[inset_0_0_0_1.5px_var(--color-signal)] lg:h-10 lg:text-[14px]"
+            className="mono-num h-12 w-full rounded-full bg-surface pr-3 pl-12 text-[16px] text-ink uppercase shadow-[inset_0_0_0_1px_var(--color-line-strong)] outline-none placeholder:text-faint placeholder:normal-case focus:shadow-[inset_0_0_0_2px_var(--accent-ink)]"
           />
         </div>
         <button
           type="submit"
           disabled={!text.trim()}
-          className="inline-flex h-12 items-center gap-1.5 rounded-[12px] px-4 text-[15px] font-semibold text-[#12110d] transition-opacity disabled:opacity-40 lg:h-10 lg:text-[14px]"
+          className="inline-flex h-12 items-center gap-1.5 rounded-full px-5 text-[15px] font-semibold text-[var(--on-accent,#12110d)] transition-opacity disabled:opacity-40"
           style={{ background: ACCENT }}
         >
           <Icon name="plus" size={16} /> Add
         </button>
+        <IconButton icon="x" label="Close" onClick={onClose} className="!size-12" />
       </div>
       {error && (
-        <p id={`${id}-error`} className="text-[13px] text-critical">
+        <p id={`${id}-error`} className="px-2 text-[13px] text-critical">
           {error}
         </p>
       )}
@@ -1125,17 +1273,19 @@ function Pairs({
   const [all, setAll] = useState(false);
   const shown = all ? pairs : pairs.slice(0, 4);
   return (
-    <Surface className={cn('grid gap-4', className)} aria-labelledby={`${id}-pairs`}>
+    <section className={cn('grid min-w-0 gap-3', className)} aria-labelledby={`${id}-pairs`}>
       <div>
-        <Label id={`${id}-pairs`}>Easy to read together</Label>
-        <p className="mt-1 text-[14px] text-muted">
-          {pairs.length
-            ? 'Text in one of these colors stays clear on the other.'
-            : 'No two of these colors are far enough apart to carry small text on each other. Each swatch above shows the text color that reads on it instead.'}
-        </p>
+        <h3 id={`${id}-pairs`} className="text-[15px] font-semibold text-ink">
+          Easy to read together
+        </h3>
+        {!pairs.length && (
+          <p className="mt-1 text-[13.5px] text-muted">
+            None of these are far enough apart to carry small text on each other.
+          </p>
+        )}
       </div>
       {pairs.length > 0 && (
-        <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4">
+        <ul className="grid grid-cols-2 gap-2">
           {shown.map((pair, index) => {
             const back = palette[pair.first];
             const front = palette[pair.second];
@@ -1143,17 +1293,17 @@ function Pairs({
               <li
                 key={`${back.key}-${front.key}`}
                 aria-label={`${colorName(front.rgb)} text on ${colorName(back.rgb).toLowerCase()} (${front.hex} on ${back.hex}), contrast ${formatRatio(pair.ratio)}`}
-                className="flex min-h-[132px] min-w-0 animate-rise flex-col justify-between gap-2 rounded-[18px] p-3.5 shadow-[inset_0_0_0_1px_rgb(0_0_0/.14)]"
-                style={{ background: back.hex, color: front.hex }}
+                className="fx-rise flex min-h-[112px] min-w-0 flex-col justify-between gap-2 rounded-[18px] p-3.5 shadow-[inset_0_0_0_1px_rgb(0_0_0/.12)]"
+                style={{ background: back.hex, color: front.hex, '--i': index } as CSSProperties}
               >
                 <span aria-hidden="true">
                   <span
-                    className="block font-display text-[34px] leading-none font-bold tracking-[-0.03em]"
+                    className="block font-display text-[30px] leading-none font-bold tracking-[-0.03em]"
                     style={{ fontVariationSettings: "'wdth' 110" }}
                   >
                     Aa
                   </span>
-                  <span className="mt-1.5 block text-[14.5px] leading-tight font-semibold">
+                  <span className="mt-1 block text-[14px] leading-tight font-semibold">
                     {PAIR_LINES[index % PAIR_LINES.length]}
                   </span>
                 </span>
@@ -1175,26 +1325,31 @@ function Pairs({
         <button
           type="button"
           onClick={() => setAll(!all)}
-          className="min-h-11 justify-self-start text-[14px] font-medium text-ink-2 underline underline-offset-2 hover:text-ink lg:min-h-0"
+          className="min-h-11 justify-self-start text-[14px] font-medium text-ink-2 underline underline-offset-2 hover:text-ink"
         >
           {all ? 'Show fewer' : `Show all ${pairs.length}`}
         </button>
       )}
-    </Surface>
+    </section>
   );
 }
 
-const FORMATS = [
-  { value: 'hex', label: 'HEX codes' },
-  { value: 'rgb', label: 'RGB' },
-  { value: 'hsl', label: 'HSL' },
+const CODES = [
   { value: 'css', label: 'CSS variables' },
   { value: 'tailwind', label: 'Tailwind' },
   { value: 'json', label: 'JSON' },
 ] as const;
-type Format = (typeof FORMATS)[number]['value'];
+type Code = ColorFormat | (typeof CODES)[number]['value'];
+const CODE_NAMES: Record<Code, string> = {
+  hex: 'HEX codes',
+  rgb: 'RGB',
+  hsl: 'HSL',
+  css: 'CSS variables',
+  tailwind: 'Tailwind',
+  json: 'JSON',
+};
 
-function codeFor(format: Format, palette: Entry[]) {
+function codeFor(format: Code, palette: Entry[]) {
   const hexes = palette.map((entry) => entry.hex);
   if (format === 'hex') return hexes.join('\n');
   if (format === 'rgb') return palette.map((entry) => formatRgb(entry.rgb)).join('\n');
@@ -1204,20 +1359,29 @@ function codeFor(format: Format, palette: Entry[]) {
   return paletteJson(palette.map(({ hex, rgb, share }) => ({ hex, rgb, share })));
 }
 
-/** The whole palette, in a tap: as codes for a design app or a stylesheet, or as a picture. */
+/**
+ * The whole palette in a tap: every color in the chosen format (the big button), for code, or as a
+ * picture of the swatches.
+ */
 function Exports({
   palette,
   stem,
+  format,
+  allText,
+  copy,
+  copied,
   className,
 }: {
   palette: Entry[];
   stem: string;
+  format: ColorFormat;
+  allText: string;
+  copy: (key: string, text: string) => Promise<boolean>;
+  copied: string | null;
   className?: string;
 }) {
-  const id = useId();
   const toast = useToast();
-  const { copy, copied } = useCopy();
-  const [shown, setShown] = useState<Format>('css');
+  const [shown, setShown] = useState<Code>('css');
   const code = codeFor(shown, palette);
 
   const savePng = async () => {
@@ -1237,88 +1401,124 @@ function Exports({
   };
 
   const chip =
-    'inline-flex min-h-11 items-center gap-2 rounded-full px-4 text-[14.5px] font-medium transition-[background-color,color,transform] active:scale-[.97] lg:min-h-10 lg:text-[14px]';
+    'fx-move inline-flex min-h-11 items-center gap-2 rounded-full px-4 text-[14px] font-medium active:scale-[.97] lg:min-h-10';
+  const allDone = copied === 'all';
 
   return (
-    <Surface className={cn('grid gap-4', className)} aria-labelledby={`${id}-use`}>
-      <div>
-        <Label id={`${id}-use`}>Copy as…</Label>
-        <p className="mt-1 text-[14px] text-muted">
-          All {palette.length} colors at once, for a design app or your code.
-        </p>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {FORMATS.map((format) => {
-          const text = codeFor(format.value, palette);
-          const done = copied === text;
+    <section className={cn('grid min-w-0 gap-3', className)} aria-label="Use the palette">
+      <ActionBar className="!mt-0 from-canvas via-canvas/95 sm:!pt-0">
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => copy('all', allText)}
+            aria-label={`Copy all ${palette.length} as ${CODE_NAMES[format]}`}
+            className={cn(
+              'fx-move inline-flex h-14 min-w-0 flex-1 items-center justify-center gap-2 rounded-full px-5 text-[16.5px] font-semibold text-[var(--on-accent,#12110d)] shadow-[0_16px_32px_-18px_var(--accent)] active:scale-[.97]',
+              allDone && 'fx-ping',
+            )}
+            style={{ background: ACCENT }}
+          >
+            <Icon name={allDone ? 'check' : 'copy'} size={19} strokeWidth={allDone ? 3 : 2} />
+            {allDone ? 'Copied' : `Copy all ${palette.length}`}
+            <span className="mono-num text-[12.5px] font-bold opacity-70">
+              {format.toUpperCase()}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={savePng}
+            aria-label="Save the swatches as a picture"
+            className="fx-move inline-flex h-14 shrink-0 items-center gap-2 rounded-full bg-surface px-5 text-[15px] font-semibold text-ink shadow-[inset_0_0_0_1px_var(--color-line)] hover:bg-ink/[.04] active:scale-[.97]"
+          >
+            <Icon name="download" size={18} />
+            <span className="max-sm:sr-only">Picture</span>
+          </button>
+        </div>
+      </ActionBar>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="mr-0.5 text-[13.5px] text-muted">Copy as</span>
+        {CODES.map((option) => {
+          const done = copied === `code-${option.value}`;
           return (
             <button
-              key={format.value}
+              key={option.value}
               type="button"
-              aria-label={`Copy as ${format.label}`}
+              aria-label={`Copy as ${option.label}`}
               onClick={() => {
-                setShown(format.value);
-                void copy(text, `${format.label} copied`);
+                setShown(option.value);
+                void copy(`code-${option.value}`, codeFor(option.value, palette));
               }}
               className={cn(
                 chip,
-                done ? 'text-[#12110d]' : 'bg-well text-ink-2 hover:bg-ink/10 hover:text-ink',
+                done
+                  ? 'fx-ping text-[var(--on-accent,#12110d)]'
+                  : 'bg-ink/[.06] text-ink-2 hover:bg-ink/10 hover:text-ink',
               )}
               style={done ? { background: ACCENT } : undefined}
             >
-              <Icon name={done ? 'check' : 'copy'} size={15} />
-              {format.label}
+              <Icon name={done ? 'check' : 'braces'} size={15} />
+              {done ? 'Copied' : option.label}
             </button>
           );
         })}
-      </div>
-      <div className="flex flex-wrap items-center gap-2 border-t border-line pt-4">
-        <span className="mr-1 text-[14px] text-muted">Save the swatches</span>
-        <button
-          type="button"
-          onClick={savePng}
-          className={cn(chip, 'bg-well text-ink-2 hover:bg-ink/10 hover:text-ink')}
-        >
-          <Icon name="download" size={15} /> Picture
-        </button>
         <button
           type="button"
           onClick={saveSvg}
-          className={cn(chip, 'bg-well text-ink-2 hover:bg-ink/10 hover:text-ink')}
+          className={cn(chip, 'bg-ink/[.06] text-ink-2 hover:bg-ink/10 hover:text-ink')}
         >
           <Icon name="download" size={15} /> SVG
         </button>
       </div>
-      <MoreOptions
-        label="See the code"
-        summary={FORMATS.find((format) => format.value === shown)?.label}
-      >
-        <pre className="max-h-64 overflow-auto rounded-[14px] bg-subtle p-4 text-[12.5px] leading-relaxed text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line)]">
-          <code className="mono-num">
-            {code.split('\n').map((line, index) => {
-              // A dot of each color beside its line (JSON has several lines per color).
-              const dot =
-                shown === 'json'
-                  ? undefined
-                  : shown === 'css' || shown === 'tailwind'
-                    ? /#[0-9A-F]{6}/.exec(line)?.[0]
-                    : palette[index]?.hex;
-              return (
-                <span key={index} className="block whitespace-pre">
-                  {line}
-                  {dot && (
-                    <span
-                      aria-hidden="true"
-                      className="ml-2 inline-block size-2.5 rounded-full align-[-1px] shadow-[inset_0_0_0_1px_var(--color-line-strong)]"
-                      style={{ background: dot }}
-                    />
-                  )}
-                </span>
-              );
-            })}
-          </code>
-        </pre>
-      </MoreOptions>
-    </Surface>
+
+      <Advanced summary={`See the code · ${CODE_NAMES[shown]}`}>
+        <div className="grid gap-2">
+          <div role="radiogroup" aria-label="Code to show" className="flex flex-wrap gap-1.5">
+            {(Object.keys(CODE_NAMES) as Code[]).map((value) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={shown === value}
+                onClick={() => setShown(value)}
+                className={cn(
+                  'min-h-10 rounded-full px-3 text-[13px] font-medium',
+                  shown === value
+                    ? 'bg-ink text-on-ink'
+                    : 'bg-ink/[.06] text-ink-2 hover:bg-ink/10 hover:text-ink',
+                )}
+              >
+                {CODE_NAMES[value]}
+              </button>
+            ))}
+          </div>
+          <pre className="max-h-64 overflow-auto rounded-[14px] bg-ink/[.045] p-4 text-[12.5px] leading-relaxed text-ink-2">
+            <code className="mono-num">
+              {code.split('\n').map((line, index) => {
+                // A dot of each color beside its line (JSON has several lines per color).
+                const dot =
+                  shown === 'json'
+                    ? undefined
+                    : shown === 'css' || shown === 'tailwind'
+                      ? /#[0-9A-F]{6}/.exec(line)?.[0]
+                      : palette[index]?.hex;
+                return (
+                  <span key={index} className="block whitespace-pre">
+                    {line}
+                    {dot && (
+                      <span
+                        aria-hidden="true"
+                        className="ml-2 inline-block size-2.5 rounded-full align-[-1px] shadow-[inset_0_0_0_1px_var(--color-line-strong)]"
+                        style={{ background: dot }}
+                      />
+                    )}
+                  </span>
+                );
+              })}
+            </code>
+          </pre>
+        </div>
+      </Advanced>
+    </section>
   );
 }
