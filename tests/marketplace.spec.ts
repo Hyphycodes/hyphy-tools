@@ -91,7 +91,10 @@ test('open several tools in a row, and back always lands on the marketplace', as
     .click();
   await expect(page.getByRole('heading', { level: 1, name: 'Split' })).toBeVisible();
   // “Open next” on Split.
-  await page.getByRole('link', { name: /^When\?/ }).first().click();
+  await page
+    .getByRole('link', { name: /^When\?/ })
+    .first()
+    .click();
   await expect(page.getByRole('heading', { level: 1, name: 'When?' })).toBeVisible();
   await page.goBack();
   await expect(page.getByRole('heading', { level: 1, name: 'Split' })).toBeVisible();
@@ -137,7 +140,7 @@ test.describe('on a phone', () => {
       .first()
       .tap();
     await expect(page.getByRole('heading', { level: 1, name: 'Split' })).toBeVisible();
-    const camera = await page.getByText('Take a photo').boundingBox();
+    const camera = await page.getByText('Take a photo', { exact: true }).boundingBox();
     // The camera button is on the first screen, no scrolling.
     expect(camera!.y + camera!.height).toBeLessThan(844);
     await page.goBack();

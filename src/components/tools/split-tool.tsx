@@ -16,6 +16,7 @@ import { receiptReader, type ReadProgress } from '@/lib/tools/receipt-reader';
 import { decodeState, clearHash, linkFor, newId } from '@/lib/share/link-state';
 import { useLocalState } from '@/lib/share/local';
 import {
+  allocate,
   computeSplit,
   CURRENCIES,
   formatMoney,
@@ -25,9 +26,10 @@ import {
   splitSummary,
   type SplitBill,
 } from '@/lib/tools/split';
-import { IconButton, Note, useCopy } from './kit';
+import { IconButton, Journey, Note, SampleButton, StartPanel, useCopy } from './kit';
 import { MoneyInput } from './money-input';
 import { ShareLinkCard } from './share-link';
+import { Avatar, colorOf, PAPER, PAPER_INK, StartArt, torn } from './split-art';
 
 /*
  * Split, receipt first: photograph the check, fix anything the reader got wrong, say who's at the
@@ -39,28 +41,35 @@ import { ShareLinkCard } from './share-link';
  * copy inside a link.
  */
 
-const COLORS = [
-  '#b8f35a',
-  '#8f9bff',
-  '#ff8ad8',
-  '#ffc53d',
-  '#7ce0c3',
-  '#ff9e7a',
-  '#c7b5ff',
-  '#7fd4ff',
-];
 const TIPS = [15, 18, 20, 22];
-const ACCENT = '#b8f35a';
+const ACCENT = 'var(--accent, var(--color-ink))';
 
 type Step = 'start' | 'receipt' | 'people' | 'items' | 'tip' | 'done' | 'even';
 const FLOW: { step: Step; label: string }[] = [
   { step: 'receipt', label: 'Receipt' },
   { step: 'people', label: 'People' },
-  { step: 'items', label: 'Who had what' },
+  { step: 'items', label: 'Who had it' },
   { step: 'tip', label: 'Tax & tip' },
-  { step: 'done', label: 'Split' },
+  { step: 'done', label: 'Totals' },
 ];
 const STEPS: Step[] = ['receipt', 'people', 'items', 'tip', 'done', 'even'];
+
+/** A made-up dinner to try it with, made on the device. */
+const SAMPLE: ParsedReceipt = {
+  merchant: 'The Sample Trattoria',
+  items: [
+    { name: 'Garlic knots', qty: 1, price: 750, unsure: false },
+    { name: 'Margherita pizza', qty: 1, price: 1600, unsure: false },
+    { name: 'Rigatoni alla vodka', qty: 1, price: 1850, unsure: false },
+    { name: 'Caesar salad', qty: 1, price: 1200, unsure: false },
+    { name: 'Lemonade', qty: 2, price: 900, unsure: false },
+    { name: 'Tiramisu', qty: 1, price: 850, unsure: false },
+  ],
+  subtotal: 7150,
+  tax: 635,
+  tip: null,
+  total: null,
+};
 
 /* ---------------- the step, in the address ---------------- */
 
@@ -111,20 +120,41 @@ function toolTop() {
   return tool ? tool.getBoundingClientRect().top + window.scrollY - 72 : 0;
 }
 
+/* ---------------- names you split with before ---------------- */
+
+const NAMES_KEY = 'hyphy.split.names';
+
+function recentNames(): string[] {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(NAMES_KEY) ?? '[]');
+    return Array.isArray(value)
+      ? value.filter((name): name is string => typeof name === 'string').slice(0, 8)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberNames(names: string[]) {
+  try {
+    const seen = new Set<string>();
+    const keep = [...names.map((name) => name.trim()), ...recentNames()].filter((name) => {
+      const key = name.toLowerCase();
+      if (!name || /^(you|me)$/i.test(name) || /^person \d+$/i.test(name) || seen.has(key))
+        return false;
+      seen.add(key);
+      return true;
+    });
+    localStorage.setItem(NAMES_KEY, JSON.stringify(keep.slice(0, 8)));
+  } catch {
+    // Private mode or storage off: suggestions are a nicety.
+  }
+}
+
 /* ---------------- small parts ---------------- */
 
 const nameOf = (bill: SplitBill, index: number) =>
   bill.people[index]?.name.trim() || (index === 0 ? 'You' : `Person ${index + 1}`);
-
-function Dot({ index, className }: { index: number; className?: string }) {
-  return (
-    <span
-      aria-hidden="true"
-      className={cn('inline-block size-2.5 shrink-0 rounded-full', className)}
-      style={{ background: COLORS[index % COLORS.length] }}
-    />
-  );
-}
 
 function Title({ children, lead }: { children: ReactNode; lead?: ReactNode }) {
   return (
@@ -161,7 +191,7 @@ function NextBar({
         type="button"
         onClick={onClick}
         disabled={disabled}
-        className="flex h-14 w-full items-center justify-center gap-2 rounded-[16px] text-[16.5px] font-semibold text-[#12110d] shadow-[0_12px_30px_-12px_rgb(184_243_90/.55)] transition-[transform,opacity] active:scale-[.985] disabled:opacity-40 disabled:shadow-none"
+        className="flex h-14 w-full items-center justify-center gap-2 rounded-[16px] text-[16.5px] font-semibold text-[#12110d] shadow-[0_14px_32px_-16px_var(--accent,transparent)] transition-[transform,opacity] active:scale-[.985] disabled:opacity-40 disabled:shadow-none"
         style={{ background: ACCENT }}
       >
         {children}
@@ -182,44 +212,22 @@ function StepBar({
   onBack: () => void;
   reachable: (step: Step) => boolean;
 }) {
-  const index = FLOW.findIndex((entry) => entry.step === step);
   return (
-    <nav aria-label="Steps" className="mb-6 flex items-center gap-3">
+    <div className="mb-6 flex items-start gap-3">
       <IconButton
         icon="arrow-left"
         label="Back"
         onClick={onBack}
         className="!rounded-full bg-well"
       />
-      <ol className="flex min-w-0 flex-1 gap-1.5">
-        {FLOW.map((entry, position) => (
-          <li key={entry.step} className="min-w-0 flex-1">
-            <button
-              type="button"
-              disabled={!reachable(entry.step)}
-              aria-current={entry.step === step ? 'step' : undefined}
-              aria-label={`Go to ${entry.label.toLowerCase()}`}
-              onClick={() => onPick(entry.step)}
-              className="group block w-full py-2"
-            >
-              <span
-                className={cn(
-                  'block h-1.5 rounded-full transition-colors',
-                  position <= index ? '' : 'bg-white/[.1] group-enabled:group-hover:bg-white/20',
-                )}
-                style={position <= index ? { background: ACCENT } : undefined}
-              />
-            </button>
-          </li>
-        ))}
-      </ol>
-      <span className="shrink-0 text-[13px] text-muted">
-        <span className="font-semibold text-ink-2">{FLOW[index]?.label}</span>{' '}
-        <span className="mono-num">
-          {index + 1}/{FLOW.length}
-        </span>
-      </span>
-    </nav>
+      <Journey
+        className="flex-1 pt-1"
+        steps={FLOW.map((entry) => entry.label)}
+        current={FLOW.findIndex((entry) => entry.step === step)}
+        onPick={(index) => onPick(FLOW[index].step)}
+        reachable={(index) => reachable(FLOW[index].step)}
+      />
+    </div>
   );
 }
 
@@ -244,6 +252,33 @@ function TextLink({
   );
 }
 
+/** A slip of receipt paper: light and warm in any theme, torn at the edges. */
+function Paper({
+  children,
+  edges = 'bottom',
+  className,
+}: {
+  children: ReactNode;
+  edges?: 'bottom' | 'top' | 'both';
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn('relative', className)}
+      style={{ background: PAPER, color: PAPER_INK, ...torn(edges, 14) }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** Money fields that sit on the paper instead of in a box. */
+const onPaper = {
+  className: '[&>span]:!text-[#221e16]/45',
+  input:
+    '!bg-transparent !text-[#221e16] !shadow-none !rounded-[9px] placeholder:!text-[#221e16]/30 focus:!bg-[#221e16]/[.07] lg:!h-11 lg:!text-[16px]',
+};
+
 /* ---------------- the tool ---------------- */
 
 type Reading = {
@@ -264,6 +299,7 @@ export function SplitTool() {
   const [photo, setPhoto] = useState<string | null>(null);
   const [reading, setReading] = useState<Reading | null>(null);
   const [unsure, setUnsure] = useState<Set<string>>(() => new Set());
+  const [sample, setSample] = useState(false);
   const stop = useRef<AbortController | null>(null);
   const reader = receiptReader();
 
@@ -301,6 +337,7 @@ export function SplitTool() {
     stop.current = controller;
     const url = URL.createObjectURL(file);
     setPhoto(url);
+    setSample(false);
     setReading({ photo: url, progress: { stage: 'preparing', progress: 0 } });
     try {
       const receipt = await reader.read(file, {
@@ -360,8 +397,16 @@ export function SplitTool() {
     setReading(null);
   };
 
+  const startSample = () => {
+    setPhoto(null);
+    setSample(true);
+    apply(SAMPLE);
+    go('receipt');
+  };
+
   const startManual = () => {
     setPhoto(null);
+    setSample(false);
     setUnsure(new Set());
     setBill((current) => ({
       ...current,
@@ -390,6 +435,7 @@ export function SplitTool() {
     const people = bill.people;
     reset({ ...newBill(bill.currency), people });
     setPhoto(null);
+    setSample(false);
     setUnsure(new Set());
     go('start', { replace: true });
   };
@@ -463,28 +509,27 @@ export function SplitTool() {
 
   if (shown === 'start')
     return (
-      <Frame>
-        <Start
-          onPhoto={(file) => void read(file)}
-          onManual={startManual}
-          onEven={startEven}
-          privacy={reader.privacy}
-          saved={
-            loaded && (hasItems || (bill.mode === 'even' && bill.total > 0))
-              ? {
-                  label:
-                    bill.title.trim() || (bill.mode === 'even' ? 'Split evenly' : 'Your last bill'),
-                  detail:
-                    bill.mode === 'even'
-                      ? `${money(result.total)} between ${bill.people.length}`
-                      : `${bill.items.length} ${bill.items.length === 1 ? 'item' : 'items'} · ${money(result.total)}`,
-                  onContinue: () => go(bill.mode === 'even' ? 'even' : 'done'),
-                  onDiscard: startOver,
-                }
-              : null
-          }
-        />
-      </Frame>
+      <Start
+        onPhoto={(file) => void read(file)}
+        onSample={startSample}
+        onManual={startManual}
+        onEven={startEven}
+        privacy={reader.privacy}
+        saved={
+          loaded && (hasItems || (bill.mode === 'even' && bill.total > 0))
+            ? {
+                label:
+                  bill.title.trim() || (bill.mode === 'even' ? 'Split evenly' : 'Your last bill'),
+                detail:
+                  bill.mode === 'even'
+                    ? `${money(result.total)} between ${bill.people.length}`
+                    : `${bill.items.length} ${bill.items.length === 1 ? 'item' : 'items'} · ${money(result.total)}`,
+                onContinue: () => go(bill.mode === 'even' ? 'even' : 'done'),
+                onDiscard: startOver,
+              }
+            : null
+        }
+      />
     );
 
   if (shown === 'even')
@@ -511,6 +556,7 @@ export function SplitTool() {
           update={update}
           money={money}
           photo={photo}
+          sample={sample}
           unsure={unsure}
           onSeen={(itemId) =>
             setUnsure((current) => {
@@ -538,7 +584,10 @@ export function SplitTool() {
         {bar('people')}
         <PeopleView bill={bill} update={update} />
         <NextBar
-          onClick={() => go('items')}
+          onClick={() => {
+            rememberNames(bill.people.map((person) => person.name));
+            go('items');
+          }}
           disabled={bill.people.length < 2}
           hint={bill.people.length < 2 ? 'Add the people you’re splitting with.' : undefined}
         >
@@ -575,7 +624,7 @@ export function SplitTool() {
   return (
     <Frame>
       {bar('done')}
-      <Result bill={bill} result={result} money={money} />
+      <Result bill={bill} result={result} money={money} celebrate />
       <ShareArea bill={bill} result={result} />
       <div className="mt-6 flex flex-wrap justify-center gap-1 border-t border-line pt-5">
         <TextLink icon="pencil" onClick={() => go('receipt')}>
@@ -620,7 +669,7 @@ function PhotoButton({
       className={cn(
         'relative flex h-14 cursor-pointer items-center justify-center gap-2.5 rounded-[16px] text-[16.5px] font-semibold transition-transform focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--color-signal)] active:scale-[.985]',
         primary
-          ? 'text-[#12110d] shadow-[0_14px_34px_-14px_rgb(184_243_90/.6)]'
+          ? 'text-[#12110d] shadow-[0_14px_32px_-16px_var(--accent,transparent)]'
           : 'bg-well text-ink shadow-[inset_0_0_0_1px_var(--color-line-strong)] hover:bg-white/[.08]',
         className,
       )}
@@ -646,12 +695,14 @@ function PhotoButton({
 
 function Start({
   onPhoto,
+  onSample,
   onManual,
   onEven,
   privacy,
   saved,
 }: {
   onPhoto: (file: File) => void;
+  onSample: () => void;
   onManual: () => void;
   onEven: () => void;
   privacy: string;
@@ -675,102 +726,78 @@ function Start({
       }}
       onDragLeave={() => setOver(false)}
       onDrop={onDrop}
-      className={cn('rounded-[18px] transition-shadow', over && 'shadow-[0_0_0_2px_#b8f35a]')}
-    >
-      {saved && (
-        <div className="mb-5 flex items-center gap-3 rounded-[16px] bg-subtle p-3 pl-4 shadow-[inset_0_0_0_1px_var(--color-line)]">
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-[15px] font-semibold text-ink">{saved.label}</p>
-            <p className="truncate text-[13px] text-muted">{saved.detail}</p>
-          </div>
-          <button
-            type="button"
-            onClick={saved.onContinue}
-            className="h-10 shrink-0 rounded-full bg-ink px-4 text-[14px] font-semibold text-on-ink"
-          >
-            Continue
-          </button>
-          <IconButton icon="x" label="Discard the last bill" onClick={saved.onDiscard} size="sm" />
-        </div>
+      className={cn(
+        'mx-auto w-full max-w-[640px] rounded-[26px] transition-shadow',
+        over && 'shadow-[0_0_0_2px_var(--accent,var(--color-ink))]',
       )}
-
-      <ReceiptPicture />
-      <h2
-        className="mt-5 text-center font-display text-[30px] leading-[1.02] font-bold tracking-[-0.03em] text-ink sm:text-[36px]"
-        style={{ fontVariationSettings: "'wdth' 108" }}
-      >
-        Snap the receipt
-      </h2>
-      <p className="mx-auto mt-2 max-w-[32ch] text-center text-[15.5px] leading-snug text-muted">
-        We’ll read the items. You tap who had what. Everyone gets their exact total.
-      </p>
-
-      <div className="mt-6 grid gap-2.5">
-        {/* Phones: straight to the camera. Computers: a file (or drop it here). */}
-        <PhotoButton
-          label="Take a photo"
-          icon="camera"
-          capture
-          primary
-          onFile={onPhoto}
-          className="[@media(pointer:fine)]:hidden"
-        />
-        <PhotoButton
-          label="Upload a photo"
-          icon="upload"
-          onFile={onPhoto}
-          className="[@media(pointer:fine)]:bg-[#b8f35a] [@media(pointer:fine)]:text-[#12110d] [@media(pointer:fine)]:shadow-none"
-        />
-      </div>
-      <p className="mt-3 flex items-center justify-center gap-1.5 text-center text-[12.5px] text-muted">
-        <Icon name="lock" size={12} /> {privacy}
-      </p>
-
-      <div className="mt-5 flex flex-wrap items-center justify-center gap-1 border-t border-line pt-4">
-        <TextLink icon="pencil" onClick={onManual}>
-          Type it in instead
-        </TextLink>
-        <TextLink icon="people" onClick={onEven}>
-          Split evenly instead
-        </TextLink>
-      </div>
-    </div>
-  );
-}
-
-/** A receipt, drawn: the tool's promise before there's a photo. */
-function ReceiptPicture() {
-  return (
-    <div aria-hidden="true" className="relative mx-auto h-[132px] w-[220px]">
-      <div
-        className="absolute inset-x-6 top-0 bottom-0 rotate-[-4deg] rounded-t-[6px] bg-[#efebe2] p-3 shadow-[0_20px_40px_-18px_rgb(0_0_0/.8)]"
-        style={{
-          maskImage:
-            'linear-gradient(black, black), radial-gradient(circle at 6px 100%, transparent 5px, black 5.5px)',
-        }}
-      >
-        {[62, 44, 70, 52].map((width, index) => (
-          <div key={index} className="mb-2.5 flex items-center justify-between gap-2">
-            <span className="h-1.5 rounded-full bg-[#12110d]/20" style={{ width: `${width}%` }} />
-            <span className="h-1.5 w-7 rounded-full bg-[#12110d]/35" />
+    >
+      <StartPanel
+        art={
+          <>
+            {saved && (
+              <div className="mb-5 flex items-center gap-3 rounded-[16px] bg-subtle p-3 pl-4 text-left shadow-[inset_0_0_0_1px_var(--color-line)]">
+                <Icon name="receipt-text" size={18} className="shrink-0 text-signal-ink" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[15px] font-semibold text-ink">{saved.label}</p>
+                  <p className="truncate text-[13px] text-muted">{saved.detail}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={saved.onContinue}
+                  className="h-10 shrink-0 rounded-full bg-ink px-4 text-[14px] font-semibold text-on-ink"
+                >
+                  Continue
+                </button>
+                <IconButton
+                  icon="x"
+                  label="Discard the last bill"
+                  onClick={saved.onDiscard}
+                  size="sm"
+                />
+              </div>
+            )}
+            <StartArt />
+          </>
+        }
+        title="Got the check?"
+        lead="Snap it and we’ll read the items. Tap who had what, and everyone gets their exact total."
+        footer={
+          <div className="grid gap-4">
+            <p className="flex items-center justify-center gap-1.5 text-[12.5px]">
+              <Icon name="lock" size={12} className="shrink-0" /> {privacy}
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-1 border-t border-line pt-3">
+              <TextLink icon="pencil" onClick={onManual}>
+                Type it in instead
+              </TextLink>
+              <TextLink icon="people" onClick={onEven}>
+                Split evenly instead
+              </TextLink>
+            </div>
           </div>
-        ))}
-        <div className="mt-3 flex justify-between border-t border-dashed border-[#12110d]/25 pt-2">
-          <span className="h-2 w-10 rounded-full bg-[#12110d]/45" />
-          <span className="h-2 w-9 rounded-full bg-[#12110d]/60" />
+        }
+      >
+        <div className="grid gap-2.5">
+          {/* Phones: straight to the camera. Computers: a file (or drop it here). */}
+          <PhotoButton
+            label="Take a photo"
+            icon="camera"
+            capture
+            primary
+            onFile={onPhoto}
+            className="[@media(pointer:fine)]:hidden"
+          />
+          <PhotoButton
+            label="Upload a photo"
+            icon="upload"
+            onFile={onPhoto}
+            className="[@media(pointer:fine)]:bg-[var(--accent,var(--color-ink))] [@media(pointer:fine)]:text-[#12110d] [@media(pointer:fine)]:shadow-none"
+          />
+          <SampleButton onClick={onSample} className="mt-0.5">
+            Try a sample receipt
+          </SampleButton>
         </div>
-      </div>
-      <div className="absolute top-3 right-0 grid gap-1.5">
-        {[0, 1, 2].map((index) => (
-          <span
-            key={index}
-            className="flex h-6 items-center gap-1.5 rounded-full bg-[#1f1f1c] pr-2.5 pl-1.5 shadow-[inset_0_0_0_1px_rgb(255_255_255/.08)]"
-          >
-            <Dot index={index} className="!size-3" />
-            <span className="h-1.5 w-8 rounded-full bg-white/25" />
-          </span>
-        ))}
-      </div>
+      </StartPanel>
     </div>
   );
 }
@@ -806,7 +833,7 @@ function ReadingView({
         {!reading.error && (
           <span
             aria-hidden="true"
-            className="absolute inset-x-0 h-16 animate-[scan_1.8s_ease-in-out_infinite_alternate] bg-gradient-to-b from-transparent via-[#b8f35a]/30 to-transparent"
+            className="absolute inset-x-0 h-16 animate-[scan_1.8s_ease-in-out_infinite_alternate] bg-gradient-to-b from-transparent via-[var(--accent,white)]/30 to-transparent"
           />
         )}
       </div>
@@ -851,6 +878,7 @@ function ReviewView({
   update,
   money,
   photo,
+  sample,
   unsure,
   onSeen,
   onRetake,
@@ -860,6 +888,7 @@ function ReviewView({
   update: (patch: Partial<SplitBill>) => void;
   money: (amount: number) => string;
   photo: string | null;
+  sample: boolean;
   unsure: Set<string>;
   onSeen: (itemId: string) => void;
   onRetake: (file: File) => void;
@@ -914,11 +943,13 @@ function ReviewView({
     <div>
       <Title
         lead={
-          read
-            ? bill.items.length
-              ? 'Here’s what we read. Tap anything to fix it.'
-              : 'We couldn’t find any prices on that photo. Add the items below, or try a flatter, sharper photo.'
-            : 'Add what’s on the check. Name and price, then Enter.'
+          sample
+            ? 'A made-up dinner to try it with. Tap any line to change it.'
+            : read
+              ? bill.items.length
+                ? 'Here’s what we read. Tap any line to fix it.'
+                : 'We couldn’t find any prices on that photo. Add the items below, or try a flatter, sharper photo.'
+              : 'One line at a time: a name, a price, then Enter.'
         }
       >
         {read ? 'Check the receipt' : 'What’s on the check?'}
@@ -961,15 +992,6 @@ function ReviewView({
         />
       )}
 
-      <input
-        aria-label="Where was this?"
-        placeholder="Where was this? (optional)"
-        value={bill.title}
-        maxLength={80}
-        onChange={(event) => update({ title: event.target.value })}
-        className="mb-3 h-11 w-full rounded-[12px] bg-transparent px-1 text-[18px] font-semibold text-ink outline-none placeholder:font-normal placeholder:text-faint focus:bg-subtle focus:px-3"
-      />
-
       {unsure.size > 0 && (
         <Note tone="caution" icon="alert" className="mb-3">
           We weren’t sure about the highlighted {unsure.size === 1 ? 'line' : 'lines'}. Give{' '}
@@ -977,121 +999,158 @@ function ReviewView({
         </Note>
       )}
 
-      <ul className="grid grid-cols-1 gap-2" aria-label="Items">
-        {bill.items.map((item, index) => (
-          <li
-            key={item.id}
-            className={cn(
-              'flex items-center gap-2 rounded-[14px] bg-subtle p-1.5 pl-2.5 shadow-[inset_0_0_0_1px_var(--color-line)]',
-              unsure.has(item.id) && 'shadow-[inset_0_0_0_1.5px_var(--color-caution)]',
-            )}
-          >
-            {item.qty && item.qty > 1 && (
-              <span className="mono-num shrink-0 rounded-[7px] bg-white/[.07] px-1.5 py-0.5 text-[12px] text-ink-2">
-                {item.qty}×
-              </span>
-            )}
-            <input
-              aria-label={`Item ${index + 1}`}
-              value={item.name}
-              placeholder="What was it?"
-              maxLength={80}
-              onChange={(event) => edit(item.id, { name: event.target.value })}
-              className="h-11 min-w-0 flex-1 bg-transparent text-[16px] text-ink outline-none placeholder:text-faint"
-            />
-            <MoneyInput
-              value={item.price}
-              currency={bill.currency}
-              label={`Item ${index + 1}’s price`}
-              onChange={(cents) => edit(item.id, { price: cents })}
-              className="w-[108px] shrink-0"
-            />
-            <IconButton
-              icon="x"
-              label={`Remove ${item.name || `item ${index + 1}`}`}
-              tone="danger"
-              size="sm"
-              onClick={() => update({ items: bill.items.filter((entry) => entry.id !== item.id) })}
-            />
-          </li>
-        ))}
-      </ul>
-
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          add();
-        }}
-        className="mt-2 flex items-center gap-2 rounded-[14px] p-1.5 pl-2.5 shadow-[inset_0_0_0_1px_var(--color-line-strong)] [border-style:dashed]"
-      >
+      <Paper edges="both" className="px-3 pt-6 pb-7 sm:px-5">
         <input
-          ref={nameInput}
-          aria-label="New item"
-          placeholder={bill.items.length ? 'Add an item' : 'First item – Margherita'}
-          value={name}
+          aria-label="Where was this?"
+          placeholder="Where was this?"
+          value={bill.title}
           maxLength={80}
-          enterKeyHint="next"
-          autoFocus={!read && bill.items.length === 0}
-          onChange={(event) => setName(event.target.value)}
-          className="h-11 min-w-0 flex-1 bg-transparent text-[16px] text-ink outline-none placeholder:text-faint"
+          onChange={(event) => update({ title: event.target.value })}
+          className="h-11 w-full rounded-[9px] bg-transparent px-2 text-center font-display text-[19px] font-bold tracking-[-0.01em] uppercase outline-none placeholder:font-sans placeholder:text-[16px] placeholder:font-normal placeholder:tracking-normal placeholder:normal-case placeholder:opacity-45 focus:bg-[#221e16]/[.07]"
+          style={{ fontVariationSettings: "'wdth' 100" }}
         />
-        <MoneyInput
-          value={price}
-          currency={bill.currency}
-          label="New item’s price"
-          onChange={setPrice}
-          onEnter={add}
-          className="w-[108px] shrink-0"
-        />
-        <button
-          type="submit"
-          aria-label="Add"
-          disabled={!name.trim() && !price}
-          className="grid size-10 shrink-0 place-items-center rounded-[10px] bg-ink text-on-ink transition-opacity disabled:opacity-30"
-        >
-          <Icon name="plus" size={18} />
-        </button>
-      </form>
+        <p className="mono-num mb-2 text-center text-[10.5px] tracking-[0.12em] uppercase opacity-50">
+          {bill.items.length} {bill.items.length === 1 ? 'item' : 'items'} · {bill.currency}
+        </p>
+        <div className="mb-1 border-t-2 border-dashed border-[#221e16]/20" />
 
-      <dl className="mt-5 grid gap-2 rounded-[16px] bg-subtle p-4 text-[15px] shadow-[inset_0_0_0_1px_var(--color-line)]">
-        <div className="flex items-center justify-between gap-3">
-          <dt className="text-muted">Subtotal</dt>
-          <dd className="num font-semibold text-ink">{money(check.itemsTotal)}</dd>
-        </div>
-        <div className="flex items-center justify-between gap-3">
-          <dt>
-            <label htmlFor={`${id}-review-tax`} className="text-muted">
-              Tax
-            </label>
-          </dt>
-          <dd>
-            <MoneyInput
-              id={`${id}-review-tax`}
-              value={
-                bill.tax.mode === 'amount'
-                  ? bill.tax.value
-                  : Math.round((check.itemsTotal * bill.tax.value) / 100)
-              }
-              currency={bill.currency}
-              label="Tax"
-              onChange={(cents) => update({ tax: { mode: 'amount', value: cents } })}
-              className="w-[120px]"
-            />
-          </dd>
-        </div>
-        {bill.tip.mode === 'amount' && bill.tip.value > 0 && read && (
-          <div className="flex items-center justify-between gap-3">
-            <dt className="text-muted">Tip on the receipt</dt>
-            <dd className="num text-ink">{money(bill.tip.value)}</dd>
+        <ul className="grid grid-cols-1" aria-label="Items">
+          {bill.items.map((item, index) => (
+            <li
+              key={item.id}
+              className={cn(
+                'flex items-center gap-1 border-b border-dashed border-[#221e16]/15 py-1',
+                unsure.has(item.id) && '-mx-1.5 rounded-[10px] bg-[#ffd666]/55 px-1.5',
+              )}
+            >
+              {item.qty && item.qty > 1 && (
+                <span className="mono-num shrink-0 pl-1 text-[12.5px] font-semibold opacity-60">
+                  {item.qty}×
+                </span>
+              )}
+              <input
+                aria-label={`Item ${index + 1}`}
+                value={item.name}
+                placeholder="What was it?"
+                maxLength={80}
+                onChange={(event) => edit(item.id, { name: event.target.value })}
+                className="h-11 min-w-0 flex-1 rounded-[9px] bg-transparent px-1.5 text-[16px] outline-none placeholder:opacity-35 focus:bg-[#221e16]/[.07]"
+              />
+              <MoneyInput
+                value={item.price}
+                currency={bill.currency}
+                label={`Item ${index + 1}’s price`}
+                onChange={(cents) => edit(item.id, { price: cents })}
+                className={cn('w-[100px] shrink-0', onPaper.className)}
+                inputClassName={cn(onPaper.input, 'font-semibold')}
+              />
+              <button
+                type="button"
+                aria-label={`Remove ${item.name || `item ${index + 1}`}`}
+                title="Remove"
+                onClick={() =>
+                  update({ items: bill.items.filter((entry) => entry.id !== item.id) })
+                }
+                className="grid size-9 shrink-0 place-items-center rounded-full opacity-40 transition-opacity hover:bg-[#221e16]/[.07] hover:opacity-90"
+              >
+                <Icon name="x" size={16} />
+              </button>
+            </li>
+          ))}
+        </ul>
+
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            add();
+          }}
+          className="mt-2 flex items-center gap-1 rounded-[12px] border-[1.5px] border-dashed border-[#221e16]/30 p-1 pl-1.5"
+        >
+          <input
+            ref={nameInput}
+            aria-label="New item"
+            placeholder={bill.items.length ? 'Add an item' : 'First item, like Pizza'}
+            value={name}
+            maxLength={80}
+            enterKeyHint="next"
+            autoComplete="off"
+            autoFocus={!read && bill.items.length === 0}
+            onChange={(event) => setName(event.target.value)}
+            className="h-11 min-w-0 flex-1 rounded-[9px] bg-transparent px-1.5 text-[16px] outline-none placeholder:opacity-45 focus:bg-[#221e16]/[.07]"
+          />
+          <MoneyInput
+            value={price}
+            currency={bill.currency}
+            label="New item’s price"
+            onChange={setPrice}
+            onEnter={add}
+            className={cn('w-[92px] shrink-0', onPaper.className)}
+            inputClassName={onPaper.input}
+          />
+          <button
+            type="submit"
+            aria-label="Add"
+            disabled={!name.trim() && !price}
+            className="grid size-10 shrink-0 place-items-center rounded-[10px] bg-[#221e16] text-[#fdfaf3] transition-opacity disabled:opacity-25"
+          >
+            <Icon name="plus" size={18} />
+          </button>
+        </form>
+
+        <dl className="mt-4 grid gap-1 border-t-2 border-dashed border-[#221e16]/20 pt-3 text-[15px]">
+          <div className="flex min-h-9 items-center justify-between gap-3 px-1.5">
+            <dt className="opacity-65">Subtotal</dt>
+            <dd className="num font-semibold">{money(check.itemsTotal)}</dd>
           </div>
-        )}
-        {bill.receipt?.total != null && (
-          <div className="flex items-center justify-between gap-3 border-t border-line pt-2">
-            <dt className="text-muted">Total on the receipt</dt>
-            <dd className="num font-semibold text-ink">{money(bill.receipt.total)}</dd>
+          <div className="flex items-center justify-between gap-3 pl-1.5">
+            <dt>
+              <label htmlFor={`${id}-review-tax`} className="opacity-65">
+                Tax
+              </label>
+            </dt>
+            <dd>
+              <MoneyInput
+                id={`${id}-review-tax`}
+                value={
+                  bill.tax.mode === 'amount'
+                    ? bill.tax.value
+                    : Math.round((check.itemsTotal * bill.tax.value) / 100)
+                }
+                currency={bill.currency}
+                label="Tax"
+                onChange={(cents) => update({ tax: { mode: 'amount', value: cents } })}
+                className={cn('w-[112px]', onPaper.className)}
+                inputClassName={cn(onPaper.input, '!pr-1.5')}
+              />
+            </dd>
           </div>
-        )}
-      </dl>
+          {bill.tip.mode === 'amount' && bill.tip.value > 0 && read && (
+            <div className="flex min-h-9 items-center justify-between gap-3 px-1.5">
+              <dt className="opacity-65">Tip on the receipt</dt>
+              <dd className="num">{money(bill.tip.value)}</dd>
+            </div>
+          )}
+          {bill.receipt?.total != null ? (
+            <div className="flex min-h-9 items-center justify-between gap-3 px-1.5">
+              <dt className="opacity-65">Total on the receipt</dt>
+              <dd className="num font-semibold">{money(bill.receipt.total)}</dd>
+            </div>
+          ) : check.itemsTotal > 0 ? (
+            <div className="flex min-h-9 items-center justify-between gap-3 px-1.5">
+              <dt className="font-semibold">Before tip</dt>
+              <dd className="num font-display text-[19px] font-bold">
+                {money(
+                  check.itemsTotal +
+                    (bill.tax.mode === 'amount'
+                      ? bill.tax.value
+                      : Math.round((check.itemsTotal * bill.tax.value) / 100)),
+                )}
+              </dd>
+            </div>
+          ) : null}
+        </dl>
+      </Paper>
+
       {read && bill.items.length > 0 && check.subtotalGap !== 0 && (
         <Note tone="caution" icon="alert" className="mt-3">
           The items add up to {money(check.itemsTotal)}, but the receipt’s subtotal says{' '}
@@ -1106,9 +1165,10 @@ function ReviewView({
         </Note>
       )}
 
-      <div className="mt-4 flex items-center justify-between gap-3 text-[13px] text-muted">
-        <span>Currency</span>
+      <div className="mt-4 flex items-center justify-end gap-2 text-[13px] text-muted">
+        <label htmlFor={`${id}-currency`}>Paying in</label>
         <select
+          id={`${id}-currency`}
           aria-label="Currency"
           value={bill.currency}
           onChange={(event) => update({ currency: event.target.value })}
@@ -1135,9 +1195,12 @@ function PeopleView({
   update: (patch: Partial<SplitBill>) => void;
 }) {
   const [name, setName] = useState('');
+  // Only ever shown after the bill loads, so reading storage here never meets the server's HTML.
+  const [recent] = useState(recentNames);
   const input = useRef<HTMLInputElement>(null);
+  const full = bill.people.length >= 30;
   const add = (value = name) => {
-    if (bill.people.length >= 30) return;
+    if (full) return;
     update({ people: [...bill.people, { id: `p${newId(6)}`, name: value.trim() }] });
     setName('');
     requestAnimationFrame(() => input.current?.focus());
@@ -1151,72 +1214,114 @@ function PeopleView({
       })),
     });
 
+  const taken = new Set(bill.people.map((person) => person.name.trim().toLowerCase()));
+  let guest = 'Guest';
+  for (let number = 2; taken.has(guest.toLowerCase()); number += 1) guest = `Guest ${number}`;
+  const suggestions = [
+    ...(taken.has('you') || taken.has('me') ? [] : ['Me']),
+    ...recent.filter((entry) => !taken.has(entry.toLowerCase())).slice(0, 5),
+    guest,
+  ];
+
   return (
     <div>
-      <Title lead="Add everyone at the table. You can change names any time.">
+      <Title lead="Type a name and press Enter, then the next. Tap a name to change it.">
         Who’s splitting?
       </Title>
-      <ul className="grid grid-cols-1 gap-2">
-        {bill.people.map((person, index) => (
-          <li
-            key={person.id}
-            className="flex h-14 items-center gap-3 rounded-[14px] bg-subtle pr-1.5 pl-4 shadow-[inset_0_0_0_1px_var(--color-line)]"
-          >
-            <Dot index={index} className="!size-3" />
-            <input
-              aria-label={`Person ${index + 1}’s name`}
-              value={person.name}
-              placeholder={index === 0 ? 'You' : `Person ${index + 1}`}
-              maxLength={40}
-              autoCapitalize="words"
-              onChange={(event) =>
-                update({
-                  people: bill.people.map((entry) =>
-                    entry.id === person.id ? { ...entry, name: event.target.value } : entry,
-                  ),
-                })
-              }
-              className="h-full min-w-0 flex-1 bg-transparent text-[17px] text-ink outline-none placeholder:text-faint"
-            />
-            {bill.people.length > 1 && (
-              <IconButton
-                icon="x"
-                label={`Remove ${nameOf(bill, index)}`}
-                tone="danger"
-                onClick={() => remove(person.id)}
+
+      <ul className="flex flex-wrap gap-2" aria-label="At the table">
+        {bill.people.map((person, index) => {
+          const shown = person.name || (index === 0 ? 'You' : `Person ${index + 1}`);
+          return (
+            <li
+              key={person.id}
+              className="flex h-12 max-w-full animate-pop items-center gap-1.5 rounded-full bg-well pr-1 pl-1.5"
+              style={{
+                boxShadow: `inset 0 0 0 1.5px color-mix(in srgb, ${colorOf(index)} 45%, transparent)`,
+              }}
+            >
+              <Avatar index={index} name={nameOf(bill, index)} size={36} />
+              <input
+                aria-label={`Person ${index + 1}’s name`}
+                value={person.name}
+                placeholder={index === 0 ? 'You' : `Person ${index + 1}`}
+                maxLength={40}
+                autoCapitalize="words"
+                autoComplete="off"
+                onChange={(event) =>
+                  update({
+                    people: bill.people.map((entry) =>
+                      entry.id === person.id ? { ...entry, name: event.target.value } : entry,
+                    ),
+                  })
+                }
+                style={{ width: `${Math.min(18, Math.max(3, shown.length)) + 1.5}ch` }}
+                className="h-10 min-w-0 rounded-full bg-transparent px-1.5 text-[16px] font-semibold text-ink outline-none placeholder:text-ink-2 focus:bg-white/[.06]"
               />
-            )}
-          </li>
-        ))}
+              {bill.people.length > 1 ? (
+                <button
+                  type="button"
+                  aria-label={`Remove ${nameOf(bill, index)}`}
+                  title="Remove"
+                  onClick={() => remove(person.id)}
+                  className="grid size-9 shrink-0 place-items-center rounded-full text-muted transition-colors hover:bg-critical-soft hover:text-critical"
+                >
+                  <Icon name="x" size={15} />
+                </button>
+              ) : (
+                <span className="w-2" />
+              )}
+            </li>
+          );
+        })}
       </ul>
+
       <form
         onSubmit={(event) => {
           event.preventDefault();
           if (name.trim()) add();
         }}
-        className="mt-2 flex h-14 items-center gap-2 rounded-[14px] pr-1.5 pl-4 shadow-[inset_0_0_0_1px_var(--color-line-strong)]"
+        className="mt-4 flex h-[60px] items-center gap-2.5 rounded-[18px] bg-subtle pr-1.5 pl-2 shadow-[inset_0_0_0_1.5px_var(--color-line-strong)] transition-shadow focus-within:shadow-[inset_0_0_0_2px_var(--accent,var(--color-ink))]"
       >
-        <Icon name="user-plus" size={18} className="shrink-0 text-muted" />
+        <Avatar index={bill.people.length} name={name.trim() || '+'} size={40} />
         <input
           ref={input}
           aria-label="Add a name"
-          placeholder="Add a name"
+          placeholder={full ? 'That’s a full table' : 'Add a name'}
+          disabled={full}
           value={name}
           maxLength={40}
           autoCapitalize="words"
-          enterKeyHint="done"
+          autoComplete="off"
+          enterKeyHint="next"
           autoFocus={bill.people.length < 2}
           onChange={(event) => setName(event.target.value)}
           className="h-full min-w-0 flex-1 bg-transparent text-[17px] text-ink outline-none placeholder:text-faint"
         />
         <button
-          type={name.trim() ? 'submit' : 'button'}
-          onClick={name.trim() ? undefined : () => add('')}
-          className="h-11 shrink-0 rounded-[11px] bg-ink px-4 text-[14.5px] font-semibold text-on-ink"
+          type="submit"
+          disabled={!name.trim() || full}
+          className="h-11 shrink-0 rounded-[12px] px-4 text-[15px] font-semibold text-[#12110d] transition-opacity disabled:opacity-30"
+          style={{ background: ACCENT }}
         >
-          {name.trim() ? 'Add' : '+ Person'}
+          Add
         </button>
       </form>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2" aria-label="Quick add">
+        <span className="mr-0.5 text-[13px] text-muted">Quick add</span>
+        {suggestions.map((suggestion) => (
+          <button
+            key={suggestion}
+            type="button"
+            disabled={full}
+            onClick={() => add(suggestion)}
+            className="inline-flex h-10 items-center gap-1.5 rounded-full bg-well px-3.5 text-[14.5px] font-medium text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line)] transition-colors hover:text-ink active:scale-[.97] disabled:opacity-40"
+          >
+            <Icon name="plus" size={14} /> {suggestion}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1232,55 +1337,69 @@ function AssignView({
   update: (patch: Partial<SplitBill>) => void;
   money: (amount: number) => string;
 }) {
-  const toggle = (itemId: string, personId: string) =>
+  const setPeople = (itemId: string, people: (current: string[]) => string[]) =>
     update({
-      items: bill.items.map((item) => {
-        if (item.id !== itemId) return item;
-        const on = item.people.includes(personId);
-        // Nobody tapped means everyone; tapping everyone keeps them all lit, which reads better.
-        return {
-          ...item,
-          people: on
-            ? item.people.filter((entry) => entry !== personId)
-            : [...item.people, personId],
-        };
-      }),
+      items: bill.items.map((item) =>
+        item.id === itemId ? { ...item, people: people(item.people) } : item,
+      ),
     });
+  const toggle = (itemId: string, personId: string) =>
+    setPeople(itemId, (current) =>
+      current.includes(personId)
+        ? current.filter((entry) => entry !== personId)
+        : [...current, personId],
+    );
+  const index = new Map(bill.people.map((person, position) => [person.id, position]));
 
   return (
     <div>
-      <Title lead="Tap who had each one. Tap more than one person to share it. Nobody tapped means everyone shares it.">
+      <Title lead="Tap who had each one. Tap two or more to share it. Untapped items are shared by everyone.">
         Who had what?
       </Title>
-      <ul className="grid grid-cols-1 gap-2.5">
+      <ul className="grid grid-cols-1 gap-3">
         {bill.items.map((item) => {
-          const everyone = item.people.length === 0;
-          const split = everyone ? bill.people.length : item.people.length;
+          const sharers = item.people.filter((personId) => index.has(personId));
+          const everyone = sharers.length === 0;
+          const count = everyone ? bill.people.length : sharers.length;
+          const parts = allocate(
+            item.price,
+            Array.from({ length: count }, () => 1),
+          );
+          const each = parts.length
+            ? `${parts[0] === parts[parts.length - 1] ? '' : 'about '}${money(parts[0])} each`
+            : '';
+          const colors = sharers.map((personId) => colorOf(index.get(personId)!));
           return (
             <li
               key={item.id}
-              className="rounded-[16px] bg-subtle p-3 shadow-[inset_0_0_0_1px_var(--color-line)]"
+              className="relative overflow-hidden rounded-[20px] bg-subtle p-3.5 pl-5 shadow-[inset_0_0_0_1px_var(--color-line)]"
             >
-              <div className="flex items-baseline justify-between gap-3 px-0.5">
-                <p className="min-w-0 truncate text-[16px] font-semibold text-ink">
+              <span
+                aria-hidden="true"
+                className="absolute inset-y-3 left-2 w-1 rounded-full transition-[background] duration-300"
+                style={{
+                  background: everyone
+                    ? 'var(--color-line-strong)'
+                    : colors.length === 1
+                      ? colors[0]
+                      : `linear-gradient(${colors.join(', ')})`,
+                }}
+              />
+              <div className="flex items-baseline justify-between gap-3">
+                <p className="min-w-0 truncate text-[17px] font-semibold text-ink">
                   {item.qty && item.qty > 1 ? `${item.qty}× ` : ''}
                   {item.name || 'Item'}
                 </p>
-                <p className="num shrink-0 text-[15px] text-ink-2">
+                <p className="num shrink-0 text-[16px] font-semibold text-ink">
                   {money(item.price)}
-                  {split > 1 && (
-                    <span className="ml-1.5 text-[12.5px] text-muted">
-                      {everyone ? 'everyone' : `÷${split}`}
-                    </span>
-                  )}
                 </p>
               </div>
               <div
                 role="group"
                 aria-label={`Who had ${item.name || 'this'}`}
-                className="mt-2.5 flex flex-wrap gap-1.5"
+                className="mt-3 flex flex-wrap gap-2"
               >
-                {bill.people.map((person, index) => {
+                {bill.people.map((person, position) => {
                   const on = item.people.includes(person.id);
                   return (
                     <button
@@ -1289,17 +1408,57 @@ function AssignView({
                       aria-pressed={on}
                       onClick={() => toggle(item.id, person.id)}
                       className={cn(
-                        'inline-flex h-10 items-center gap-2 rounded-full pr-3.5 pl-3 text-[14.5px] font-medium transition-[background-color,color,box-shadow] active:scale-[.97]',
+                        'inline-flex h-11 items-center gap-2 rounded-full pr-4 pl-1.5 text-[15px] font-semibold transition-[background-color,color,box-shadow,transform] active:scale-[.95]',
                         on
-                          ? 'bg-ink text-on-ink'
-                          : 'bg-white/[.05] text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line-strong)]',
+                          ? 'text-[#12110d]'
+                          : 'bg-well text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line)] hover:text-ink',
                       )}
+                      style={on ? { background: colorOf(position) } : undefined}
                     >
-                      <Dot index={index} />
-                      {nameOf(bill, index)}
+                      {on ? (
+                        <span
+                          className="grid size-8 place-items-center rounded-full bg-[#12110d]/85"
+                          style={{ color: colorOf(position) }}
+                        >
+                          <Icon name="check" size={16} strokeWidth={3} />
+                        </span>
+                      ) : (
+                        <Avatar index={position} name={nameOf(bill, position)} size={32} />
+                      )}
+                      {nameOf(bill, position)}
                     </button>
                   );
                 })}
+              </div>
+              <div className="mt-2.5 flex min-h-8 items-center justify-between gap-2 text-[13px]">
+                <p className="flex min-w-0 items-center gap-1.5 text-muted">
+                  {everyone ? (
+                    <>
+                      <Icon name="people" size={14} className="shrink-0" />
+                      <span className="truncate">Everyone shares it · {each}</span>
+                    </>
+                  ) : count === 1 ? (
+                    <span className="truncate">
+                      Just {nameOf(bill, index.get(sharers[0])!)} · {money(item.price)}
+                    </span>
+                  ) : (
+                    <>
+                      <span className="shrink-0 rounded-full bg-signal-soft px-2 py-0.5 text-[12px] font-semibold text-signal-ink">
+                        Shared ÷{count}
+                      </span>
+                      <span className="truncate">{each}</span>
+                    </>
+                  )}
+                </p>
+                {!everyone && (
+                  <button
+                    type="button"
+                    onClick={() => setPeople(item.id, () => [])}
+                    className="h-8 shrink-0 rounded-full px-2.5 text-[12.5px] font-medium text-muted hover:bg-white/[.06] hover:text-ink"
+                  >
+                    Split with all
+                  </button>
+                )}
               </div>
             </li>
           );
@@ -1327,9 +1486,9 @@ function RunningTotals({
       {result.people.map((person, index) => (
         <span
           key={person.id}
-          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-well px-2.5 text-[12.5px] text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line)]"
+          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-well pr-3 pl-1 text-[13px] text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line)]"
         >
-          <Dot index={index} className="!size-2" />
+          <Avatar index={index} name={nameOf(bill, index)} size={26} />
           {nameOf(bill, index)}
           <span className="num font-semibold text-ink">{money(person.subtotal)}</span>
         </span>
@@ -1339,6 +1498,45 @@ function RunningTotals({
 }
 
 /* ---------------- 5. tax and tip ---------------- */
+
+function TipChip({
+  on,
+  onClick,
+  title,
+  detail,
+  className,
+}: {
+  on: boolean;
+  onClick?: () => void;
+  title: ReactNode;
+  detail?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      onClick={onClick}
+      className={cn(
+        'flex min-h-[68px] flex-col items-center justify-center rounded-[18px] px-2 transition-[background-color,color,box-shadow,transform] active:scale-[.97]',
+        on
+          ? 'text-[#12110d] shadow-[0_12px_28px_-16px_var(--accent,transparent)]'
+          : 'bg-well text-ink shadow-[inset_0_0_0_1px_var(--color-line)] hover:bg-white/[.08]',
+        className,
+      )}
+      style={on ? { background: ACCENT } : undefined}
+    >
+      <span className="font-display text-[20px] leading-tight font-bold tracking-[-0.02em]">
+        {title}
+      </span>
+      {detail && (
+        <span className={cn('num text-[12.5px]', on ? 'text-[#12110d]/70' : 'text-muted')}>
+          {detail}
+        </span>
+      )}
+    </button>
+  );
+}
 
 function TipView({
   id,
@@ -1357,12 +1555,8 @@ function TipView({
   const preset =
     bill.tip.mode === 'percent' && (bill.tip.value === 0 || TIPS.includes(bill.tip.value));
   const [custom, setCustom] = useState(!preset && !printed);
-
-  const chip = (on: boolean) =>
-    cn(
-      'h-12 rounded-[12px] text-[15px] font-semibold transition-colors',
-      on ? 'bg-ink text-on-ink' : 'bg-well text-ink-2 hover:text-ink',
-    );
+  const base = bill.tip.afterTax ? result.subtotal + result.tax : result.subtotal;
+  const tipFor = (percent: number) => money(Math.round((base * percent) / 100));
 
   return (
     <div>
@@ -1370,12 +1564,103 @@ function TipView({
         Tax and tip
       </Title>
 
-      <div className="flex items-center justify-between gap-3 rounded-[14px] bg-subtle p-3 pl-4 shadow-[inset_0_0_0_1px_var(--color-line)]">
+      <p className="label mb-2.5">Tip</p>
+      {printed ? (
+        <div className="grid gap-2" role="group" aria-label="Tip">
+          <TipChip on title="On the receipt" detail={money(bill.tip.value)} />
+        </div>
+      ) : (
+        <div className="grid grid-cols-3 gap-2" role="group" aria-label="Tip">
+          <TipChip
+            on={bill.tip.value === 0 && !custom}
+            onClick={() => {
+              setCustom(false);
+              update({ tip: { ...bill.tip, mode: 'percent', value: 0 } });
+            }}
+            title="No tip"
+            detail="Skip it"
+          />
+          {TIPS.map((value) => (
+            <TipChip
+              key={value}
+              on={!custom && bill.tip.mode === 'percent' && bill.tip.value === value}
+              onClick={() => {
+                setCustom(false);
+                update({ tip: { ...bill.tip, mode: 'percent', value } });
+              }}
+              title={`${value}%`}
+              detail={tipFor(value)}
+            />
+          ))}
+          <TipChip
+            on={custom}
+            onClick={() => setCustom(true)}
+            title="Custom"
+            detail={custom ? money(result.tip) : 'Your call'}
+          />
+        </div>
+      )}
+      {(custom || printed) && (
+        <div className="mt-2.5 flex animate-rise items-center justify-between gap-2 rounded-[16px] bg-subtle p-2 pl-4 shadow-[inset_0_0_0_1px_var(--color-line)]">
+          <span className="text-[14px] text-muted">{printed ? 'Change the tip' : 'Your tip'}</span>
+          <span className="flex items-center gap-1.5">
+            {bill.tip.mode === 'percent' ? (
+              <PercentInput
+                label="Tip percent"
+                value={bill.tip.value}
+                autoFocus={custom}
+                onChange={(value) => update({ tip: { ...bill.tip, mode: 'percent', value } })}
+              />
+            ) : (
+              <MoneyInput
+                value={bill.tip.value}
+                currency={bill.currency}
+                label="Tip amount"
+                onChange={(cents) => update({ tip: { ...bill.tip, mode: 'amount', value: cents } })}
+                className="w-[120px]"
+              />
+            )}
+            <Toggle
+              label="Tip as"
+              value={bill.tip.mode === 'amount' ? '$' : '%'}
+              onChange={(value) =>
+                update({
+                  tip:
+                    value === '$'
+                      ? { ...bill.tip, mode: 'amount', value: result.tip }
+                      : {
+                          ...bill.tip,
+                          mode: 'percent',
+                          value: result.subtotal
+                            ? Math.round((result.tip / result.subtotal) * 100)
+                            : 0,
+                        },
+                })
+              }
+            />
+          </span>
+        </div>
+      )}
+      {bill.tip.mode === 'percent' && bill.tip.value > 0 && (
+        <label className="mt-2 flex min-h-11 items-center gap-2.5 text-[14px] text-muted">
+          <input
+            type="checkbox"
+            checked={bill.tip.afterTax}
+            onChange={(event) => update({ tip: { ...bill.tip, afterTax: event.target.checked } })}
+            className="size-5 accent-[var(--accent,var(--color-ink))]"
+          />
+          Tip on the total with tax
+        </label>
+      )}
+
+      <div className="mt-6 flex items-center justify-between gap-3 rounded-[16px] bg-subtle p-2 pl-4 shadow-[inset_0_0_0_1px_var(--color-line)]">
         <label htmlFor={`${id}-tax`} className="text-[15px] text-ink-2">
           Tax
-          {bill.receipt && bill.tax.mode === 'amount' && bill.tax.value > 0 && (
-            <span className="block text-[12.5px] text-muted">From the receipt</span>
-          )}
+          <span className="block text-[12.5px] text-muted">
+            {bill.receipt && bill.tax.mode === 'amount' && bill.tax.value > 0
+              ? 'From the receipt'
+              : 'As printed on the check'}
+          </span>
         </label>
         <div className="flex items-center gap-1.5">
           {bill.tax.mode === 'amount' ? (
@@ -1385,7 +1670,7 @@ function TipView({
               currency={bill.currency}
               label="Tax"
               onChange={(cents) => update({ tax: { mode: 'amount', value: cents } })}
-              className="w-[120px]"
+              className="w-[112px]"
             />
           ) : (
             <PercentInput
@@ -1415,119 +1700,26 @@ function TipView({
         </div>
       </div>
 
-      <p className="label mt-6 mb-2.5">Tip</p>
-      <div className="grid grid-cols-3 gap-2" role="group" aria-label="Tip">
-        {printed ? (
-          <button type="button" className={cn(chip(true), 'col-span-3')} aria-pressed="true">
-            On the receipt · {money(bill.tip.value)}
-          </button>
-        ) : (
-          <>
-            <button
-              type="button"
-              aria-pressed={bill.tip.value === 0 && !custom}
-              onClick={() => {
-                setCustom(false);
-                update({ tip: { ...bill.tip, mode: 'percent', value: 0 } });
-              }}
-              className={chip(bill.tip.value === 0 && !custom)}
-            >
-              No tip
-            </button>
-            {TIPS.map((value) => {
-              const on = !custom && bill.tip.mode === 'percent' && bill.tip.value === value;
-              return (
-                <button
-                  key={value}
-                  type="button"
-                  aria-pressed={on}
-                  onClick={() => {
-                    setCustom(false);
-                    update({ tip: { ...bill.tip, mode: 'percent', value } });
-                  }}
-                  className={chip(on)}
-                >
-                  {value}%
-                </button>
-              );
-            })}
-            <button
-              type="button"
-              aria-pressed={custom}
-              onClick={() => setCustom(true)}
-              className={chip(custom)}
-            >
-              Custom
-            </button>
-          </>
-        )}
-      </div>
-      {(custom || printed) && (
-        <div className="mt-2.5 flex items-center justify-end gap-1.5">
-          {bill.tip.mode === 'percent' ? (
-            <PercentInput
-              label="Tip percent"
-              value={bill.tip.value}
-              autoFocus={custom}
-              onChange={(value) => update({ tip: { ...bill.tip, mode: 'percent', value } })}
-            />
-          ) : (
-            <MoneyInput
-              value={bill.tip.value}
-              currency={bill.currency}
-              label="Tip amount"
-              onChange={(cents) => update({ tip: { ...bill.tip, mode: 'amount', value: cents } })}
-              className="w-[130px]"
-            />
-          )}
-          <Toggle
-            label="Tip as"
-            value={bill.tip.mode === 'amount' ? '$' : '%'}
-            onChange={(value) =>
-              update({
-                tip:
-                  value === '$'
-                    ? { ...bill.tip, mode: 'amount', value: result.tip }
-                    : {
-                        ...bill.tip,
-                        mode: 'percent',
-                        value: result.subtotal
-                          ? Math.round((result.tip / result.subtotal) * 100)
-                          : 0,
-                      },
-              })
-            }
-          />
-        </div>
-      )}
-      {bill.tip.mode === 'percent' && bill.tip.value > 0 && (
-        <label className="mt-3 flex min-h-11 items-center gap-2.5 text-[14px] text-muted">
-          <input
-            type="checkbox"
-            checked={bill.tip.afterTax}
-            onChange={(event) => update({ tip: { ...bill.tip, afterTax: event.target.checked } })}
-            className="size-5 accent-[#b8f35a]"
-          />
-          Tip on the total with tax
-        </label>
-      )}
-
-      <dl className="mt-5 grid gap-1.5 rounded-[16px] bg-subtle p-4 text-[15px] shadow-[inset_0_0_0_1px_var(--color-line)]">
-        {[
-          ['Items', result.subtotal],
-          ['Tax', result.tax],
-          ['Tip', result.tip],
-        ].map(([label, amount]) => (
-          <div key={label} className="flex justify-between gap-3">
-            <dt className="text-muted">{label}</dt>
-            <dd className="num text-ink-2">{money(amount as number)}</dd>
+      <Paper edges="both" className="mt-6 px-5 py-6">
+        <dl className="grid gap-1.5 text-[15px]">
+          {[
+            ['Items', result.subtotal],
+            ['Tax', result.tax],
+            ['Tip', result.tip],
+          ].map(([label, amount]) => (
+            <div key={label} className="flex justify-between gap-3">
+              <dt className="opacity-65">{label}</dt>
+              <dd className="num">{money(amount as number)}</dd>
+            </div>
+          ))}
+          <div className="mt-1.5 flex items-baseline justify-between gap-3 border-t-2 border-dashed border-[#221e16]/20 pt-2.5">
+            <dt className="font-semibold">Total</dt>
+            <dd className="num font-display text-[22px] font-bold tracking-[-0.02em]">
+              {money(result.total)}
+            </dd>
           </div>
-        ))}
-        <div className="mt-1 flex justify-between gap-3 border-t border-line pt-2.5">
-          <dt className="font-semibold text-ink">Total</dt>
-          <dd className="num text-[17px] font-bold text-ink">{money(result.total)}</dd>
-        </div>
-      </dl>
+        </dl>
+      </Paper>
     </div>
   );
 }
@@ -1546,7 +1738,7 @@ function PercentInput({
   autoFocus?: boolean;
 }) {
   return (
-    <div className="relative w-[110px]">
+    <div className="relative w-[100px]">
       <input
         id={id}
         aria-label={label}
@@ -1599,67 +1791,122 @@ function Toggle({
 
 /* ---------------- 6. the split ---------------- */
 
+/** A few flecks of color over the total: done, and it adds up. */
+function Confetti() {
+  const bits = [
+    { left: '2%', top: 6, rotate: -18, color: 0, delay: 60 },
+    { left: '9%', top: 44, rotate: 24, color: 2, delay: 160 },
+    { left: '3%', top: 84, rotate: 50, color: 6, delay: 320 },
+    { left: '91%', top: 10, rotate: 30, color: 1, delay: 100 },
+    { left: '85%', top: 50, rotate: -12, color: 3, delay: 220 },
+    { left: '94%', top: 88, rotate: 8, color: 4, delay: 280 },
+  ];
+  return (
+    <div aria-hidden="true" className="pointer-events-none absolute inset-0">
+      {bits.map((bit, index) => (
+        <span
+          key={index}
+          className="absolute animate-rise"
+          style={{ left: bit.left, top: bit.top, animationDelay: `${bit.delay}ms` }}
+        >
+          <span
+            className="block h-2 w-3.5 rounded-[3px]"
+            style={{ background: colorOf(bit.color), transform: `rotate(${bit.rotate}deg)` }}
+          />
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function Result({
   bill,
   result,
   money,
+  celebrate,
 }: {
   bill: SplitBill;
   result: ReturnType<typeof computeSplit>;
   money: (amount: number) => string;
+  celebrate?: boolean;
 }) {
   const [open, setOpen] = useState<string | null>(null);
   return (
     <section aria-label="Totals">
-      <div className="mb-5 text-center">
-        <p className="label">{bill.title.trim() || 'The bill'}</p>
+      <div className="relative mb-6 px-6 pt-2 text-center">
+        {celebrate && <Confetti />}
+        <p className="label !text-ink-2">{bill.title.trim() || 'The bill'}</p>
         <p
-          className="num mt-1.5 font-display text-[44px] leading-none font-bold tracking-[-0.03em] text-ink"
+          className="num mt-2 font-display text-[48px] leading-none font-bold tracking-[-0.035em] text-ink"
           style={{ fontVariationSettings: "'wdth' 108" }}
         >
           {money(result.total)}
         </p>
-        <p className="mt-1.5 text-[13px] text-muted">
+        <p className="mt-2 text-[13px] text-muted">
           {money(result.subtotal)} {bill.mode === 'items' ? 'in items' : 'bill'}
           {result.tax > 0 && ` · ${money(result.tax)} tax`}
           {result.tip > 0 && ` · ${money(result.tip)} tip`}
         </p>
+        {celebrate && (
+          <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-signal-soft px-3 py-1.5 text-[13px] font-medium text-signal-ink">
+            <Icon name="check" size={14} strokeWidth={2.6} />
+            Split {result.people.length} ways, exact to the cent
+          </p>
+        )}
       </div>
-      <ul className="grid grid-cols-1 gap-2">
+      <ul className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
         {result.people.map((person, index) => {
           const expanded = open === person.id;
+          const color = colorOf(index);
           return (
             <li
               key={person.id}
-              className="overflow-hidden rounded-[18px] bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)]"
+              className={cn(
+                'animate-rise overflow-hidden rounded-[22px]',
+                expanded && 'sm:col-span-2',
+              )}
+              style={{
+                animationDelay: `${Math.min(index, 8) * 60}ms`,
+                background: `color-mix(in oklab, ${color} 13%, var(--color-subtle))`,
+                boxShadow: `inset 0 0 0 1.5px color-mix(in srgb, ${color} 38%, transparent)`,
+              }}
             >
               <button
                 type="button"
                 aria-expanded={expanded}
                 onClick={() => setOpen(expanded ? null : person.id)}
-                className="flex w-full items-center gap-3.5 px-4 py-3.5 text-left"
+                className="flex w-full items-center gap-3.5 p-4 text-left"
               >
-                <Dot index={index} className="!size-3.5" />
-                <span className="min-w-0 flex-1 truncate text-[17px] font-semibold text-ink">
-                  {nameOf(bill, index)}
+                <Avatar index={index} name={nameOf(bill, index)} size={46} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[17px] font-semibold text-ink">
+                    {nameOf(bill, index)}
+                  </span>
+                  <span className="flex items-center gap-1 text-[12.5px] text-muted">
+                    {bill.mode === 'items'
+                      ? `${person.items.length} ${person.items.length === 1 ? 'item' : 'items'}`
+                      : 'Equal share'}
+                    <Icon
+                      name="chevron-down"
+                      size={13}
+                      className={cn('transition-transform', expanded && 'rotate-180')}
+                    />
+                  </span>
                 </span>
                 <span
-                  className="num font-display text-[26px] leading-none font-bold tracking-[-0.02em] text-ink"
+                  className="num font-display text-[30px] leading-none font-bold tracking-[-0.03em] text-ink"
                   style={{ fontVariationSettings: "'wdth' 106" }}
                 >
                   {money(person.total)}
                 </span>
-                <Icon
-                  name="chevron-down"
-                  size={17}
-                  className={cn(
-                    'shrink-0 text-muted transition-transform',
-                    expanded && 'rotate-180',
-                  )}
-                />
               </button>
               {expanded && (
-                <dl className="grid animate-fade gap-1.5 border-t border-line px-4 py-3 text-[14px]">
+                <dl
+                  className="grid animate-fade gap-1.5 px-4 pt-3 pb-4 text-[14px]"
+                  style={{
+                    borderTop: `1px dashed color-mix(in srgb, ${color} 40%, transparent)`,
+                  }}
+                >
                   {person.items.map((item) => (
                     <div key={item.id} className="flex justify-between gap-3">
                       <dt className="min-w-0 truncate text-ink-2">
@@ -1710,7 +1957,7 @@ function Result({
 
 /** Sharing, once there's something worth sending: the phone's share sheet first. */
 function ShareArea({ bill, result }: { bill: SplitBill; result: ReturnType<typeof computeSplit> }) {
-  const { copy } = useCopy();
+  const { copy, copied } = useCopy();
   const [more, setMore] = useState(false);
   const summary = splitSummary(bill, result);
   const share = async () => {
@@ -1726,33 +1973,37 @@ function ShareArea({ bill, result }: { bill: SplitBill; result: ReturnType<typeo
     await copy(`${summary}\n${url}`, 'Copied — paste it in the group chat');
   };
   return (
-    <div className="mt-5 grid gap-2">
-      <button
-        type="button"
-        onClick={share}
-        className="flex h-14 items-center justify-center gap-2 rounded-[16px] text-[16.5px] font-semibold text-[#12110d] active:scale-[.985]"
-        style={{ background: ACCENT }}
-      >
-        <Icon name="share" size={18} /> Share the split
-      </button>
+    <div className="mt-6 grid gap-2">
+      <div className="grid grid-cols-[1fr_auto] gap-2">
+        <button
+          type="button"
+          onClick={share}
+          className="flex h-14 items-center justify-center gap-2 rounded-[16px] text-[16.5px] font-semibold text-[#12110d] shadow-[0_14px_32px_-16px_var(--accent,transparent)] active:scale-[.985]"
+          style={{ background: ACCENT }}
+        >
+          <Icon name="share" size={18} /> Share the split
+        </button>
+        <button
+          type="button"
+          onClick={() => copy(summary, 'Totals copied')}
+          aria-label="Copy the totals as text"
+          className="inline-flex h-14 items-center justify-center gap-2 rounded-[16px] bg-well px-4 text-[15px] font-semibold text-ink shadow-[inset_0_0_0_1px_var(--color-line-strong)] hover:bg-white/[.08] active:scale-[.985]"
+        >
+          <Icon name={copied === summary ? 'check' : 'copy'} size={17} />
+          {copied === summary ? 'Copied' : 'Copy'}
+        </button>
+      </div>
       <button
         type="button"
         aria-expanded={more}
         onClick={() => setMore((value) => !value)}
-        className="mx-auto inline-flex h-10 items-center gap-1.5 text-[14px] text-muted hover:text-ink"
+        className="mx-auto inline-flex h-11 items-center gap-1.5 px-2 text-[14px] text-muted hover:text-ink"
       >
         More ways to share{' '}
         <Icon name="chevron-down" size={15} className={cn(more && 'rotate-180')} />
       </button>
       {more && (
         <div className="grid animate-rise gap-3 rounded-[16px] bg-subtle p-4 shadow-[inset_0_0_0_1px_var(--color-line)]">
-          <button
-            type="button"
-            onClick={() => copy(summary, 'Totals copied')}
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-[12px] bg-well text-[15px] font-medium text-ink-2 hover:text-ink"
-          >
-            <Icon name="copy" size={16} /> Copy the totals as text
-          </button>
           <ShareLinkCard
             build={() => linkFor(bill)}
             title={bill.title.trim() || 'The bill'}
@@ -1794,6 +2045,7 @@ function EvenView({
   };
   const each = result.people.length ? Math.min(...result.people.map((person) => person.total)) : 0;
   const uneven = new Set(result.people.map((person) => person.total)).size > 1;
+  const faces = Math.min(count, 7);
 
   return (
     <div>
@@ -1813,29 +2065,48 @@ function EvenView({
         label="Bill total"
         autoFocus={!bill.total}
         onChange={(cents) => update({ total: cents })}
-        inputClassName="!h-16 !text-[28px] !rounded-[16px] !pl-9"
+        inputClassName="!h-16 !text-[28px] !rounded-[18px] !pl-9 lg:!h-16 lg:!text-[28px]"
       />
 
       <p className="label mt-6 mb-2.5">Between</p>
-      <div className="flex items-center justify-between rounded-[16px] bg-subtle p-2 shadow-[inset_0_0_0_1px_var(--color-line)]">
+      <div className="flex items-center justify-between gap-2 rounded-[18px] bg-subtle p-2 shadow-[inset_0_0_0_1px_var(--color-line)]">
         <button
           type="button"
           aria-label="One fewer person"
           onClick={() => setCount(count - 1)}
           disabled={count <= 2}
-          className="grid size-12 place-items-center rounded-[12px] bg-well text-ink disabled:opacity-30"
+          className="grid size-12 shrink-0 place-items-center rounded-[14px] bg-well text-ink active:scale-[.95] disabled:opacity-30"
         >
           <Icon name="minus" size={20} />
         </button>
-        <p className="text-center">
-          <span className="num text-[28px] font-bold text-ink">{count}</span>{' '}
-          <span className="text-[15px] text-muted">people</span>
-        </p>
+        <div className="flex min-w-0 flex-col items-center gap-1.5">
+          <span aria-hidden="true" className="flex -space-x-1.5">
+            {Array.from({ length: faces }, (_, index) => (
+              <Avatar
+                key={index}
+                index={index}
+                name={nameOf(bill, index)}
+                size={28}
+                className="ring-2 ring-[var(--color-subtle)]"
+              />
+            ))}
+            {count > faces && (
+              <span className="grid size-7 place-items-center rounded-full bg-well text-[11px] font-bold text-ink-2 ring-2 ring-[var(--color-subtle)]">
+                +{count - faces}
+              </span>
+            )}
+          </span>
+          <p className="text-center leading-none">
+            <span className="num text-[22px] font-bold text-ink">{count}</span>{' '}
+            <span className="text-[14px] text-muted">people</span>
+          </p>
+        </div>
         <button
           type="button"
           aria-label="One more person"
           onClick={() => setCount(count + 1)}
-          className="grid size-12 place-items-center rounded-[12px] bg-well text-ink"
+          disabled={count >= 30}
+          className="grid size-12 shrink-0 place-items-center rounded-[14px] bg-well text-ink active:scale-[.95] disabled:opacity-30"
         >
           <Icon name="plus" size={20} />
         </button>
@@ -1852,9 +2123,12 @@ function EvenView({
               aria-pressed={on}
               onClick={() => update({ tip: { ...bill.tip, mode: 'percent', value } })}
               className={cn(
-                'h-11 rounded-[11px] text-[14px] font-semibold',
-                on ? 'bg-ink text-on-ink' : 'bg-well text-ink-2',
+                'h-12 rounded-[14px] text-[15px] font-semibold transition-[background-color,color,transform] active:scale-[.96]',
+                on
+                  ? 'text-[#12110d]'
+                  : 'bg-well text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line)]',
               )}
+              style={on ? { background: ACCENT } : undefined}
             >
               {value ? `${value}%` : 'None'}
             </button>
@@ -1862,23 +2136,22 @@ function EvenView({
         })}
       </div>
 
-      <div
-        className="mt-6 rounded-[20px] p-5 text-center"
-        style={{ background: 'color-mix(in oklab, #b8f35a 14%, transparent)' }}
-      >
-        <p className="label !text-ink-2">Each person pays</p>
+      <Paper edges="both" className="mt-6 px-5 py-7 text-center">
+        <p className="mono-num text-[11px] tracking-[0.12em] uppercase opacity-60">
+          Each person pays
+        </p>
         <p
-          className="num mt-1 font-display text-[48px] leading-none font-bold tracking-[-0.03em] text-ink"
+          className="num mt-1.5 font-display text-[50px] leading-none font-bold tracking-[-0.035em]"
           style={{ fontVariationSettings: "'wdth' 108" }}
           aria-live="polite"
         >
           {money(each)}
         </p>
-        <p className="mt-2 text-[13px] text-muted">
+        <p className="mt-2.5 text-[13px] opacity-65">
           {money(result.total)} total{result.tip > 0 && ` with ${money(result.tip)} tip`}
           {uneven && ' · a few cents go to some people so it adds up exactly'}
         </p>
-      </div>
+      </Paper>
       {result.total > 0 && <ShareArea bill={bill} result={result} />}
       <div className="mt-4 flex justify-center">
         <TextLink icon="receipt-text" onClick={onItems}>

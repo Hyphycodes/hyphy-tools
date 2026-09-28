@@ -196,6 +196,7 @@ test('Split evenly is a shortcut, not a detour', async ({ page }) => {
 
 test('QR Studio draws as you type and hands over a PNG', async ({ page }) => {
   await visit(page, '/tools/qr');
+  await page.getByRole('radio', { name: /^Link/ }).click();
   await page.getByLabel('Link or text').fill('saltandember.example/menu');
   await expect(page.getByRole('img', { name: /QR code for https:\/\/saltandember/ })).toBeVisible();
   const [png] = await Promise.all([
@@ -207,10 +208,11 @@ test('QR Studio draws as you type and hands over a PNG', async ({ page }) => {
 
 test('a Signal Page is published as its own link', async ({ page, browser }) => {
   await visit(page, '/tools/signal-pages');
+  await page.getByRole('button', { name: 'Next: add your links' }).click();
   await page.getByLabel('Name', { exact: true }).fill('Rosa Delgado');
-  await page.getByLabel('Link 1 name').fill('Book a table');
   await page.getByLabel('Link 1 address').fill('saltandember.example/book');
-  await page.getByRole('button', { name: /Get your page’s link/ }).click();
+  await page.getByLabel('Link 1 name').fill('Book a table');
+  await page.getByRole('button', { name: 'Next: share your page' }).click();
   const link = await page
     .locator('span.mono-num')
     .filter({ hasText: '/platform/p#' })
