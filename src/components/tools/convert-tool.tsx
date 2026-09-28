@@ -5,17 +5,17 @@ import {
   useEffect,
   useId,
   useImperativeHandle,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
-  type DragEvent,
   type KeyboardEvent,
   type ReactNode,
   type Ref,
 } from 'react';
 import { cn } from '@/components/ui/cn';
 import { Input } from '@/components/ui/form';
-import { Icon, type IconName } from '@/components/ui/icon';
+import { Icon } from '@/components/ui/icon';
 import { download } from '@/lib/files/download';
 import { zip } from '@/lib/files/zip';
 import { formatBytes, plural } from '@/lib/platform/format';
@@ -23,9 +23,6 @@ import {
   baseName,
   buildPdf,
   DEFAULT_SETUP,
-  embedPlan,
-  hasTransparency,
-  jpegOrientation,
   kindOf,
   layoutPage,
   MAX_IMAGE_BYTES,
@@ -38,43 +35,48 @@ import {
   pagesZipName,
   pdfName,
   previewBoxes,
-  REDRAW_QUALITY,
-  redrawSize,
-  redrawType,
   RESOLUTIONS,
   sizeChange,
-  SMALLER,
-  sniffImage,
   type PageLayout,
   type PageSetup,
-  type PdfImage,
-  type PdfSource,
   type Resolution,
   type Size,
 } from '@/lib/tools/convert';
 import { formatRange, parseRange } from '@/lib/tools/pdf';
 import type { PdfOpenError, RenderablePdf } from '@/lib/tools/pdf-render';
-import { FileDrop, MoreOptions, Note, Surface } from './kit';
+import {
+  convertPicture,
+  formatOf,
+  IMAGE_TYPES,
+  readPicture,
+  samplePhotos,
+  sourceFor,
+  unreadable,
+  type ImageTarget,
+} from './convert-pictures';
+import { Advanced, BeforeAfter, DropObject, Payoff, PillButton, SampleButton } from './kit';
+import { CornerButton, DeskBar, DeskButton, GrabNumber } from './pdf-parts';
+import { useSortable } from './pdf-sortable';
 
 /*
- * Convert: photos and scans into one PDF, in the order you choose, or the pages of a PDF out as
- * JPG or PNG images. All of it happens on this device: pdf-lib builds the PDF, PDF.js draws the
- * pages, and a canvas redraws what a PDF can't take as it is. Nothing is uploaded.
+ * Convert: drop files in, and they become another format. The one object is the transformation
+ * itself: what you dropped on the left, what it becomes on the right, and the formats to tap in
+ * between, with the likely one already picked (photos → PDF, a PDF → JPG, iPhone HEIC → JPG).
+ *
+ * - Photos and scans → one PDF, in the order you set (pdf-lib), or → JPG, PNG or WebP (a canvas).
+ * - A PDF → its pages as JPG or PNG images (PDF.js).
+ *
+ * Page size, margins, quality and resolution wait in Advanced. All of it happens on this device.
  */
 
-type Mode = 'images' | 'pdf';
-/** How one side hands files to the other: a PDF dropped among photos, say. */
-type Intake = { take: (files: File[]) => void };
+type Side = 'images' | 'pdf';
+/** How a side is handed files: dropped on the page, or passed over from the other side. */
+type Intake = { take: (files: File[]) => void; reset: () => void };
 
 /** Page previews are drawn in a 4:5 frame, whatever the page's shape. */
 const FRAME = 4 / 5;
-/** Picture thumbnails, long side in pixels: sharp in a tile on a phone, light in memory. */
-const THUMB_SIDE = 360;
-/** PDF page thumbnails, in CSS pixels. */
-const PAGE_THUMB_WIDTH = 132;
-const ACCENT_TINT = 'bg-[color-mix(in_oklab,var(--accent)_16%,transparent)]';
-
-const hasFiles = (event: DragEvent) => Array.from(event.dataTransfer.types).includes('Files');
+const PAGE_THUMB_WIDTH = 160;
+const EDGE = 'shadow-[0_0_0_1px_rgb(14_20_51/.08),0_10px_22px_-12px_rgb(14_20_51/.45)]';
 
 /** “a.jpg” and “b.png”; “a.jpg”, “b.png” and 3 more. */
 function names(list: string[]) {
@@ -84,8 +86,10 @@ function names(list: string[]) {
 }
 
 export function ConvertTool() {
-  const [mode, setMode] = useState<Mode>('images');
-  const [started, setStarted] = useState<Record<Mode, boolean>>({ images: false, pdf: false });
+  const [side, setSide] = useState<Side | null>(null);
+  const [started, setStarted] = useState<Record<Side, boolean>>({ images: false, pdf: false });
+  const [message, setMessage] = useState('');
+  const [sampling, setSampling] = useState(false);
   const images = useRef<Intake>(null);
   const pdfs = useRef<Intake>(null);
   const startedImages = useCallback(
@@ -96,215 +100,460 @@ export function ConvertTool() {
     (yes: boolean) => setStarted((current) => ({ ...current, pdf: yes })),
     [],
   );
+
+  /** Files in: pictures go to the pictures side, a PDF to the PDF side. */
+  const route = (files: File[]) => {
+    if (!files.length) return;
+    const pictures = files.filter((file) => ['image', 'heic'].includes(kindOf(file)));
+    const pdfFiles = files.filter((file) => kindOf(file) === 'pdf');
+    setMessage('');
+    if (pictures.length) {
+      setSide('images');
+      images.current?.take(files);
+    } else if (pdfFiles.length) {
+      setSide('pdf');
+      pdfs.current?.take(files);
+    } else {
+      setMessage(
+        `${names(files.map((file) => file.name))} can’t be converted here. Try photos (JPG, PNG, WebP, HEIC) or a PDF.`,
+      );
+    }
+  };
+
+  const startOver = () => {
+    images.current?.reset();
+    pdfs.current?.reset();
+    setSide(null);
+    setMessage('');
+  };
+
+  // While working, files dropped anywhere on the page go where they belong.
+  const latest = useRef(route);
+  useLayoutEffect(() => {
+    latest.current = route;
+  });
+  const [over, setOver] = useState(false);
+  useEffect(() => {
+    if (!side) return;
+    let depth = 0;
+    const has = (event: DragEvent) => Boolean(event.dataTransfer?.types.includes('Files'));
+    const enter = (event: DragEvent) => {
+      if (!has(event)) return;
+      depth += 1;
+      setOver(true);
+    };
+    const leave = (event: DragEvent) => {
+      if (!has(event)) return;
+      depth = Math.max(0, depth - 1);
+      if (!depth) setOver(false);
+    };
+    const dragOver = (event: DragEvent) => {
+      if (has(event)) event.preventDefault();
+    };
+    const drop = (event: DragEvent) => {
+      depth = 0;
+      setOver(false);
+      if (!event.dataTransfer?.files.length) return;
+      event.preventDefault();
+      latest.current(Array.from(event.dataTransfer.files));
+    };
+    window.addEventListener('dragenter', enter);
+    window.addEventListener('dragleave', leave);
+    window.addEventListener('dragover', dragOver);
+    window.addEventListener('drop', drop);
+    return () => {
+      window.removeEventListener('dragenter', enter);
+      window.removeEventListener('dragleave', leave);
+      window.removeEventListener('dragover', dragOver);
+      window.removeEventListener('drop', drop);
+    };
+  }, [side]);
+
+  const other: Side | null =
+    side === 'images' && started.pdf ? 'pdf' : side === 'pdf' && started.images ? 'images' : null;
+  const switchBack = other && (
+    <button
+      type="button"
+      onClick={() => setSide(other)}
+      className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full bg-ink/[.05] px-4 text-[14px] font-medium text-ink-2 hover:bg-ink/[.09] hover:text-ink lg:min-h-10"
+    >
+      <Icon name="chevron-left" size={15} />
+      {other === 'pdf' ? 'Your PDF' : 'Your photos'}
+    </button>
+  );
+
   return (
-    <div className="grid grid-cols-1 gap-4">
-      <ModeSwitch value={mode} onChange={setMode} compact={started[mode]} />
-      <ImagesToPdf
+    <div className="min-w-0">
+      {side === null && (
+        <div className="mx-auto max-w-[620px] py-2 sm:py-6">
+          <DropObject
+            shape="files"
+            accept=".pdf,application/pdf,image/*,.heic,.heif"
+            multiple
+            onFiles={route}
+            art={<FormatArt />}
+            title="Drop files to convert"
+            hint="Photos or a PDF."
+            cta="Choose files"
+          >
+            <SampleButton
+              disabled={sampling}
+              onClick={async () => {
+                setSampling(true);
+                try {
+                  route(await samplePhotos());
+                } catch {
+                  setMessage(
+                    'We couldn’t draw the samples here. Choose your own pictures instead.',
+                  );
+                } finally {
+                  setSampling(false);
+                }
+              }}
+            >
+              {sampling ? 'Drawing sample photos…' : 'Try sample photos'}
+            </SampleButton>
+            <SampleButton
+              disabled={sampling}
+              onClick={async () => {
+                setSampling(true);
+                try {
+                  const { samplePdfs } = await import('@/lib/tools/pdf-samples');
+                  route(await samplePdfs('extract'));
+                } catch {
+                  setMessage('We couldn’t make the sample here. Choose your own PDF instead.');
+                } finally {
+                  setSampling(false);
+                }
+              }}
+            >
+              Try a sample PDF
+            </SampleButton>
+          </DropObject>
+          {message && (
+            <p role="status" className="mt-4 text-center text-[14px] text-caution">
+              {message}
+            </p>
+          )}
+        </div>
+      )}
+
+      {side && over && (
+        <div
+          aria-hidden="true"
+          className="fx-pop pointer-events-none fixed inset-3 z-40 grid place-items-center rounded-[28px] border-2 border-dashed border-[var(--accent-ink)] bg-[color-mix(in_srgb,var(--accent)_10%,transparent)]"
+        >
+          <span className="rounded-full bg-surface px-5 py-2.5 text-[16px] font-semibold text-ink shadow-lift">
+            Let go to add
+          </span>
+        </div>
+      )}
+
+      <ImagesSide
         ref={images}
-        hidden={mode !== 'images'}
+        hidden={side !== 'images'}
         onStarted={startedImages}
         onPdfs={(files) => {
-          setMode('pdf');
+          setSide('pdf');
           pdfs.current?.take(files);
         }}
+        onStartOver={startOver}
+        top={switchBack}
       />
-      <PdfToImages
+      <PdfSide
         ref={pdfs}
-        hidden={mode !== 'pdf'}
+        hidden={side !== 'pdf'}
         onStarted={startedPdf}
         onImages={(files) => {
-          setMode('images');
+          setSide('images');
           images.current?.take(files);
         }}
+        onStartOver={startOver}
+        top={switchBack}
       />
     </div>
+  );
+}
+
+/* ---------------- The object: one format becoming another ---------------- */
+
+/** On the way in: a photo becoming a page, drawn. */
+function FormatArt() {
+  return (
+    <div aria-hidden="true" className="mx-auto flex items-center justify-center gap-3 sm:gap-4">
+      <span
+        className={cn(
+          'relative grid h-[92px] w-[76px] -rotate-6 place-items-end overflow-hidden rounded-[10px] bg-[#f6b77a] p-2 sm:h-[104px] sm:w-[86px]',
+          EDGE,
+        )}
+      >
+        <svg viewBox="0 0 80 60" className="absolute inset-x-0 bottom-0 w-full">
+          <path d="M0 60V38l18-16 16 14 14-12 32 24v12z" fill="#94664c" />
+          <circle cx="58" cy="14" r="7" fill="#fff3d6" />
+        </svg>
+        <span className="relative rounded-full bg-white/90 px-2 py-0.5 text-[11px] font-bold text-[#0e1433]">
+          JPG
+        </span>
+      </span>
+      <FlowArrow />
+      <span
+        className={cn(
+          'fx-flip relative grid h-[104px] w-[80px] rotate-3 content-start gap-1.5 rounded-[6px] bg-white p-2.5 sm:h-[118px] sm:w-[92px]',
+          EDGE,
+        )}
+      >
+        <span className="h-[44%] rounded-[3px] bg-[#f6b77a]" />
+        <span className="h-1.5 w-4/5 rounded-full bg-[#dfe4f7]" />
+        <span className="h-1.5 w-3/5 rounded-full bg-[#dfe4f7]" />
+        <span
+          className="absolute right-2 bottom-2 rounded-full px-2 py-0.5 text-[11px] font-bold text-[var(--on-accent,#12110d)]"
+          style={{ background: 'var(--accent)' }}
+        >
+          PDF
+        </span>
+      </span>
+    </div>
+  );
+}
+
+/** The arrow between old and new: a short electric stroke. */
+function FlowArrow({ className }: { className?: string }) {
+  const id = useId();
+  return (
+    <svg
+      viewBox="0 0 56 24"
+      aria-hidden="true"
+      className={cn('h-6 w-12 shrink-0 sm:w-14', className)}
+    >
+      <defs>
+        <linearGradient id={id} x1="0" x2="1">
+          <stop offset="0" stopColor="var(--glow, #35e0ff)" />
+          <stop offset="1" stopColor="var(--accent-ink, #2f4ae0)" />
+        </linearGradient>
+      </defs>
+      <path
+        d="M3 12h44m-8-7 8 7-8 7"
+        fill="none"
+        stroke={`url(#${id})`}
+        strokeWidth="3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** A format, as a little tag: quiet for what it was, lit for what it becomes. */
+function FormatTag({
+  children,
+  lit,
+  className,
+}: {
+  children: ReactNode;
+  lit?: boolean;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        'inline-flex h-6 items-center rounded-full px-2.5 text-[12px] font-bold tracking-[.02em]',
+        lit
+          ? 'text-[var(--on-accent,#12110d)]'
+          : 'bg-surface text-ink-2 shadow-[0_0_0_1px_var(--color-line)]',
+        className,
+      )}
+      style={lit ? { background: 'var(--accent)' } : undefined}
+    >
+      {children}
+    </span>
+  );
+}
+
+/** A small fan of what's there: photos or pages. */
+function Fan({
+  thumbs,
+  paper = false,
+}: {
+  thumbs: (string | undefined | null)[];
+  paper?: boolean;
+}) {
+  const shown = (thumbs.length ? thumbs : [undefined]).slice(0, 3);
+  return (
+    <span className="relative block h-[96px] w-[92px] sm:h-[124px] sm:w-[120px]">
+      {shown
+        .map((src, index) => ({ src, index }))
+        .reverse()
+        .map(({ src, index }) => (
+          <span
+            key={index}
+            className="absolute inset-0 flex items-center justify-center"
+            style={{
+              transform: `translateX(${[0, 10, -10][index]}px) rotate(${[0, 6, -6][index]}deg)`,
+            }}
+          >
+            {src ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={src}
+                alt=""
+                draggable={false}
+                className={cn(
+                  'block max-h-full max-w-full object-contain',
+                  paper ? 'rounded-[3px] bg-white' : 'rounded-[8px]',
+                  EDGE,
+                )}
+              />
+            ) : (
+              <span className={cn('block h-[88%] w-[70%] rounded-[6px] bg-white', EDGE)}>
+                <span className="skeleton m-[12%] block h-[76%]" />
+              </span>
+            )}
+          </span>
+        ))}
+    </span>
+  );
+}
+
+type TargetOption<T extends string> = { value: T; label: string; hint: string };
+
+/**
+ * The transformation, big: what's here on the left, what it becomes on the right, and the formats
+ * to tap underneath. The right side flips over to its new face when the format changes.
+ */
+function Transform<T extends string>({
+  from,
+  to,
+  targets,
+  value,
+  onChange,
+  disabled,
+}: {
+  from: {
+    thumbs: (string | undefined | null)[];
+    tag: ReactNode;
+    caption: ReactNode;
+    paper?: boolean;
+  };
+  to: {
+    thumbs: (string | undefined | null)[];
+    tag: ReactNode;
+    caption: ReactNode;
+    paper?: boolean;
+    /** Drawn instead of the fan: a page with the photo on it. */
+    object?: ReactNode;
+  };
+  targets: TargetOption<T>[];
+  value: T;
+  onChange: (value: T) => void;
+  disabled?: boolean;
+}) {
+  const index = targets.findIndex((target) => target.value === value);
+  const pick = (next: number, event?: KeyboardEvent<HTMLElement>) => {
+    const target = targets[(next + targets.length) % targets.length];
+    onChange(target.value);
+    const sibling =
+      event?.currentTarget.parentElement?.children[(next + targets.length) % targets.length];
+    if (sibling instanceof HTMLElement) sibling.focus();
+  };
+  return (
+    <section
+      aria-label="Convert"
+      className="relative isolate overflow-hidden rounded-[28px] bg-surface px-4 pt-5 pb-4 shadow-lift sm:px-8 sm:pt-7 sm:pb-6"
+    >
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 -z-10"
+        style={{
+          background:
+            'radial-gradient(40% 70% at 78% 30%, color-mix(in srgb, var(--glow, #35e0ff) 14%, transparent), transparent 70%), radial-gradient(40% 70% at 22% 30%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%)',
+        }}
+      />
+      <div className="mx-auto grid max-w-[640px] grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-6">
+        <div className="flex min-w-0 flex-col items-center gap-3 text-center">
+          <Fan thumbs={from.thumbs} paper={from.paper} />
+          <div className="relative min-w-0">
+            <FormatTag>{from.tag}</FormatTag>
+            <p className="mt-1.5 truncate text-[13px] text-muted sm:text-[14px]">{from.caption}</p>
+          </div>
+        </div>
+        <FlowArrow className="-mt-10" />
+        <div
+          key={String(value)}
+          className="fx-flip flex min-w-0 flex-col items-center gap-3 text-center"
+        >
+          {to.object ?? <Fan thumbs={to.thumbs} paper={to.paper} />}
+          <div className="relative min-w-0">
+            <FormatTag lit>{to.tag}</FormatTag>
+            <p className="mt-1.5 truncate text-[13px] text-muted sm:text-[14px]">{to.caption}</p>
+          </div>
+        </div>
+      </div>
+      {targets.length > 1 && (
+        <div
+          role="radiogroup"
+          aria-label="Convert to"
+          className={cn(
+            'mx-auto mt-5 grid max-w-[640px] gap-2',
+            targets.length === 2
+              ? 'grid-cols-2'
+              : targets.length === 3
+                ? 'grid-cols-3'
+                : 'grid-cols-4',
+          )}
+        >
+          {targets.map((target, position) => {
+            const on = target.value === value;
+            return (
+              <button
+                key={target.value}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                tabIndex={on ? 0 : -1}
+                disabled={disabled}
+                onClick={() => onChange(target.value)}
+                onKeyDown={(event) => {
+                  if (['ArrowRight', 'ArrowDown'].includes(event.key)) {
+                    event.preventDefault();
+                    pick(index + 1, event);
+                  } else if (['ArrowLeft', 'ArrowUp'].includes(event.key)) {
+                    event.preventDefault();
+                    pick(index - 1, event);
+                  }
+                }}
+                className={cn(
+                  'flex min-h-[64px] min-w-0 flex-col items-center justify-center rounded-[16px] px-1 py-2 transition-[background-color,box-shadow,transform] active:scale-[.96] disabled:opacity-50',
+                  on
+                    ? 'bg-[color-mix(in_srgb,var(--accent)_12%,var(--color-surface))] shadow-[inset_0_0_0_2px_var(--accent-ink),0_10px_24px_-14px_var(--accent)]'
+                    : 'bg-ink/[.04] shadow-[inset_0_0_0_1px_var(--color-line)] hover:bg-ink/[.07]',
+                )}
+                style={{ '--i': position } as CSSProperties}
+              >
+                <span
+                  className={cn(
+                    'font-display text-[19px] leading-none font-bold tracking-[-0.01em] sm:text-[22px]',
+                    on ? 'text-[var(--accent-ink)]' : 'text-ink',
+                  )}
+                >
+                  {target.label}
+                </span>
+                <span className="mt-1 truncate text-[11.5px] text-muted sm:text-[12.5px]">
+                  {target.hint}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }
 
 /* ---------------- Shared parts ---------------- */
 
-/** Arrow keys move a radio group's choice, the way native radio buttons do. */
-function arrowTo<T>(
-  event: KeyboardEvent<HTMLElement>,
-  options: readonly T[],
-  index: number,
-  pick: (option: T) => void,
-) {
-  const forward = event.key === 'ArrowRight' || event.key === 'ArrowDown';
-  const back = event.key === 'ArrowLeft' || event.key === 'ArrowUp';
-  if (!forward && !back) return;
-  event.preventDefault();
-  const next = (index + (forward ? 1 : -1) + options.length) % options.length;
-  pick(options[next]);
-  const sibling = event.currentTarget.parentElement?.children[next];
-  if (sibling instanceof HTMLElement) sibling.focus();
-}
-
-const MODES: { value: Mode; from: string; to: string; icon: IconName; hint: string }[] = [
-  {
-    value: 'images',
-    from: 'Images',
-    to: 'PDF',
-    icon: 'file-image',
-    hint: 'Photos and scans into one PDF',
-  },
-  { value: 'pdf', from: 'PDF', to: 'images', icon: 'pdf', hint: 'Every page as a JPG or PNG' },
-];
-
-/** Photos and a page, drawn: which way the files go. */
-function DirectionArt({ mode }: { mode: Mode }) {
-  const photos = (x: number) =>
-    [0, 1, 2].map((index) => (
-      <g key={index} transform={`rotate(${[-9, 0, 9][index]} ${x + 13} 26)`}>
-        <rect
-          x={x + index * 7}
-          y={12 + index * 2}
-          width="22"
-          height="18"
-          rx="3"
-          fill={['#f6b77a', '#9fc3a8', '#8a6a4f'][index]}
-          className="stroke-[rgb(0_0_0/.18)]"
-        />
-        <path
-          d={`M${x + index * 7 + 3} ${27 + index * 2}l5-6 4 4 3-3 5 5`}
-          className="fill-none stroke-white/70"
-          strokeWidth="1.4"
-        />
-      </g>
-    ));
-  const sheet = (x: number) => (
-    <g>
-      <rect
-        x={x}
-        y="5"
-        width="28"
-        height="36"
-        rx="3.5"
-        className="fill-white stroke-[rgb(0_0_0/.14)]"
-      />
-      <rect x={x} y="5" width="28" height="5" rx="2" style={{ fill: 'var(--accent)' }} />
-      {[16, 21, 26, 31].map((y) => (
-        <rect key={y} x={x + 5} y={y} width={y === 31 ? 11 : 18} height="2" rx="1" fill="#d8d3c8" />
-      ))}
-    </g>
-  );
-  const arrow = (
-    <g className="stroke-[var(--accent)]" strokeWidth="2.4" strokeLinecap="round" fill="none">
-      <path d="M52 23h16" />
-      <path d="M63 18l5 5-5 5" strokeLinejoin="round" />
-    </g>
-  );
-  return (
-    <svg viewBox="0 0 112 46" aria-hidden="true" className="h-11 w-[108px] overflow-visible">
-      {mode === 'images' ? (
-        <>
-          {photos(4)}
-          {arrow}
-          {sheet(78)}
-        </>
-      ) : (
-        <>
-          {sheet(10)}
-          {arrow}
-          {photos(76)}
-        </>
-      )}
-    </svg>
-  );
-}
-
-/**
- * Which way: two big picture cards to start, a slim switch once there are files. Each side keeps
- * its own files, so switching back finds them where they were.
- */
-function ModeSwitch({
-  value,
-  onChange,
-  compact,
-}: {
-  value: Mode;
-  onChange: (mode: Mode) => void;
-  compact: boolean;
-}) {
-  return (
-    <div
-      role="radiogroup"
-      aria-label="What to convert"
-      className={cn(
-        'grid grid-cols-2',
-        compact ? 'gap-1 rounded-[18px] bg-well p-1 sm:max-w-[620px]' : 'gap-2.5 sm:gap-3',
-      )}
-    >
-      {MODES.map((option, index) => {
-        const on = option.value === value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            role="radio"
-            aria-checked={on}
-            aria-label={`${option.from} to ${option.to}`}
-            tabIndex={on ? 0 : -1}
-            onClick={() => onChange(option.value)}
-            onKeyDown={(event) => arrowTo(event, MODES, index, (next) => onChange(next.value))}
-            className={cn(
-              'text-left transition-[background-color,box-shadow,color,transform]',
-              compact
-                ? cn(
-                    'flex min-h-14 items-center gap-2.5 rounded-[14px] px-2.5 sm:gap-3 sm:px-4',
-                    on ? 'bg-surface text-ink shadow-card' : 'text-muted hover:text-ink',
-                  )
-                : cn(
-                    'flex min-w-0 flex-col items-start gap-3 rounded-[22px] p-4 active:scale-[.98] sm:p-5',
-                    on
-                      ? 'bg-[color-mix(in_srgb,var(--accent)_14%,var(--color-surface))] text-ink shadow-[inset_0_0_0_2px_var(--accent)]'
-                      : 'bg-surface text-ink-2 shadow-card hover:text-ink',
-                  ),
-            )}
-          >
-            {compact ? (
-              <span
-                className={cn(
-                  'grid size-8 shrink-0 place-items-center rounded-[10px] transition-colors sm:size-9 sm:rounded-[11px]',
-                  on ? 'text-[#12110d]' : 'bg-ink/5',
-                )}
-                style={on ? { background: 'var(--accent)' } : undefined}
-              >
-                <Icon name={option.icon} size={18} />
-              </span>
-            ) : (
-              <DirectionArt mode={option.value} />
-            )}
-            <span className="min-w-0">
-              <span
-                className={cn(
-                  'flex items-center gap-1.5 font-semibold',
-                  compact ? 'text-[15px]' : 'text-[17px] sm:text-[19px]',
-                )}
-              >
-                {option.from}
-                <Icon name="arrow-right" size={compact ? 14 : 16} className="text-muted" />
-                {option.to}
-              </span>
-              <span
-                className={cn(
-                  'text-[12.5px] leading-snug text-muted',
-                  compact ? 'hidden truncate sm:block' : 'mt-0.5 block sm:text-[13.5px]',
-                )}
-              >
-                {option.hint}
-              </span>
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 type Option<T extends string> = { value: T; label: ReactNode; detail?: ReactNode };
 
-/** A labelled row of choices (a radio group of buttons). */
+/** A labelled row of choices (a radio group of buttons), for Advanced. */
 function Choice<T extends string>({
   label,
   hint,
@@ -329,7 +578,7 @@ function Choice<T extends string>({
       <div
         role="radiogroup"
         aria-labelledby={id}
-        className="grid auto-cols-fr grid-flow-col gap-1 rounded-[12px] bg-well p-1"
+        className="grid auto-cols-fr grid-flow-col gap-1 rounded-[14px] bg-ink/[.05] p-1"
       >
         {options.map((option, index) => {
           const on = option.value === value;
@@ -342,15 +591,24 @@ function Choice<T extends string>({
               tabIndex={on ? 0 : -1}
               disabled={disabled}
               onClick={() => onChange(option.value)}
-              onKeyDown={(event) => arrowTo(event, options, index, (next) => onChange(next.value))}
+              onKeyDown={(event) => {
+                const forward = event.key === 'ArrowRight' || event.key === 'ArrowDown';
+                const back = event.key === 'ArrowLeft' || event.key === 'ArrowUp';
+                if (!forward && !back) return;
+                event.preventDefault();
+                const next = (index + (forward ? 1 : -1) + options.length) % options.length;
+                onChange(options[next].value);
+                const sibling = event.currentTarget.parentElement?.children[next];
+                if (sibling instanceof HTMLElement) sibling.focus();
+              }}
               className={cn(
-                'min-h-11 rounded-[9px] px-1.5 py-1 text-[14px] leading-tight font-medium transition-colors disabled:opacity-50 lg:min-h-9 lg:text-[13.5px]',
+                'min-h-11 rounded-[10px] px-1.5 py-1 text-[14px] leading-tight font-medium transition-colors disabled:opacity-50 lg:min-h-10 lg:text-[13.5px]',
                 on ? 'bg-surface text-ink shadow-card' : 'text-muted hover:text-ink',
               )}
             >
               {option.label}
               {option.detail && (
-                <span className="mono-num mt-0.5 block text-[11px] font-normal text-muted">
+                <span className="mt-0.5 block text-[11px] font-normal text-muted">
                   {option.detail}
                 </span>
               )}
@@ -363,7 +621,7 @@ function Choice<T extends string>({
   );
 }
 
-/** Work in progress: what's happening, how far along, and a way to stop. */
+/** Work in progress, in the bar: what's happening, how far along, and a way to stop. */
 function Progress({
   name,
   done,
@@ -378,66 +636,35 @@ function Progress({
   onCancel: () => void;
 }) {
   return (
-    <div className="grid gap-2 rounded-[14px] bg-subtle p-3 shadow-[inset_0_0_0_1px_var(--color-line)]">
-      <div className="flex items-center gap-2.5">
-        <Icon name="loader" size={16} className="shrink-0 animate-spin text-muted" />
-        <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink-2">{label}</span>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="h-11 shrink-0 rounded-[10px] px-3 text-[14px] font-medium text-ink-2 hover:bg-ink/5 hover:text-ink lg:h-9 lg:text-[13.5px]"
+    <div className="flex min-w-0 flex-1 items-center gap-3 px-2">
+      <div className="grid min-w-0 flex-1 gap-2">
+        <span className="truncate text-[13.5px] text-ink-2">{label}</span>
+        <div
+          role="progressbar"
+          aria-label={name}
+          aria-valuemin={0}
+          aria-valuemax={total}
+          aria-valuenow={done}
+          aria-valuetext={`${done} of ${total}`}
+          className="h-2 overflow-hidden rounded-full bg-ink/[.07]"
         >
-          Cancel
-        </button>
+          <span
+            className="block h-full rounded-full transition-[width] duration-300"
+            style={{
+              width: `${total ? (done / total) * 100 : 0}%`,
+              background: 'linear-gradient(90deg, var(--accent), var(--glow, var(--accent)))',
+            }}
+          />
+        </div>
       </div>
-      <div
-        role="progressbar"
-        aria-label={name}
-        aria-valuemin={0}
-        aria-valuemax={total}
-        aria-valuenow={done}
-        aria-valuetext={`${done} of ${total}`}
-        className="h-1.5 overflow-hidden rounded-full bg-well"
+      <button
+        type="button"
+        onClick={onCancel}
+        className="h-12 shrink-0 rounded-[14px] bg-ink/[.05] px-4 text-[14.5px] font-semibold text-ink-2 hover:bg-ink/10 hover:text-ink"
       >
-        <span
-          className="block h-full rounded-full bg-[var(--accent,var(--color-signal))] transition-[width] duration-300"
-          style={{ width: `${total ? (done / total) * 100 : 0}%` }}
-        />
-      </div>
+        Cancel
+      </button>
     </div>
-  );
-}
-
-/** On a phone a result lands below the settings: bring it into view once it's there. */
-function useShowOnPhone(ready: boolean) {
-  const target = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!ready || !window.matchMedia('(max-width: 1023px)').matches) return;
-    const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    target.current?.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'nearest' });
-  }, [ready]);
-  return target;
-}
-
-function SampleButton({
-  onClick,
-  disabled,
-  children,
-}: {
-  onClick: () => void;
-  disabled?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="mx-auto flex h-11 items-center gap-1.5 rounded-full px-4 text-[14px] font-medium text-signal-ink transition-colors hover:bg-signal-soft disabled:opacity-50 lg:h-9 lg:text-[13.5px]"
-    >
-      <Icon name="sparkles" size={15} />
-      {children}
-    </button>
   );
 }
 
@@ -473,7 +700,7 @@ function PagePreview({
         </span>
       ) : boxes ? (
         <span
-          className="absolute overflow-hidden rounded-[2px] bg-white shadow-[0_0_0_1px_rgb(0_0_0/.06),0_10px_22px_-12px_rgb(0_0_0/.75)]"
+          className={cn('absolute overflow-hidden rounded-[2px] bg-white', EDGE)}
           style={percent(boxes.sheet)}
         >
           {thumb && (
@@ -494,324 +721,178 @@ function PagePreview({
   );
 }
 
-/* ---------------- Images → PDF: reading and redrawing pictures ---------------- */
-
-async function decode(file: Blob) {
-  try {
-    return await createImageBitmap(file, { imageOrientation: 'from-image' });
-  } catch (error) {
-    // Browsers from before "from-image" reject the option itself; they turn photos anyway.
-    if (error instanceof TypeError) return createImageBitmap(file);
-    throw error;
-  }
-}
-
-const unreadable = (file: File) =>
-  kindOf(file) === 'heic'
-    ? `“${file.name}” is an iPhone HEIC photo, and only Safari opens those. Open this page in Safari, or share the photo as a JPG.`
-    : `“${file.name}” couldn’t be opened here. Try JPG, PNG, WebP or GIF.`;
-
-function toBlob(canvas: HTMLCanvasElement, type: string, quality?: number) {
-  return new Promise<Blob>((resolve, reject) =>
-    canvas.toBlob(
-      (blob) => (blob ? resolve(blob) : reject(new Error('This picture is too big to save here.'))),
-      type,
-      quality,
-    ),
+/** A picture on its own, in a square: for the formats that stay pictures. */
+function PhotoTile({ thumb, problem }: { thumb?: string; problem?: string }) {
+  return (
+    <span className="relative block aspect-[4/5]">
+      {problem ? (
+        <span className="absolute inset-[6%] grid place-items-center rounded-[10px] bg-critical-soft px-2 text-center text-[12px] leading-snug text-critical">
+          <span>
+            <Icon name="alert" size={16} className="mx-auto mb-1" />
+            {problem}
+          </span>
+        </span>
+      ) : thumb ? (
+        <span className="absolute inset-[6%] flex items-center justify-center">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={thumb}
+            alt=""
+            draggable={false}
+            className={cn(
+              'block max-h-full max-w-full animate-fade rounded-[8px] object-contain',
+              EDGE,
+            )}
+          />
+        </span>
+      ) : (
+        <span className="skeleton absolute inset-[10%]" />
+      )}
+    </span>
   );
 }
 
-/** The picture as it's seen (turned upright), shrunk for its tile, and its real size. */
-async function readPicture(file: File): Promise<{ thumb: string; size: Size }> {
-  const bitmap = await decode(file);
-  const size = { width: bitmap.width, height: bitmap.height };
-  const scale = Math.min(1, THUMB_SIDE / Math.max(size.width, size.height));
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(size.width * scale));
-  canvas.height = Math.max(1, Math.round(size.height * scale));
-  try {
-    const context = canvas.getContext('2d');
-    if (!context) throw new Error('No canvas');
-    // See-through parts show white, as they will on the page.
-    context.fillStyle = '#ffffff';
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.imageSmoothingQuality = 'high';
-    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    return { thumb: canvas.toDataURL('image/jpeg', 0.8), size };
-  } finally {
-    bitmap.close();
-    canvas.width = 0;
-    canvas.height = 0;
-  }
+/** The side's own header: what's in, and the ways out (the other side, start over). */
+function SideHeader({
+  title,
+  detail,
+  top,
+  onStartOver,
+}: {
+  title: ReactNode;
+  detail: ReactNode;
+  top?: ReactNode;
+  onStartOver: () => void;
+}) {
+  return (
+    <div className="flex min-w-0 items-center gap-3">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[16px] font-semibold text-ink">{title}</p>
+        <p className="truncate text-[13px] text-muted">{detail}</p>
+      </div>
+      {top}
+      <button
+        type="button"
+        onClick={onStartOver}
+        aria-label="Start over"
+        title="Start over"
+        className="grid size-11 shrink-0 place-items-center rounded-full text-muted transition-colors hover:bg-ink/[.06] hover:text-ink lg:size-10"
+      >
+        <Icon name="x" size={18} />
+      </button>
+    </div>
+  );
 }
 
-/** Looks for see-through pixels a band at a time, so a big picture never needs one huge copy. */
-function seeThrough(context: CanvasRenderingContext2D, size: Size) {
-  const rows = Math.max(1, Math.floor(1_000_000 / size.width));
-  for (let top = 0; top < size.height; top += rows) {
-    const band = context.getImageData(0, top, size.width, Math.min(rows, size.height - top));
-    if (hasTransparency(band.data)) return true;
-  }
-  return false;
+/** Finished (or finishing) files, flipping over to their new format as each one is done. */
+function FlipTiles({
+  tiles,
+  label,
+}: {
+  tiles: {
+    key: string | number;
+    thumb?: string | null;
+    name: string;
+    detail: ReactNode;
+    done: boolean;
+    paper?: boolean;
+    onDownload?: () => void;
+  }[];
+  label: string;
+}) {
+  return (
+    <ol
+      aria-label="Your files"
+      className="mx-auto flex max-h-[600px] w-full max-w-[920px] flex-wrap justify-center gap-x-3 gap-y-4 overflow-y-auto p-1 text-left"
+    >
+      {tiles.map((tile, index) => (
+        <li key={tile.key} className="w-[calc(50%-6px)] min-w-0 sm:w-[164px]">
+          <div
+            key={tile.done ? 'done' : 'waiting'}
+            className={cn('relative', tile.done && 'fx-flip')}
+            style={{ '--i': Math.min(index, 12) } as CSSProperties}
+          >
+            <span className="relative block aspect-[4/5]">
+              {tile.thumb ? (
+                <span className="absolute inset-[6%] flex items-center justify-center">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={tile.thumb}
+                    alt=""
+                    className={cn(
+                      'block max-h-full max-w-full object-contain transition-opacity',
+                      tile.paper ? 'rounded-[3px] bg-white' : 'rounded-[8px]',
+                      EDGE,
+                      !tile.done && 'opacity-40',
+                    )}
+                  />
+                </span>
+              ) : (
+                <span className="skeleton absolute inset-[10%]" />
+              )}
+              <span className="absolute bottom-[8%] left-[10%]">
+                {tile.done ? (
+                  <FormatTag lit>
+                    <Icon name="check" size={12} strokeWidth={3} className="mr-1" />
+                    {label}
+                  </FormatTag>
+                ) : (
+                  <FormatTag>
+                    <Icon name="loader" size={12} className="mr-1 animate-spin" />
+                    {label}
+                  </FormatTag>
+                )}
+              </span>
+            </span>
+          </div>
+          <div className="mt-1 flex min-w-0 items-center gap-1">
+            <p className="min-w-0 flex-1 truncate text-[12.5px] text-ink-2" title={tile.name}>
+              {tile.name}
+              <span className="block truncate text-[11.5px] text-muted">{tile.detail}</span>
+            </p>
+            {tile.onDownload && (
+              <button
+                type="button"
+                onClick={tile.onDownload}
+                aria-label={`Download ${tile.name}`}
+                title={`Download ${tile.name}`}
+                className="grid size-11 shrink-0 place-items-center rounded-full text-ink-2 hover:bg-ink/[.07] hover:text-ink lg:size-9"
+              >
+                <Icon name="download" size={16} />
+              </button>
+            )}
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
 }
 
-/** A picture redrawn as a JPEG (or a PNG, if it has see-through parts) a PDF can hold. */
-async function redraw(
-  file: File,
-  smaller: boolean,
-  opaque: boolean,
-): Promise<PdfImage & { capped: boolean }> {
-  let bitmap: ImageBitmap;
-  try {
-    bitmap = await decode(file);
-  } catch {
-    throw new Error(unreadable(file));
-  }
-  const size = redrawSize(bitmap, smaller);
-  const canvas = document.createElement('canvas');
-  canvas.width = size.width;
-  canvas.height = size.height;
-  try {
-    const context = canvas.getContext('2d', { willReadFrequently: !opaque });
-    if (!context) throw new Error('This browser couldn’t draw the picture.');
-    context.imageSmoothingQuality = 'high';
-    context.drawImage(bitmap, 0, 0, size.width, size.height);
-    const type = redrawType(!opaque && seeThrough(context, size));
-    const blob = await toBlob(canvas, type, smaller ? SMALLER.quality : REDRAW_QUALITY);
-    return {
-      bytes: new Uint8Array(await blob.arrayBuffer()),
-      format: type === 'image/png' ? 'png' : 'jpeg',
-      orientation: 1,
-      capped: size.capped,
-    };
-  } finally {
-    bitmap.close();
-    canvas.width = 0;
-    canvas.height = 0;
-  }
-}
-
-/**
- * One picture, ready for the PDF: the original bytes when a PDF can take them (the lossless
- * path), otherwise a redrawn copy. With "Make it smaller", whichever of the two is lighter.
- */
-async function sourceFor(
-  file: File,
-  smaller: boolean,
-  notes: { capped: number },
-): Promise<PdfSource> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const format = sniffImage(bytes);
-  const orientation = format === 'jpeg' ? jpegOrientation(bytes) : 1;
-  const plan = embedPlan(format, orientation, smaller);
-  const opaque = format === 'jpeg';
-  let redrawn: Awaited<ReturnType<typeof redraw>> | null = null;
-  if (plan.redraw) {
-    try {
-      redrawn = await redraw(file, smaller, opaque);
-    } catch (error) {
-      // Only "Make it smaller" wanted a redraw: the original still goes in as it is.
-      if (!plan.original) throw error;
-    }
-  }
-  if (plan.original && format && (!redrawn || bytes.length <= redrawn.bytes.length))
-    return {
-      bytes,
-      format,
-      orientation,
-      fallback: async () => redrawn ?? redraw(file, smaller, opaque),
-    };
-  if (!redrawn) throw new Error(unreadable(file));
-  if (redrawn.capped) notes.capped += 1;
-  return redrawn;
-}
-
-/** Three photos drawn on this device, plainly samples, so the tool can be tried right away. */
-async function samplePhotos(): Promise<File[]> {
-  // A seeded wobble, so the samples come out the same every time.
-  let seed = 11;
-  const random = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
-  const shoot = async (
-    name: string,
-    width: number,
-    height: number,
-    draw: (context: CanvasRenderingContext2D) => void,
-  ) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext('2d');
-    if (!context) throw new Error('No canvas');
-    draw(context);
-    // Grain, so it weighs what a real photo weighs rather than a flat drawing.
-    for (let index = 0; index < 40000; index += 1) {
-      context.fillStyle = `rgba(${random() > 0.5 ? '255,255,255' : '0,0,0'},${0.03 + random() * 0.05})`;
-      context.fillRect(random() * width, random() * height, 4 + random() * 14, 3);
-    }
-    const blob = await toBlob(canvas, 'image/jpeg', 0.92);
-    canvas.width = 0;
-    canvas.height = 0;
-    return new File([blob], name, { type: 'image/jpeg' });
-  };
-
-  const sunset = await shoot('Sample sunset.jpg', 3200, 2400, (context) => {
-    const sky = context.createLinearGradient(0, 0, 0, 1700);
-    sky.addColorStop(0, '#f08f63');
-    sky.addColorStop(0.55, '#f7c98f');
-    sky.addColorStop(1, '#efe2c8');
-    context.fillStyle = sky;
-    context.fillRect(0, 0, 3200, 2400);
-    context.fillStyle = '#fff3d6';
-    context.beginPath();
-    context.arc(2150, 900, 220, 0, Math.PI * 2);
-    context.fill();
-    const hills: [string, number, number][] = [
-      ['#c08a66', 0.55, 150],
-      ['#94664c', 0.64, 120],
-      ['#5f4636', 0.76, 95],
-      ['#33291f', 0.88, 70],
-    ];
-    for (const [color, base, amplitude] of hills) {
-      context.fillStyle = color;
-      context.beginPath();
-      context.moveTo(0, 2400);
-      for (let x = 0; x <= 3200; x += 80)
-        context.lineTo(x, 2400 * base + Math.sin(x / 330 + base * 9) * amplitude + random() * 30);
-      context.lineTo(3200, 2400);
-      context.fill();
-    }
-  });
-
-  const doorway = await shoot('Sample doorway.jpg', 2400, 3200, (context) => {
-    const wall = context.createLinearGradient(0, 0, 2400, 0);
-    wall.addColorStop(0, '#e2a47e');
-    wall.addColorStop(1, '#c8744d');
-    context.fillStyle = wall;
-    context.fillRect(0, 0, 2400, 3200);
-    context.fillStyle = '#b8aea0';
-    context.fillRect(0, 2660, 2400, 540);
-    context.fillStyle = '#d3cabd';
-    context.fillRect(560, 2560, 1280, 110);
-    // The door: a pale arch around a teal door with two panels and a brass knob.
-    const arch = (x: number, top: number, width: number, bottom: number) => {
-      context.beginPath();
-      context.moveTo(x, bottom);
-      context.lineTo(x, top + width / 2);
-      context.arc(x + width / 2, top + width / 2, width / 2, Math.PI, 0);
-      context.lineTo(x + width, bottom);
-      context.closePath();
-      context.fill();
-    };
-    context.fillStyle = '#f2e7d8';
-    arch(640, 620, 1120, 2560);
-    context.fillStyle = '#2f6f73';
-    arch(720, 700, 960, 2560);
-    context.fillStyle = '#28605f';
-    context.fillRect(820, 1320, 320, 560);
-    context.fillRect(1260, 1320, 320, 560);
-    context.fillRect(820, 1980, 320, 480);
-    context.fillRect(1260, 1980, 320, 480);
-    context.fillStyle = '#d8b45c';
-    context.beginPath();
-    context.arc(1560, 1900, 30, 0, Math.PI * 2);
-    context.fill();
-    // A potted plant by the step.
-    context.fillStyle = '#b4552e';
-    context.beginPath();
-    context.moveTo(1880, 2320);
-    context.lineTo(2200, 2320);
-    context.lineTo(2150, 2660);
-    context.lineTo(1930, 2660);
-    context.closePath();
-    context.fill();
-    for (let leaf = 0; leaf < 14; leaf += 1) {
-      context.fillStyle = leaf % 2 ? '#4f8a4b' : '#3d7040';
-      context.beginPath();
-      context.ellipse(
-        2040 + (random() - 0.5) * 260,
-        2140 - random() * 320,
-        44,
-        150,
-        (random() - 0.5) * 1.6,
-        0,
-        Math.PI * 2,
-      );
-      context.fill();
-    }
-    const shade = context.createLinearGradient(0, 0, 2400, 0);
-    shade.addColorStop(0, 'rgba(0,0,0,0)');
-    shade.addColorStop(1, 'rgba(0,0,0,0.16)');
-    context.fillStyle = shade;
-    context.fillRect(0, 0, 2400, 3200);
-  });
-
-  const notes = await shoot('Sample notes.jpg', 2400, 1800, (context) => {
-    context.fillStyle = '#8b5e3c';
-    context.fillRect(0, 0, 2400, 1800);
-    for (let line = 0; line < 70; line += 1) {
-      const y = random() * 1800;
-      context.strokeStyle = `rgba(60,35,20,${0.2 + random() * 0.25})`;
-      context.lineWidth = 3 + random() * 8;
-      context.beginPath();
-      context.moveTo(0, y);
-      for (let x = 0; x <= 2400; x += 120) context.lineTo(x, y + Math.sin(x / 260 + line) * 14);
-      context.stroke();
-    }
-    // A sheet of lined paper, slightly turned, with a few lines of handwriting.
-    context.save();
-    context.translate(1150, 900);
-    context.rotate(-0.05);
-    context.fillStyle = 'rgba(0,0,0,0.28)';
-    context.fillRect(-730, -520, 1500, 1100);
-    context.fillStyle = '#fbfaf5';
-    context.fillRect(-750, -550, 1500, 1100);
-    context.strokeStyle = '#b9d3ee';
-    context.lineWidth = 3;
-    for (let y = -390; y < 530; y += 72) {
-      context.beginPath();
-      context.moveTo(-750, y);
-      context.lineTo(750, y);
-      context.stroke();
-    }
-    context.strokeStyle = '#e8a0a0';
-    context.beginPath();
-    context.moveTo(-600, -550);
-    context.lineTo(-600, 550);
-    context.stroke();
-    context.fillStyle = '#27327a';
-    context.font = 'italic 600 86px Georgia, serif';
-    context.fillText('Sample notes', -560, -420);
-    context.strokeStyle = '#2b3a8f';
-    context.lineWidth = 6;
-    context.lineCap = 'round';
-    for (let row = 0; row < 9; row += 1) {
-      const y = -330 + row * 72;
-      const end = 200 + random() * 480;
-      context.beginPath();
-      context.moveTo(-560, y);
-      for (let x = -560; x < end; x += 34)
-        context.quadraticCurveTo(x + 17, y - 26 * random(), x + 34, y - 4 + 8 * random());
-      context.stroke();
-    }
-    context.restore();
-  });
-
-  return [sunset, doorway, notes];
-}
-
-/* ---------------- Images → PDF ---------------- */
+/* ---------------- Photos → PDF, JPG, PNG or WebP ---------------- */
 
 type Picture = {
   id: number;
   file: File;
   status: 'reading' | 'ready' | 'unreadable';
-  /** A small JPEG of the picture as it's seen, for its page preview. */
+  /** A small JPEG of the picture as it's seen, for its preview. */
   thumb?: string;
   /** Its size as it's seen, in pixels. */
   size?: Size;
 };
 
+type Target = 'pdf' | ImageTarget;
+type Quality = 'best' | 'balanced' | 'small';
+const QUALITY: Record<Quality, number> = { best: 0.95, balanced: 0.85, small: 0.72 };
+
+const TARGETS: TargetOption<Target>[] = [
+  { value: 'pdf', label: 'PDF', hint: 'One document' },
+  { value: 'jpeg', label: 'JPG', hint: 'Works anywhere' },
+  { value: 'png', label: 'PNG', hint: 'Exact' },
+  { value: 'webp', label: 'WebP', hint: 'Smallest' },
+];
+
 type MadePdf = {
+  kind: 'pdf';
   url: string;
   name: string;
   bytes: number;
@@ -820,35 +901,45 @@ type MadePdf = {
   pages: number;
   smaller: boolean;
   covers: { id: number; layout: PageLayout }[];
-  /** What it was made from, to tell when it's out of date. */
-  from: string;
   notes: string[];
 };
+type MadeImages = {
+  kind: 'images';
+  target: ImageTarget;
+  files: { id: number; name: string; blob: Blob; width: number; height: number }[];
+  before: number;
+  total: number;
+  failed: string[];
+  capped: number;
+};
 
-function ImagesToPdf({
+function ImagesSide({
   ref,
   hidden,
   onPdfs,
   onStarted,
+  onStartOver,
+  top,
 }: {
   ref: Ref<Intake>;
   hidden: boolean;
   onPdfs: (files: File[]) => void;
   onStarted: (started: boolean) => void;
+  onStartOver: () => void;
+  top?: ReactNode;
 }) {
   const id = useId();
   const [items, setItems] = useState<Picture[]>([]);
   const started = items.length > 0;
   useEffect(() => onStarted(started), [started, onStarted]);
+  const [chosen, setChosen] = useState<Target | null>(null);
   const [setup, setSetup] = useState<PageSetup>(DEFAULT_SETUP);
   const [smaller, setSmaller] = useState(false);
+  const [quality, setQuality] = useState<Quality>('balanced');
   const [job, setJob] = useState<{ done: number; total: number; label: string } | null>(null);
-  const [made, setMade] = useState<MadePdf | null>(null);
+  const [made, setMade] = useState<MadePdf | MadeImages | null>(null);
   const [notice, setNotice] = useState('');
   const [status, setStatus] = useState('');
-  const [drawing, setDrawing] = useState(false);
-  const [dragging, setDragging] = useState<number | null>(null);
-  const [over, setOver] = useState(false);
   const nextId = useRef(0);
   /** Pictures still in the list: a removed one isn't read. */
   const live = useRef(new Set<number>());
@@ -856,6 +947,7 @@ function ImagesToPdf({
   const building = useRef<AbortController | null>(null);
   const madeUrl = useRef<string | null>(null);
   const moreInput = useRef<HTMLInputElement>(null);
+  const payoff = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const ids = live.current;
@@ -870,9 +962,18 @@ function ImagesToPdf({
 
   const busy = job !== null;
   const usable = items.filter((item) => item.status !== 'unreadable');
-  const from = JSON.stringify([usable.map((item) => item.id), setup, smaller]);
-  const stale = made !== null && made.from !== from;
   const weight = usable.reduce((sum, item) => sum + item.file.size, 0);
+  const formats = [...new Set(usable.map((item) => formatOf(item.file)))];
+  const from = formats.length === 1 ? formats[0] : 'Photos';
+  // Offer every format but the one they're all in already; iPhone photos become JPGs by default.
+  const targets = TARGETS.filter(
+    (target) =>
+      !(formats.length === 1 && formats[0] === IMAGE_TYPES[target.value as ImageTarget]?.label),
+  );
+  const auto: Target = formats.length === 1 && formats[0] === 'HEIC' ? 'jpeg' : 'pdf';
+  const target: Target =
+    chosen && targets.some((option) => option.value === chosen) ? chosen : auto;
+  const targetLabel = TARGETS.find((option) => option.value === target)!.label;
 
   function patch(pictureId: number, change: Partial<Picture>) {
     setItems((current) =>
@@ -885,6 +986,13 @@ function ImagesToPdf({
     madeUrl.current = null;
     setMade(null);
   }
+
+  // The result takes the stage: bring it into view.
+  useEffect(() => {
+    if (!made) return;
+    const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    payoff.current?.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'start' });
+  }, [made]);
 
   function read(entries: Picture[]) {
     // One at a time: a phone decoding sixty photos at once would run out of memory.
@@ -921,6 +1029,7 @@ function ImagesToPdf({
       onPdfs(pdfFiles);
       return;
     }
+    clearMade();
     const notes: string[] = [];
     if (pictures.length) {
       const entries = pictures.map((file) => ({
@@ -931,11 +1040,10 @@ function ImagesToPdf({
       entries.forEach((entry) => live.current.add(entry.id));
       setItems((current) => [...current, ...entries]);
       read(entries);
-      notes.push(`Added ${plural(pictures.length, 'picture')}.`);
     }
     if (pdfFiles.length)
       notes.push(
-        `${names(pdfFiles.map((file) => file.name))} ${pdfFiles.length === 1 ? 'is a PDF' : 'are PDFs'}. To turn PDF pages into images, choose PDF → images above.`,
+        `${names(pdfFiles.map((file) => file.name))} ${pdfFiles.length === 1 ? 'is a PDF' : 'are PDFs'}: drop ${pdfFiles.length === 1 ? 'it' : 'them'} on its own to turn pages into images.`,
       );
     if (others.length)
       notes.push(
@@ -946,49 +1054,38 @@ function ImagesToPdf({
         `${names(heavy)} ${heavy.length === 1 ? 'is' : 'are'} over 40 MB, the most Convert takes for one picture.`,
       );
     if (left)
-      notes.push(
-        `Up to ${MAX_IMAGES} pictures go in one PDF: ${plural(left, 'picture')} left out.`,
-      );
+      notes.push(`Up to ${MAX_IMAGES} pictures at a time: ${plural(left, 'picture')} left out.`);
     setNotice(notes.join(' '));
   }
 
-  useImperativeHandle(ref, () => ({ take: add }));
-
-  async function trySamples() {
-    setDrawing(true);
-    setNotice('Drawing three sample photos…');
-    try {
-      add(await samplePhotos());
-    } catch {
-      setNotice('We couldn’t draw the samples here. Choose your own pictures instead.');
-    } finally {
-      setDrawing(false);
-    }
+  function reset() {
+    building.current?.abort();
+    live.current.clear();
+    clearMade();
+    setItems([]);
+    setChosen(null);
+    setNotice('');
+    setStatus('');
   }
 
-  function move(from: number, to: number, announce = true) {
-    if (busy || from === to || to < 0 || to >= items.length) return;
-    const next = [...items];
-    const [moved] = next.splice(from, 1);
-    next.splice(to, 0, moved);
-    setItems(next);
-    if (announce) setNotice(`Moved “${moved.file.name}” to number ${to + 1} of ${next.length}.`);
-  }
+  useImperativeHandle(ref, () => ({ take: add, reset }));
+
+  const sort = useSortable({
+    keys: items.map((item) => item.id),
+    disabled: busy || target !== 'pdf',
+    onMove: (fromIndex, to) => {
+      const next = [...items];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(to, 0, moved);
+      setItems(next);
+    },
+  });
 
   function remove(picture: Picture) {
     if (busy) return;
     live.current.delete(picture.id);
     setItems((current) => current.filter((item) => item.id !== picture.id));
-    setNotice(`Removed “${picture.file.name}”.`);
-  }
-
-  function startOver() {
-    building.current?.abort();
-    live.current.clear();
-    clearMade();
-    setItems([]);
-    setNotice('');
-    setStatus('');
+    if (items.length === 1) onStartOver();
   }
 
   async function makePdf() {
@@ -1007,11 +1104,7 @@ function ImagesToPdf({
         total,
         async (index) => {
           const picture = list[index];
-          setJob({
-            done: index,
-            total,
-            label: `Adding ${index + 1} of ${total}: ${picture.file.name}`,
-          });
+          setJob({ done: index, total, label: `Adding ${index + 1} of ${total}` });
           try {
             return await sourceFor(picture.file, smaller, notes);
           } catch (error) {
@@ -1047,6 +1140,7 @@ function ImagesToPdf({
           `Left out ${names(left.map((item) => item.file.name))}: ${left.length === 1 ? 'it' : 'they'} couldn’t be opened here.`,
         );
       setMade({
+        kind: 'pdf',
         url,
         name: pdfName(included.map((item) => item.file.name)),
         bytes: blob.size,
@@ -1056,18 +1150,14 @@ function ImagesToPdf({
         covers: result.pages
           .slice(0, 3)
           .map(({ index, layout }) => ({ id: list[index].id, layout })),
-        from: JSON.stringify([included.map((item) => item.id), setup, smaller]),
         notes: notices,
       });
-      setStatus(
-        `Your PDF is ready: ${plural(included.length, 'page')}, ${formatBytes(blob.size)}.`,
-      );
     } catch (error) {
       if (controller.signal.aborted) {
         if (building.current === controller) setStatus('Stopped. No PDF was made.');
       } else if (error instanceof RangeError) {
         setStatus(
-          'This browser ran out of memory making the PDF. Turn on Make it smaller, or make two smaller PDFs.',
+          'This browser ran out of memory making the PDF. Turn on Make it smaller in Advanced, or make two smaller PDFs.',
         );
       } else {
         setStatus(
@@ -1082,480 +1172,567 @@ function ImagesToPdf({
     }
   }
 
-  const paper = setup.size !== 'fit';
+  async function makeImages(format: ImageTarget) {
+    if (busy || !usable.length) return;
+    const list = usable;
+    const total = list.length;
+    const controller = new AbortController();
+    building.current = controller;
+    clearMade();
+    setStatus('');
+    const files: MadeImages['files'] = [];
+    const failed: string[] = [];
+    let capped = 0;
+    const taken = new Set<string>();
+    const snapshot = (): MadeImages => ({
+      kind: 'images',
+      target: format,
+      files: [...files],
+      before: list.reduce((sum, item) => sum + item.file.size, 0),
+      total,
+      failed: [...failed],
+      capped,
+    });
+    setJob({ done: 0, total, label: `Converting 1 of ${total}` });
+    setMade(snapshot());
+    for (const [index, picture] of list.entries()) {
+      if (controller.signal.aborted) break;
+      setJob({ done: index, total, label: `Converting ${index + 1} of ${total}` });
+      try {
+        const result = await convertPicture(picture.file, format, QUALITY[quality]);
+        if (result.capped) capped += 1;
+        let name = `${baseName(picture.file.name, 'photo')}.${IMAGE_TYPES[format].ext}`;
+        for (let copy = 2; taken.has(name); copy += 1)
+          name = `${baseName(picture.file.name, 'photo')}-${copy}.${IMAGE_TYPES[format].ext}`;
+        taken.add(name);
+        files.push({ id: picture.id, name, ...result });
+      } catch (error) {
+        if (error instanceof RangeError) {
+          setStatus('This browser ran out of memory. Try fewer pictures at a time.');
+          break;
+        }
+        failed.push(
+          error instanceof Error && /can’t save/.test(error.message)
+            ? error.message
+            : picture.file.name,
+        );
+      }
+      setMade(snapshot());
+    }
+    if (building.current === controller) building.current = null;
+    setJob(null);
+    setMade(snapshot());
+  }
+
+  const convert = () => (target === 'pdf' ? makePdf() : makeImages(target));
   const thumbOf = (pictureId: number) => items.find((item) => item.id === pictureId)?.thumb;
   /** Page numbers skip pictures that can't be opened: they're left out of the PDF. */
   const pageOf = new Map(usable.map((item, index) => [item.id, index + 1]));
-  const change = made && sizeChange(made.before, made.bytes);
-  const madeCard = useShowOnPhone(made !== null && !stale);
+  const pdfTarget = target === 'pdf';
+  const thumbs = usable.map((item) => item.thumb);
+
+  const payoffView = made && (
+    <div ref={payoff} className="scroll-mt-24">
+      {made.kind === 'pdf' ? (
+        <Payoff
+          headline={`✓ ${plural(made.pages, 'photo')} → PDF`}
+          caption={
+            <BeforeAfter before={formatBytes(made.before)} after={formatBytes(made.bytes)} />
+          }
+          action={{ label: 'Download PDF', icon: 'download', href: made.url, download: made.name }}
+          secondary={
+            <>
+              <PillButton icon="undo" onClick={clearMade}>
+                Make changes
+              </PillButton>
+              {!made.smaller && made.bytes > 5 * 1024 * 1024 && (
+                <PillButton
+                  icon="shrink"
+                  onClick={() => {
+                    setSmaller(true);
+                    clearMade();
+                  }}
+                >
+                  Make it smaller
+                </PillButton>
+              )}
+            </>
+          }
+          onReset={onStartOver}
+        >
+          <div className="flex flex-col items-center">
+            <div className="relative mx-auto h-[210px] w-[168px] sm:h-[250px] sm:w-[200px]">
+              {made.covers
+                .map((cover, index) => ({ cover, index }))
+                .reverse()
+                .map(({ cover, index }) => (
+                  // Fanned out, first page on top, each flipping over from photo to page.
+                  <span
+                    key={index}
+                    className="fx-flip absolute inset-0"
+                    style={
+                      {
+                        '--i': made.covers.length - index,
+                        transform: `translateX(${[0, 16, -16][index]}px) rotate(${[0, 5, -5][index]}deg)`,
+                      } as CSSProperties
+                    }
+                  >
+                    <PagePreview layout={cover.layout} thumb={thumbOf(cover.id)} />
+                  </span>
+                ))}
+              <span className="absolute -right-4 -bottom-1 rounded-full bg-ink px-3 py-1.5 text-[13px] font-semibold text-on-ink shadow-lift">
+                {plural(made.pages, 'page')}
+              </span>
+            </div>
+            <p className="mt-6 max-w-full truncate text-[16px] font-semibold text-ink">
+              {made.name}
+            </p>
+            <p className="text-[13.5px] text-muted">
+              {sizeChange(made.before, made.bytes) === 'about the same'
+                ? 'About the same size as the photos'
+                : `${sizeChange(made.before, made.bytes).replace(/^\w/, (letter) => letter.toUpperCase())} than the photos`}
+            </p>
+            {made.notes.map((note) => (
+              <p key={note} className="mt-2 max-w-[48ch] text-[12.5px] text-muted">
+                {note}
+              </p>
+            ))}
+          </div>
+        </Payoff>
+      ) : (
+        <ImagesPayoff
+          made={made}
+          busy={busy}
+          thumbOf={thumbOf}
+          onStop={() => building.current?.abort()}
+          onBack={clearMade}
+          onReset={onStartOver}
+        />
+      )}
+    </div>
+  );
 
   return (
-    <section
-      hidden={hidden}
-      aria-label="Images to PDF"
-      className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)] lg:items-start"
-    >
-      <Surface className="grid grid-cols-1 content-start gap-4">
-        {items.length === 0 ? (
-          <div className="grid gap-3">
-            <FileDrop
-              onFiles={add}
-              accept="image/*"
-              icon="file-image"
-              accent="var(--accent)"
-              title="Choose photos or scans"
-              hint={`Each one becomes a page, in the order you set. Up to ${MAX_IMAGES}.`}
-              disabled={busy || drawing}
-            />
-            <SampleButton onClick={trySamples} disabled={drawing}>
-              {drawing ? 'Drawing sample photos…' : 'Try with sample photos'}
-            </SampleButton>
-          </div>
-        ) : (
-          <>
-            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-              <p className="flex items-center gap-2 text-[13px] text-muted">
-                <Icon name="grip" size={14} /> Drag, or use the arrows, to set the order
-              </p>
-              <p className="mono-num text-[12px] text-faint">
-                {items.length}/{MAX_IMAGES} · {formatBytes(weight)}
-              </p>
-            </div>
-            <ol
-              aria-label="Pages, in order"
-              onDragOver={(event) => {
-                if (!hasFiles(event) || busy) return;
-                event.preventDefault();
-                setOver(true);
-              }}
-              onDragLeave={(event) => {
-                if (!event.currentTarget.contains(event.relatedTarget as Node | null))
-                  setOver(false);
-              }}
-              onDrop={(event) => {
-                if (!hasFiles(event)) return;
-                event.preventDefault();
-                setOver(false);
-                add(Array.from(event.dataTransfer.files));
-              }}
-              className={cn(
-                '-mx-1 grid max-h-[680px] grid-cols-2 gap-1 overflow-y-auto rounded-[16px] p-1 transition-shadow sm:grid-cols-3 xl:grid-cols-4',
-                over && 'shadow-[inset_0_0_0_2px_var(--color-signal)]',
-              )}
-            >
-              {items.map((item, index) => {
-                const number = pageOf.get(item.id);
-                const problem =
-                  item.status === 'unreadable'
-                    ? kindOf(item.file) === 'heic'
-                      ? 'HEIC opens only in Safari'
-                      : 'Can’t open this one here'
-                    : undefined;
-                return (
-                  <li
-                    key={item.id}
-                    draggable={!busy}
-                    onDragStart={(event) => {
-                      setDragging(index);
-                      event.dataTransfer.effectAllowed = 'move';
-                      event.dataTransfer.setData('text/plain', item.file.name);
-                    }}
-                    onDragEnd={() => setDragging(null)}
-                    onDragOver={(event) => {
-                      if (dragging === null) return;
-                      event.preventDefault();
-                      if (dragging !== index) {
-                        move(dragging, index, false);
-                        setDragging(index);
-                      }
-                    }}
-                    onDrop={(event) => {
-                      if (dragging !== null) event.preventDefault();
-                    }}
-                    className={cn(
-                      'group relative min-w-0 animate-rise rounded-[16px] p-2 transition-colors',
-                      !busy && 'cursor-grab active:cursor-grabbing',
-                      dragging === index
-                        ? 'bg-signal-soft shadow-[inset_0_0_0_1.5px_var(--color-signal)]'
-                        : 'hover:bg-subtle',
-                    )}
-                  >
-                    <div className="relative">
+    <section hidden={hidden} aria-label="Photos" className="grid min-w-0 gap-5">
+      {payoffView}
+      <div hidden={made !== null} className="grid min-w-0 gap-5">
+        <SideHeader
+          title={plural(items.length, 'photo')}
+          detail={`${from} · ${formatBytes(weight)}`}
+          top={top}
+          onStartOver={onStartOver}
+        />
+        <Transform<Target>
+          from={{ thumbs, tag: from, caption: plural(usable.length, 'photo') }}
+          to={{
+            thumbs,
+            object: pdfTarget ? (
+              <span className="relative block h-[96px] w-[92px] sm:h-[124px] sm:w-[120px]">
+                {usable
+                  .slice(0, 3)
+                  .map((item, index) => ({ item, index }))
+                  .reverse()
+                  .map(({ item, index }) => (
+                    <span
+                      key={item.id}
+                      className="absolute inset-0"
+                      style={{ transform: `translate(${index * 5}px, ${index * -5}px)` }}
+                    >
                       <PagePreview
                         layout={item.size && layoutPage(item.size, setup)}
                         thumb={item.thumb}
-                        problem={problem}
+                        className="h-full !aspect-auto"
                       />
-                      {number !== undefined && (
-                        <span className="mono-num absolute top-1 left-1 grid h-6 min-w-6 place-items-center rounded-full bg-ink px-1.5 text-[11px] font-medium text-on-ink shadow-lift">
-                          {number}
-                        </span>
-                      )}
-                    </div>
-                    <p
-                      className="mt-2 truncate px-1 text-[13px] font-medium text-ink"
-                      title={item.file.name}
-                    >
-                      {item.file.name}
-                    </p>
-                    <p className="mono-num truncate px-1 text-[11.5px] text-muted">
-                      {item.size
-                        ? `${item.size.width}×${item.size.height} · ${formatBytes(item.file.size)}`
-                        : item.status === 'reading'
-                          ? 'Reading…'
-                          : formatBytes(item.file.size)}
-                    </p>
-                    <div className="mt-1 flex">
-                      <TileButton
-                        icon="arrow-left"
-                        label={`Move “${item.file.name}” earlier`}
-                        off={busy || index === 0}
-                        onClick={() => move(index, index - 1)}
-                      />
-                      <TileButton
-                        icon="arrow-right"
-                        label={`Move “${item.file.name}” later`}
-                        off={busy || index === items.length - 1}
-                        onClick={() => move(index, index + 1)}
-                      />
-                      <TileButton
-                        icon="x"
-                        label={`Remove “${item.file.name}”`}
-                        off={busy}
-                        danger
-                        onClick={() => remove(item)}
-                        className="ml-auto"
-                      />
-                    </div>
-                  </li>
-                );
-              })}
-              {items.length < MAX_IMAGES && (
-                <li className="p-2">
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => moreInput.current?.click()}
-                    className="flex aspect-[4/5] w-full flex-col items-center justify-center gap-2 rounded-[14px] border-[1.5px] border-dashed border-line-strong bg-subtle text-[13.5px] font-medium text-ink-2 transition-colors hover:bg-well hover:text-ink disabled:opacity-50"
-                  >
-                    <span
-                      className="grid size-9 place-items-center rounded-full text-[#12110d]"
-                      style={{ background: 'var(--accent)' }}
-                    >
-                      <Icon name="plus" size={18} />
                     </span>
-                    Add more
-                  </button>
-                  <input
-                    ref={moreInput}
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    tabIndex={-1}
-                    aria-hidden="true"
-                    className="sr-only"
-                    onChange={(event) => {
-                      add(Array.from(event.target.files ?? []));
-                      event.target.value = '';
-                    }}
+                  ))}
+              </span>
+            ) : undefined,
+            tag: targetLabel,
+            caption: pdfTarget
+              ? `${plural(usable.length, 'page')}, one file`
+              : plural(usable.length, 'photo'),
+          }}
+          targets={targets}
+          value={target}
+          onChange={(next) => {
+            setChosen(next);
+            clearMade();
+          }}
+          disabled={busy}
+        />
+
+        <div className="flex items-center justify-between gap-3">
+          <p className="flex items-center gap-2 text-[14px] text-muted">
+            {pdfTarget ? (
+              <>
+                <Icon name="grip" size={15} /> Drag to set the page order
+              </>
+            ) : (
+              'Each photo becomes its own file'
+            )}
+          </p>
+        </div>
+        <ol
+          aria-label={pdfTarget ? 'Pages, in order' : 'Photos'}
+          className="grid grid-cols-3 gap-x-2 gap-y-3 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7"
+        >
+          {items.map((item) => {
+            const number = pageOf.get(item.id);
+            const problem =
+              item.status === 'unreadable'
+                ? kindOf(item.file) === 'heic'
+                  ? 'HEIC opens only in Safari'
+                  : 'Can’t open this one here'
+                : undefined;
+            const up = sort.lifted === item.id;
+            return (
+              <li
+                key={item.id}
+                {...(pdfTarget ? sort.item(item.id) : {})}
+                className={cn(
+                  'group relative min-w-0',
+                  pdfTarget && !busy && 'cursor-grab active:cursor-grabbing',
+                )}
+              >
+                <div
+                  className={cn(
+                    'relative rounded-[14px] transition-[scale,rotate,background-color,box-shadow] duration-150',
+                    up
+                      ? 'scale-[1.06] rotate-[-2deg] bg-surface shadow-[0_24px_40px_-20px_rgb(14_20_51/.5)]'
+                      : sort.pending === item.id
+                        ? 'scale-[.97]'
+                        : 'hover:bg-ink/[.035]',
+                  )}
+                >
+                  {pdfTarget ? (
+                    <PagePreview
+                      layout={item.size && layoutPage(item.size, setup)}
+                      thumb={item.thumb}
+                      problem={problem}
+                    />
+                  ) : (
+                    <PhotoTile thumb={item.thumb} problem={problem} />
+                  )}
+                  {pdfTarget && number !== undefined && (
+                    <GrabNumber handle={sort.handle(item.id)} label={`Move “${item.file.name}”`}>
+                      {number}
+                    </GrabNumber>
+                  )}
+                  <CornerButton
+                    icon="x"
+                    label={`Remove “${item.file.name}”`}
+                    disabled={busy}
+                    onClick={() => remove(item)}
                   />
-                </li>
-              )}
-            </ol>
-            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
+                </div>
+                <p
+                  className="mt-0.5 truncate px-1 text-center text-[12px] text-muted"
+                  title={item.file.name}
+                >
+                  {item.status === 'reading' ? 'Reading…' : item.file.name}
+                </p>
+              </li>
+            );
+          })}
+          {items.length < MAX_IMAGES && (
+            <li className="min-w-0">
               <button
                 type="button"
-                onClick={startOver}
-                className="h-11 rounded-[10px] px-3 text-[14px] font-medium text-muted hover:bg-ink/5 hover:text-ink lg:h-9 lg:text-[13.5px]"
+                disabled={busy}
+                onClick={() => moreInput.current?.click()}
+                className="flex aspect-[4/5] w-full flex-col items-center justify-center gap-2 rounded-[16px] border-[1.5px] border-dashed border-line-strong text-[14px] font-medium text-ink-2 transition-colors hover:bg-ink/[.04] hover:text-ink disabled:opacity-50"
               >
-                Start over
-              </button>
-              {items.some((item) => item.status === 'unreadable') && (
-                <span className="text-[12.5px] text-caution">
-                  Pictures that can’t be opened are left out.
+                <span
+                  className="grid size-10 place-items-center rounded-full text-[var(--on-accent,#12110d)]"
+                  style={{ background: 'var(--accent)' }}
+                >
+                  <Icon name="plus" size={18} />
                 </span>
-              )}
-            </div>
-          </>
-        )}
+                Add more
+              </button>
+              <input
+                ref={moreInput}
+                type="file"
+                accept="image/*,.heic,.heif"
+                multiple
+                tabIndex={-1}
+                aria-hidden="true"
+                className="sr-only"
+                onChange={(event) => {
+                  add(Array.from(event.target.files ?? []));
+                  event.target.value = '';
+                }}
+              />
+            </li>
+          )}
+        </ol>
+
         {/* Always in the page, so screen readers announce what lands in it. */}
         <p
           aria-live="polite"
           className={cn(
-            'text-[13px] leading-relaxed [overflow-wrap:anywhere] text-muted',
+            'text-[13.5px] leading-relaxed [overflow-wrap:anywhere] text-caution',
             !notice && 'sr-only',
           )}
         >
           {notice}
         </p>
-      </Surface>
 
-      {/* Settings wait for pictures: there's nothing to decide before then. */}
-      <aside
-        aria-label="Page setup and your PDF"
-        className={cn(
-          'min-w-0 grid-cols-1 gap-4 lg:sticky lg:top-24 lg:grid',
-          items.length ? 'grid' : 'hidden',
-        )}
-      >
-        <Surface className={cn('grid-cols-1 gap-4', items.length ? 'grid' : 'hidden')}>
-          <h2 className="label">Pages</h2>
-          <Choice<PageSetup['size']>
-            label="Page size"
-            value={setup.size}
-            disabled={busy}
-            onChange={(size) => setSetup({ ...setup, size })}
-            options={[
-              { value: 'fit', label: 'Fit image' },
-              { value: 'a4', label: 'A4' },
-              { value: 'letter', label: 'US Letter' },
-            ]}
-            hint={
-              paper
-                ? `Every page is ${setup.size === 'a4' ? 'A4' : 'US Letter'}, with the picture centered and kept in shape.`
-                : 'Each page fits its image: the picture’s own shape, edge to edge.'
+        {target !== 'png' && (
+          <Advanced
+            summary={
+              pdfTarget
+                ? `${setup.size === 'fit' ? 'Fit image' : setup.size === 'a4' ? 'A4' : 'US Letter'}${smaller ? ' · smaller' : ''}`
+                : { best: 'Best quality', balanced: 'Balanced', small: 'Smaller files' }[quality]
             }
-          />
-          {paper && (
-            <MoreOptions
-              label="Orientation and margins"
-              summary={`${setup.orientation === 'auto' ? 'Auto' : setup.orientation === 'portrait' ? 'Portrait' : 'Landscape'} · ${setup.margin === 'none' ? 'no' : setup.margin} margin`}
-            >
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-1">
-                <Choice<PageSetup['orientation']>
-                  label="Orientation"
-                  value={setup.orientation}
+          >
+            {pdfTarget ? (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Choice<PageSetup['size']>
+                  label="Page size"
+                  value={setup.size}
                   disabled={busy}
-                  onChange={(orientation) => setSetup({ ...setup, orientation })}
+                  onChange={(size) => setSetup({ ...setup, size })}
                   options={[
-                    { value: 'auto', label: 'Auto' },
-                    { value: 'portrait', label: 'Portrait' },
-                    { value: 'landscape', label: 'Landscape' },
+                    { value: 'fit', label: 'Fit image' },
+                    { value: 'a4', label: 'A4' },
+                    { value: 'letter', label: 'US Letter' },
                   ]}
                   hint={
-                    setup.orientation === 'auto'
-                      ? 'Each page turns to suit its picture.'
-                      : `Every page ${setup.orientation === 'portrait' ? 'upright' : 'on its side'}; pictures shrink to fit.`
+                    setup.size !== 'fit'
+                      ? 'The picture is centered and kept in shape.'
+                      : 'Each page is the picture’s own shape.'
                   }
                 />
-                <Choice<PageSetup['margin']>
-                  label="Margin"
-                  value={setup.margin}
-                  disabled={busy}
-                  onChange={(margin) => setSetup({ ...setup, margin })}
-                  options={[
-                    { value: 'none', label: 'None' },
-                    { value: 'small', label: 'Small' },
-                    { value: 'normal', label: 'Normal' },
-                  ]}
-                />
+                {setup.size !== 'fit' && (
+                  <Choice<PageSetup['orientation']>
+                    label="Orientation"
+                    value={setup.orientation}
+                    disabled={busy}
+                    onChange={(orientation) => setSetup({ ...setup, orientation })}
+                    options={[
+                      { value: 'auto', label: 'Auto' },
+                      { value: 'portrait', label: 'Portrait' },
+                      { value: 'landscape', label: 'Landscape' },
+                    ]}
+                  />
+                )}
+                {setup.size !== 'fit' && (
+                  <Choice<PageSetup['margin']>
+                    label="Margin"
+                    value={setup.margin}
+                    disabled={busy}
+                    onChange={(margin) => setSetup({ ...setup, margin })}
+                    options={[
+                      { value: 'none', label: 'None' },
+                      { value: 'small', label: 'Small' },
+                      { value: 'normal', label: 'Normal' },
+                    ]}
+                  />
+                )}
+                <label
+                  htmlFor={`${id}-smaller`}
+                  className="flex cursor-pointer items-start gap-3 self-end rounded-[14px] bg-ink/[.04] p-3 shadow-[inset_0_0_0_1px_var(--color-line)]"
+                >
+                  <input
+                    id={`${id}-smaller`}
+                    type="checkbox"
+                    checked={smaller}
+                    disabled={busy}
+                    onChange={(event) => setSmaller(event.target.checked)}
+                    className="mt-0.5 size-5 shrink-0 accent-[var(--accent-ink)]"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-[14px] font-medium text-ink">Make it smaller</span>
+                    <span className="block text-[12.5px] leading-snug text-muted">
+                      Easier to email, still sharp on screen.
+                    </span>
+                  </span>
+                </label>
               </div>
-            </MoreOptions>
-          )}
-          <label
-            htmlFor={`${id}-smaller`}
-            className="flex cursor-pointer items-start gap-3 rounded-[14px] bg-subtle p-3 shadow-[inset_0_0_0_1px_var(--color-line)]"
-          >
-            <input
-              id={`${id}-smaller`}
-              type="checkbox"
-              checked={smaller}
-              disabled={busy}
-              onChange={(event) => setSmaller(event.target.checked)}
-              className="mt-0.5 size-5 shrink-0 accent-[var(--accent)]"
-            />
-            <span className="min-w-0">
-              <span className="block text-[14px] font-medium text-ink">Make it smaller</span>
-              <span className="block text-[12.5px] leading-snug text-muted">
-                Easier to email, still sharp on screen.
+            ) : (
+              <Choice<Quality>
+                label="Quality"
+                value={quality}
+                disabled={busy}
+                onChange={setQuality}
+                options={[
+                  { value: 'best', label: 'Best' },
+                  { value: 'balanced', label: 'Balanced' },
+                  { value: 'small', label: 'Smaller files' },
+                ]}
+              />
+            )}
+          </Advanced>
+        )}
+
+        <DeskBar
+          summary={
+            job ? undefined : (
+              <span role="status" className="block truncate">
+                {status ||
+                  (usable.length === 0
+                    ? items.some((item) => item.status === 'reading')
+                      ? 'Reading…'
+                      : 'None of these pictures can be opened here.'
+                    : `${plural(usable.length, 'photo')} · ${formatBytes(weight)}`)}
               </span>
-            </span>
-          </label>
-          <button
-            type="button"
-            onClick={makePdf}
-            disabled={busy || usable.length === 0}
-            className="inline-flex h-14 items-center justify-center gap-2 rounded-[16px] bg-[var(--accent)] px-5 text-[16.5px] font-semibold text-[#12110d] shadow-[0_14px_32px_-16px_var(--accent)] transition-[transform,opacity] active:scale-[.985] disabled:opacity-40 disabled:shadow-none sm:h-13 sm:text-[16px]"
-          >
-            <Icon name="file-stack" size={17} />
-            {stale
-              ? 'Make the PDF again'
-              : usable.length
-                ? `Make a ${usable.length}-page PDF`
-                : 'Make PDF'}
-          </button>
-          {job && (
+            )
+          }
+        >
+          {job ? (
             <Progress
-              name="Making the PDF"
+              name={pdfTarget ? 'Making the PDF' : 'Converting'}
               done={job.done}
               total={job.total}
               label={job.label}
               onCancel={() => building.current?.abort()}
             />
-          )}
-          <p
-            role="status"
-            className="min-h-5 text-[13px] leading-relaxed [overflow-wrap:anywhere] text-muted"
-          >
-            {status ||
-              (items.length === 0
-                ? 'Add pictures to begin.'
-                : usable.length === 0
-                  ? 'None of these pictures can be opened here.'
-                  : '')}
-          </p>
-        </Surface>
-
-        <div
-          ref={madeCard}
-          className={cn(
-            'scroll-mb-4 rounded-[24px] p-5 transition-colors duration-300 sm:p-6',
-            made
-              ? ACCENT_TINT
-              : 'hidden bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)] lg:block',
-          )}
-        >
-          {made ? (
-            <div className="animate-rise">
-              <div className={cn('relative mx-auto h-[190px] w-[152px]', stale && 'opacity-50')}>
-                {made.covers
-                  .map((cover, index) => ({ cover, index }))
-                  .reverse()
-                  .map(({ cover, index }) => (
-                    // Fanned out, first page on top.
-                    <span
-                      key={index}
-                      className="absolute inset-0 transition-transform duration-500"
-                      style={{
-                        transform: `translateX(${[0, 16, -16][index]}px) rotate(${[0, 5, -5][index]}deg)`,
-                      }}
-                    >
-                      <PagePreview layout={cover.layout} thumb={thumbOf(cover.id)} />
-                    </span>
-                  ))}
-                <span className="absolute -right-3 -bottom-2 rounded-full bg-ink px-2.5 py-1 text-[12px] font-medium text-on-ink shadow-lift">
-                  {plural(made.pages, 'page')}
-                </span>
-              </div>
-              <p className="mt-6 truncate text-center text-[15px] font-semibold text-ink">
-                {made.name}
-              </p>
-              <p className="text-center text-[13px] text-ink-2">
-                {plural(made.pages, 'page')} · {formatBytes(made.bytes)}
-              </p>
-              <dl className="mt-4 grid grid-cols-2 gap-2 text-center">
-                <div className="rounded-[12px] bg-ink/5 px-2 py-2.5">
-                  <dt className="label">Pictures</dt>
-                  <dd className="mono-num mt-0.5 text-[15px] text-ink">
-                    {formatBytes(made.before)}
-                  </dd>
-                </div>
-                <div className="rounded-[12px] bg-ink/5 px-2 py-2.5">
-                  <dt className="label">PDF</dt>
-                  <dd className="mono-num mt-0.5 text-[15px] text-ink">
-                    {formatBytes(made.bytes)}
-                  </dd>
-                </div>
-              </dl>
-              <p className="mt-2 text-center text-[12.5px] text-muted">
-                {change === 'about the same'
-                  ? 'About the same size as the pictures.'
-                  : `${change?.replace(/^\w/, (letter) => letter.toUpperCase())} than the pictures.`}
-                {!made.smaller && made.bytes > 5 * 1024 * 1024 && (
-                  <> Need it lighter? Turn on Make it smaller.</>
-                )}
-              </p>
-              <a
-                href={made.url}
-                download={made.name}
-                className="mt-4 w-full inline-flex h-14 items-center justify-center gap-2 rounded-[16px] bg-[var(--accent)] px-5 text-[16.5px] font-semibold text-[#12110d] shadow-[0_14px_32px_-16px_var(--accent)] transition-[transform,opacity] active:scale-[.985] disabled:opacity-40 disabled:shadow-none sm:h-13 sm:text-[16px]"
-              >
-                <Icon name="download" size={17} /> Download PDF
-              </a>
-              {stale && (
-                <Note icon="refresh" tone="caution" className="mt-3">
-                  You’ve changed things since this PDF was made. Make it again to include them.
-                </Note>
-              )}
-              {made.notes.map((note) => (
-                <p key={note} className="mt-3 text-[12.5px] text-muted">
-                  {note}
-                </p>
-              ))}
-            </div>
           ) : (
-            <div className="py-4 text-center">
-              <div className="relative mx-auto h-[120px] w-[96px]" aria-hidden="true">
-                <span className="absolute inset-0 rotate-[-7deg] rounded-[7px] bg-ink/[.05] shadow-[inset_0_0_0_1px_var(--color-line)]" />
-                <span className="absolute inset-0 rotate-[5deg] rounded-[7px] bg-ink/[.07] shadow-[inset_0_0_0_1px_var(--color-line)]" />
-                <span className="absolute inset-0 grid place-items-center rounded-[7px] border border-dashed border-line-strong bg-surface">
-                  <Icon name="file-stack" size={26} className="text-faint" />
-                </span>
-              </div>
-              <p className="mt-5 text-[14px] font-medium text-ink">Your PDF appears here</p>
-              <p className="mt-1 text-[13px] text-muted">
-                One page per picture, in the order shown.
-              </p>
-            </div>
+            <DeskButton
+              icon={pdfTarget ? 'file-stack' : 'repeat'}
+              onClick={convert}
+              disabled={usable.length === 0}
+            >
+              {pdfTarget
+                ? usable.length
+                  ? `Make a ${usable.length}-page PDF`
+                  : 'Make PDF'
+                : `Convert to ${targetLabel}`}
+            </DeskButton>
           )}
-        </div>
-        {made && (
-          <p className="px-1 text-[12.5px] leading-relaxed text-muted">
-            Camera details and where a photo was taken aren’t copied into the PDF.
-          </p>
-        )}
-      </aside>
+        </DeskBar>
+      </div>
     </section>
   );
 }
 
-/** Move and remove buttons on a picture tile. Stays focusable at the ends of the list. */
-function TileButton({
-  icon,
-  label,
-  off,
-  danger,
-  onClick,
-  className,
+/** Photos in their new format: flipping over as each one is done, then one big download. */
+function ImagesPayoff({
+  made,
+  busy,
+  thumbOf,
+  onStop,
+  onBack,
+  onReset,
 }: {
-  icon: IconName;
-  label: string;
-  off: boolean;
-  danger?: boolean;
-  onClick: () => void;
-  className?: string;
+  made: MadeImages;
+  busy: boolean;
+  thumbOf: (id: number) => string | undefined;
+  onStop: () => void;
+  onBack: () => void;
+  onReset: () => void;
 }) {
+  const [zipping, setZipping] = useState(false);
+  const label = IMAGE_TYPES[made.target].label;
+  const weight = made.files.reduce((sum, file) => sum + file.blob.size, 0);
+  const waiting = busy ? Math.max(0, made.total - made.files.length - made.failed.length) : 0;
+  const [only] = made.files;
+
+  const downloadAll = async () => {
+    if (made.files.length === 1) return download(only.blob, only.name);
+    setZipping(true);
+    try {
+      download(
+        await zip(made.files.map((file) => ({ name: file.name, data: file.blob }))),
+        `${label.toLowerCase()}-photos.zip`,
+      );
+    } finally {
+      setZipping(false);
+    }
+  };
+
   return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      aria-disabled={off || undefined}
-      onClick={() => !off && onClick()}
-      className={cn(
-        'grid size-11 place-items-center rounded-[10px] text-muted transition-colors aria-disabled:opacity-30 lg:size-9',
-        danger ? 'hover:bg-critical-soft hover:text-critical' : 'hover:bg-ink/[.07] hover:text-ink',
-        className,
-      )}
+    <Payoff
+      headline={
+        busy
+          ? `Converting ${Math.min(made.files.length + made.failed.length + 1, made.total)} of ${made.total}…`
+          : `✓ ${plural(made.files.length, 'photo')} → ${label}`
+      }
+      caption={
+        made.files.length > 0 && !busy ? (
+          <BeforeAfter before={formatBytes(made.before)} after={formatBytes(weight)} />
+        ) : undefined
+      }
+      action={
+        !busy && made.files.length
+          ? {
+              label: zipping
+                ? 'Zipping…'
+                : made.files.length === 1
+                  ? `Download ${label}`
+                  : `Download all ${made.files.length} (.zip)`,
+              icon: 'download',
+              onClick: downloadAll,
+            }
+          : undefined
+      }
+      secondary={
+        busy ? (
+          <PillButton icon="x" onClick={onStop}>
+            Stop
+          </PillButton>
+        ) : (
+          <PillButton icon="undo" onClick={onBack}>
+            Make changes
+          </PillButton>
+        )
+      }
+      onReset={busy ? undefined : onReset}
     >
-      <Icon name={icon} size={16} />
-    </button>
+      <FlipTiles
+        label={label}
+        tiles={[
+          ...made.files.map((file) => ({
+            key: file.id,
+            thumb: thumbOf(file.id),
+            name: file.name,
+            detail: `${file.width}×${file.height} · ${formatBytes(file.blob.size)}`,
+            done: true,
+            onDownload: () => download(file.blob, file.name),
+          })),
+          ...(waiting
+            ? Array.from({ length: Math.min(waiting, 20) }, (_, index) => ({
+                key: `waiting-${index}`,
+                thumb: undefined,
+                name: '…',
+                detail: '',
+                done: false,
+              }))
+            : []),
+        ]}
+      />
+      {made.failed.length > 0 && (
+        <p className="mt-4 text-[13px] text-caution">
+          Left out: {made.failed.slice(0, 4).join(', ')}
+          {made.failed.length > 4 && ` and ${made.failed.length - 4} more`}.
+        </p>
+      )}
+      {made.capped > 0 && (
+        <p className="mt-2 text-[12.5px] text-muted">
+          {plural(made.capped, 'photo')} {made.capped === 1 ? 'was' : 'were'} bigger than this
+          browser can draw, so {made.capped === 1 ? 'it was' : 'they were'} scaled down to 16
+          megapixels.
+        </p>
+      )}
+    </Payoff>
   );
 }
 
-/* ---------------- PDF → images ---------------- */
+/* ---------------- A PDF → images ---------------- */
 
 type OpenedPdf = { id: number; file: File; pages: number; first: Size };
 type PageImage = { index: number; name: string; blob: Blob; width: number; height: number };
 type Rendered = {
   images: PageImage[];
+  pages: number[];
   total: number;
   format: 'jpeg' | 'png';
   dpi: number;
   capped: number;
   failed: number[];
   zipName: string;
-  from: string;
+  stopped: boolean;
 };
 
 const openProblem = (error: unknown, name: string) => {
@@ -1570,22 +1747,31 @@ const openProblem = (error: unknown, name: string) => {
   return 'We couldn’t open the PDF in this browser. Try again, or try another browser.';
 };
 
-function PdfToImages({
+const PAGE_TARGETS: TargetOption<'jpeg' | 'png'>[] = [
+  { value: 'jpeg', label: 'JPG', hint: 'Smaller files' },
+  { value: 'png', label: 'PNG', hint: 'Exact, larger' },
+];
+
+function PdfSide({
   ref,
   hidden,
   onImages,
   onStarted,
+  onStartOver,
+  top,
 }: {
   ref: Ref<Intake>;
   hidden: boolean;
   onImages: (files: File[]) => void;
   onStarted: (started: boolean) => void;
+  onStartOver: () => void;
+  top?: ReactNode;
 }) {
   const id = useId();
   const [opened, setOpened] = useState<OpenedPdf | null>(null);
-  const started = opened !== null;
-  useEffect(() => onStarted(started), [started, onStarted]);
   const [opening, setOpening] = useState<string | null>(null);
+  const started = opened !== null || opening !== null;
+  useEffect(() => onStarted(started), [started, onStarted]);
   /** Page thumbnails: a data URL, `null` when a page can't be drawn, undefined until it is. */
   const [thumbs, setThumbs] = useState<(string | null | undefined)[]>([]);
   const [picked, setPicked] = useState<number[]>([]);
@@ -1595,12 +1781,11 @@ function PdfToImages({
   const [job, setJob] = useState<{ done: number; total: number } | null>(null);
   const [rendered, setRendered] = useState<Rendered | null>(null);
   const [zipping, setZipping] = useState(false);
-  const [notice, setNotice] = useState<{ text: ReactNode; tone: 'quiet' | 'caution' } | null>(null);
-  const [status, setStatus] = useState('');
+  const [notice, setNotice] = useState<ReactNode>(null);
   const doc = useRef<RenderablePdf | null>(null);
   const generation = useRef(0);
   const running = useRef<AbortController | null>(null);
-  const otherInput = useRef<HTMLInputElement>(null);
+  const payoff = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const pdf = doc;
@@ -1615,29 +1800,36 @@ function PdfToImages({
 
   const busy = job !== null;
   const chosen = new Set(picked);
-  const from = JSON.stringify([opened?.id, picked, format, resolution]);
-  const stale = rendered !== null && rendered.from !== from;
   const dpi = RESOLUTIONS[resolution].dpi;
   const label = format === 'png' ? 'PNG' : 'JPG';
 
-  async function open(file: File) {
-    const run = ++generation.current;
+  const showing = rendered !== null;
+  useEffect(() => {
+    if (!showing) return;
+    const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    payoff.current?.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'start' });
+  }, [showing]);
+
+  function reset() {
+    generation.current += 1;
     running.current?.abort();
     doc.current?.close();
     doc.current = null;
     setOpened(null);
+    setOpening(null);
     setThumbs([]);
     setPicked([]);
     setRange('');
     setRendered(null);
     setJob(null);
-    setStatus('');
     setNotice(null);
+  }
+
+  async function open(file: File) {
+    reset();
+    const run = generation.current;
     if (file.size > MAX_PDF_BYTES) {
-      setNotice({
-        text: `“${file.name}” is ${formatBytes(file.size)}. Convert opens PDFs up to 50 MB.`,
-        tone: 'caution',
-      });
+      setNotice(`“${file.name}” is ${formatBytes(file.size)}. Convert opens PDFs up to 50 MB.`);
       return;
     }
     setOpening(file.name);
@@ -1647,19 +1839,16 @@ function PdfToImages({
       if (run !== generation.current) return pdf.close();
       if (pdf.pages > MAX_PDF_PAGES) {
         pdf.close();
-        setNotice({
-          text: (
-            <>
-              “{file.name}” has {pdf.pages} pages. Convert takes up to {MAX_PDF_PAGES} at a time:
-              pull out the pages you need with the{' '}
-              <Link href="/tools/pdf" className="font-medium underline underline-offset-2">
-                PDF tool
-              </Link>{' '}
-              first.
-            </>
-          ),
-          tone: 'caution',
-        });
+        setNotice(
+          <>
+            “{file.name}” has {pdf.pages} pages. Convert takes up to {MAX_PDF_PAGES} at a time: pull
+            out the pages you need with the{' '}
+            <Link href="/tools/pdf" className="font-medium underline underline-offset-2">
+              PDF tool
+            </Link>{' '}
+            first.
+          </>,
+        );
         return;
       }
       const size = await pdf.size(0);
@@ -1684,7 +1873,7 @@ function PdfToImages({
       }
     } catch (error) {
       if (run !== generation.current) return;
-      setNotice({ text: openProblem(error, file.name), tone: 'caution' });
+      setNotice(openProblem(error, file.name));
     } finally {
       if (run === generation.current) setOpening(null);
     }
@@ -1696,37 +1885,14 @@ function PdfToImages({
     if (!pdfFiles.length) {
       const pictures = files.filter((file) => ['image', 'heic'].includes(kindOf(file)));
       if (pictures.length) return onImages(pictures);
-      setNotice({
-        text: `${names(files.map((file) => file.name))} ${files.length === 1 ? 'isn’t a PDF' : 'aren’t PDFs'}. Choose a PDF to turn its pages into images.`,
-        tone: 'caution',
-      });
       return;
     }
-    void open(pdfFiles[0]);
-    if (files.length > 1)
-      setNotice({
-        text: `One PDF at a time: opening “${pdfFiles[0].name}”.`,
-        tone: 'quiet',
-      });
+    void open(pdfFiles[0]).then(() => {
+      if (pdfFiles.length > 1) setNotice(`One PDF at a time: this is “${pdfFiles[0].name}”.`);
+    });
   }
 
-  useImperativeHandle(ref, () => ({ take }));
-
-  async function trySample() {
-    setNotice(null);
-    setOpening('a sample PDF');
-    try {
-      const { samplePdfs } = await import('@/lib/tools/pdf-samples');
-      const [file] = await samplePdfs('extract');
-      await open(file);
-    } catch {
-      setOpening(null);
-      setNotice({
-        text: 'We couldn’t make the sample here. Choose your own PDF instead.',
-        tone: 'caution',
-      });
-    }
-  }
+  useImperativeHandle(ref, () => ({ take, reset }));
 
   function toggle(index: number) {
     const next = chosen.has(index)
@@ -1753,18 +1919,18 @@ function PdfToImages({
     const images: PageImage[] = [];
     const failed: number[] = [];
     let capped = 0;
-    const snapshot = () => ({
+    const snapshot = (stopped = false): Rendered => ({
       images: [...images],
+      pages,
       total: pages.length,
       format,
       dpi,
       capped,
       failed: [...failed],
       zipName: pagesZipName(base, format),
-      from,
+      stopped,
     });
     setRendered(snapshot());
-    setStatus('');
     setJob({ done: 0, total: pages.length });
     for (const [position, index] of pages.entries()) {
       if (controller.signal.aborted) break;
@@ -1796,12 +1962,7 @@ function PdfToImages({
     if (run !== generation.current) return;
     if (running.current === controller) running.current = null;
     setJob(null);
-    const weight = images.reduce((sum, image) => sum + image.blob.size, 0);
-    setStatus(
-      controller.signal.aborted
-        ? `Stopped after ${images.length} of ${pages.length}. The finished ones are ready to download.`
-        : `Done: ${plural(images.length, 'image')}, ${formatBytes(weight)}.`,
-    );
+    setRendered(snapshot(controller.signal.aborted));
   }
 
   async function downloadAll() {
@@ -1815,7 +1976,7 @@ function PdfToImages({
       );
       download(archive, rendered.zipName);
     } catch (error) {
-      setStatus(
+      setNotice(
         error instanceof Error
           ? error.message
           : 'We couldn’t make the zip. Download the pages one at a time instead.',
@@ -1827,405 +1988,300 @@ function PdfToImages({
 
   const rangeInvalid = opened !== null && range.trim() !== '' && picked.length === 0;
   const weight = rendered?.images.reduce((sum, image) => sum + image.blob.size, 0) ?? 0;
-  const imagesCard = useShowOnPhone(rendered !== null && !busy && rendered.images.length > 0);
+
+  if (!opened)
+    return (
+      <section hidden={hidden} aria-label="PDF to images" className="grid min-w-0 gap-5">
+        <SideHeader
+          title={opening ? `Opening ${opening}…` : 'A PDF'}
+          detail={opening ? 'Reading its pages' : 'Nothing open'}
+          top={top}
+          onStartOver={onStartOver}
+        />
+        {opening ? (
+          <div className="skeleton h-[260px] !rounded-[28px]" />
+        ) : (
+          notice && (
+            <p className="rounded-[16px] bg-caution-soft px-4 py-3.5 text-[14.5px] [overflow-wrap:anywhere] text-caution">
+              {notice}
+            </p>
+          )
+        )}
+      </section>
+    );
+
+  const renderedLabel = rendered?.format === 'png' ? 'PNG' : 'JPG';
+  const doneIndexes = new Set(rendered?.images.map((image) => image.index));
 
   return (
-    <section
-      hidden={hidden}
-      aria-label="PDF to images"
-      className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)] lg:items-start"
-    >
-      <Surface className="grid grid-cols-1 content-start gap-4">
-        {!opened ? (
-          <div className="grid gap-3">
-            <FileDrop
-              onFiles={take}
-              accept=".pdf,application/pdf"
-              multiple={false}
-              icon="pdf"
-              accent="var(--accent)"
-              title={opening ? `Opening ${opening}…` : 'Choose a PDF'}
-              hint="Each page becomes a picture you can save or share."
-              disabled={opening !== null}
+    <section hidden={hidden} aria-label="PDF to images" className="grid min-w-0 gap-5">
+      {rendered && (
+        <div ref={payoff} className="scroll-mt-24">
+          <Payoff
+            headline={
+              busy
+                ? `Converting ${Math.min((job?.done ?? 0) + 1, rendered.total)} of ${rendered.total}…`
+                : rendered.stopped
+                  ? `Stopped · ${rendered.images.length} of ${rendered.total} ready`
+                  : `✓ ${plural(rendered.images.length, 'page')} → ${renderedLabel}`
+            }
+            caption={
+              !busy && rendered.images.length ? (
+                <span className="tabular-nums">
+                  {formatBytes(weight)} · {RESOLUTIONS[resolution].label.toLowerCase()} quality
+                </span>
+              ) : undefined
+            }
+            action={
+              !busy && rendered.images.length
+                ? {
+                    label: zipping
+                      ? 'Zipping…'
+                      : rendered.images.length === 1
+                        ? `Download ${renderedLabel}`
+                        : `Download all ${rendered.images.length} (.zip)`,
+                    icon: 'download',
+                    onClick: downloadAll,
+                  }
+                : undefined
+            }
+            secondary={
+              busy ? (
+                <PillButton icon="x" onClick={() => running.current?.abort()}>
+                  Stop
+                </PillButton>
+              ) : (
+                <PillButton icon="undo" onClick={() => setRendered(null)}>
+                  Make changes
+                </PillButton>
+              )
+            }
+            onReset={busy ? undefined : onStartOver}
+          >
+            <FlipTiles
+              label={renderedLabel}
+              tiles={rendered.pages
+                .filter((index) => !rendered.failed.includes(index))
+                .map((index) => {
+                  const image = rendered.images.find((item) => item.index === index);
+                  return {
+                    key: index,
+                    thumb: thumbs[index],
+                    paper: true,
+                    name: image?.name ?? `Page ${index + 1}`,
+                    detail: image
+                      ? `${image.width}×${image.height} · ${formatBytes(image.blob.size)}`
+                      : '',
+                    done: doneIndexes.has(index),
+                    onDownload: image ? () => download(image.blob, image.name) : undefined,
+                  };
+                })}
             />
-            <SampleButton onClick={trySample} disabled={opening !== null}>
-              Try a sample PDF
-            </SampleButton>
-          </div>
-        ) : (
-          <>
-            <div className="flex items-center gap-3 rounded-[14px] bg-subtle p-2.5 shadow-[inset_0_0_0_1px_var(--color-line)]">
-              <span
-                className="grid size-10 shrink-0 place-items-center rounded-[11px] text-[#12110d]"
-                style={{ background: 'var(--accent)' }}
-              >
-                <Icon name="pdf" size={19} />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[14px] font-medium text-ink">
-                  {opened.file.name}
-                </span>
-                <span className="block text-[12.5px] text-muted">
-                  {plural(opened.pages, 'page')} · {formatBytes(opened.file.size)}
-                </span>
-              </span>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => otherInput.current?.click()}
-                className="h-11 shrink-0 rounded-[10px] px-3 text-[14px] font-medium text-ink-2 hover:bg-ink/5 hover:text-ink disabled:opacity-45 lg:h-9 lg:text-[13.5px]"
-              >
-                Change<span className="sr-only"> PDF</span>
-              </button>
-              <input
-                ref={otherInput}
-                type="file"
-                accept=".pdf,application/pdf"
-                tabIndex={-1}
-                aria-hidden="true"
-                className="sr-only"
-                onChange={(event) => {
-                  take(Array.from(event.target.files ?? []).slice(0, 1));
-                  event.target.value = '';
-                }}
-              />
-            </div>
-
-            <div className="flex flex-wrap items-end gap-2">
-              <div className="min-w-[180px] flex-1">
-                <label
-                  htmlFor={`${id}-range`}
-                  className="mb-1.5 block text-[13.5px] font-medium text-ink-2"
-                >
-                  Pages to convert{' '}
-                  <span className="font-normal text-muted">(1–{opened.pages})</span>
-                </label>
-                <Input
-                  id={`${id}-range`}
-                  value={range}
-                  disabled={busy}
-                  onChange={(event) => typeRange(event.target.value)}
-                  placeholder="Tap pages below, or type 1-3, 5"
-                  aria-invalid={rangeInvalid}
-                  aria-describedby={rangeInvalid ? `${id}-range-problem` : undefined}
-                  className={cn(rangeInvalid && '!shadow-[inset_0_0_0_1.5px_var(--color-caution)]')}
-                />
-              </div>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => {
-                  const everything = picked.length === opened.pages;
-                  const next = everything
-                    ? []
-                    : Array.from({ length: opened.pages }, (_, index) => index);
-                  setPicked(next);
-                  setRange(formatRange(next));
-                }}
-                className="h-12 rounded-[11px] px-3.5 text-[14px] font-medium text-ink-2 hover:bg-ink/5 hover:text-ink disabled:opacity-45 lg:h-10 lg:text-[13.5px]"
-              >
-                {picked.length === opened.pages ? 'Select none' : 'Select all'}
-              </button>
-            </div>
-            {rangeInvalid && (
-              <p id={`${id}-range-problem`} className="-mt-2 text-[12.5px] text-caution">
-                Pages go from 1 to {opened.pages}. Try something like 1-3, 5.
+            {rendered.failed.length > 0 && (
+              <p className="mt-4 text-[13px] text-caution">
+                {rendered.failed.length === 1 ? 'Page' : 'Pages'} {formatRange(rendered.failed)}{' '}
+                couldn’t be drawn, so {rendered.failed.length === 1 ? 'it’s' : 'they’re'} not
+                included.
               </p>
             )}
-
-            <ol
-              aria-label="Pages"
-              className="-mx-1 grid max-h-[620px] grid-cols-3 gap-1 overflow-y-auto p-1 sm:grid-cols-4 xl:grid-cols-5"
-            >
-              {thumbs.map((src, index) => {
-                const on = chosen.has(index);
-                return (
-                  <li key={index}>
-                    <button
-                      type="button"
-                      aria-pressed={on}
-                      aria-label={`Page ${index + 1}`}
-                      disabled={busy}
-                      onClick={() => toggle(index)}
-                      className={cn(
-                        'relative block w-full rounded-[12px] p-1.5 transition-colors',
-                        on ? 'bg-signal-soft' : 'hover:bg-subtle',
-                      )}
-                    >
-                      {/* Dimmed on this wrapper: the image's fade-in animation holds its opacity. */}
-                      <span
-                        className={cn(
-                          'relative block aspect-[3/4] transition-opacity',
-                          picked.length > 0 && !on && 'opacity-40',
-                        )}
-                      >
-                        {src ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={src}
-                            alt=""
-                            className="absolute inset-0 h-full w-full animate-fade object-contain drop-shadow-[0_6px_10px_rgb(0_0_0/.45)]"
-                          />
-                        ) : src === null ? (
-                          <span className="absolute inset-[6%] grid place-items-center rounded-[4px] bg-white text-[11px] text-[#6c685e]">
-                            Can’t preview
-                          </span>
-                        ) : (
-                          <span className="skeleton absolute inset-[8%]" />
-                        )}
-                      </span>
-                      <span
-                        className={cn(
-                          'absolute top-2.5 right-2.5 grid size-5 place-items-center rounded-full transition-all',
-                          on
-                            ? 'scale-100 bg-signal text-white'
-                            : 'scale-90 bg-white/90 text-transparent shadow-[inset_0_0_0_1.5px_rgb(22_21_15/.25)]',
-                        )}
-                        aria-hidden="true"
-                      >
-                        <Icon name="check" size={12} strokeWidth={3} />
-                      </span>
-                      <span
-                        className={cn(
-                          'mono-num mt-1 block text-center text-[11.5px]',
-                          on ? 'font-medium text-signal-ink' : 'text-muted',
-                        )}
-                      >
-                        {index + 1}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
-          </>
-        )}
-        {/* Always in the page, so screen readers announce what lands in it. */}
-        <div aria-live="polite" className={cn(!notice && 'sr-only')}>
-          {notice && (
-            <Note icon={notice.tone === 'caution' ? 'alert' : 'file-text'} tone={notice.tone}>
-              <span className="[overflow-wrap:anywhere]">{notice.text}</span>
-            </Note>
-          )}
+            {rendered.capped > 0 && (
+              <p className="mt-2 text-[12.5px] text-muted">
+                {plural(rendered.capped, 'page')} {rendered.capped === 1 ? 'was' : 'were'} too big
+                for that quality, so {rendered.capped === 1 ? 'it was' : 'they were'} made as large
+                as a browser can draw.
+              </p>
+            )}
+          </Payoff>
         </div>
-      </Surface>
+      )}
 
-      {/* Settings wait for a PDF: there's nothing to decide before then. */}
-      <aside
-        aria-label="Image settings and your images"
-        className={cn(
-          'min-w-0 grid-cols-1 gap-4 lg:sticky lg:top-24 lg:grid',
-          opened ? 'grid' : 'hidden',
-        )}
-      >
-        <Surface className={cn('grid-cols-1 gap-4', opened ? 'grid' : 'hidden')}>
-          <h2 className="label">Images</h2>
-          <Choice<'jpeg' | 'png'>
-            label="Format"
-            value={format}
-            disabled={busy}
-            onChange={setFormat}
-            options={[
-              { value: 'jpeg', label: 'JPG', detail: 'Smaller files' },
-              { value: 'png', label: 'PNG', detail: 'Exact, larger' },
-            ]}
-          />
-          <Choice<Resolution>
-            label="Quality"
-            value={resolution}
-            disabled={busy}
-            onChange={setResolution}
-            options={(Object.keys(RESOLUTIONS) as Resolution[]).map((value) => ({
-              value,
-              label: RESOLUTIONS[value].label,
-            }))}
-            hint={RESOLUTIONS[resolution].use}
-          />
-          {format === 'png' && resolution === 'print' && (
-            <p className="-mt-1 text-[12.5px] text-muted">
-              Print-size PNGs are big files. JPG is a fraction of the size.
-            </p>
-          )}
+      <div hidden={rendered !== null} className="grid min-w-0 gap-5">
+        <SideHeader
+          title={opened.file.name}
+          detail={`${plural(opened.pages, 'page')} · ${formatBytes(opened.file.size)}`}
+          top={top}
+          onStartOver={onStartOver}
+        />
+        <Transform<'jpeg' | 'png'>
+          from={{
+            thumbs: thumbs.slice(0, 3),
+            paper: true,
+            tag: 'PDF',
+            caption: plural(opened.pages, 'page'),
+          }}
+          to={{
+            thumbs: picked.slice(0, 3).map((index) => thumbs[index]),
+            paper: true,
+            tag: label,
+            caption: plural(picked.length, 'image'),
+          }}
+          targets={PAGE_TARGETS}
+          value={format}
+          onChange={setFormat}
+          disabled={busy}
+        />
+
+        <div className="flex min-h-11 items-center justify-between gap-3">
+          <p className="text-[14px] text-muted">
+            {picked.length === opened.pages ? (
+              'Every page · tap one to leave it out'
+            ) : picked.length ? (
+              <span className="font-semibold text-ink">{plural(picked.length, 'page')} picked</span>
+            ) : (
+              'Tap the pages to convert'
+            )}
+          </p>
           <button
             type="button"
-            onClick={makeImages}
-            disabled={busy || !opened || picked.length === 0}
-            className="inline-flex h-14 items-center justify-center gap-2 rounded-[16px] bg-[var(--accent)] px-5 text-[16.5px] font-semibold text-[#12110d] shadow-[0_14px_32px_-16px_var(--accent)] transition-[transform,opacity] active:scale-[.985] disabled:opacity-40 disabled:shadow-none sm:h-13 sm:text-[16px]"
+            disabled={busy}
+            onClick={() => {
+              const everything = picked.length === opened.pages;
+              const next = everything
+                ? []
+                : Array.from({ length: opened.pages }, (_, index) => index);
+              setPicked(next);
+              setRange(formatRange(next));
+            }}
+            className="inline-flex min-h-11 shrink-0 items-center rounded-full bg-ink/[.05] px-4 text-[14px] font-medium text-ink-2 hover:bg-ink/[.09] hover:text-ink disabled:opacity-45 lg:min-h-10"
           >
-            <Icon name="file-image" size={17} />
-            {picked.length ? `Make ${plural(picked.length, label)}` : `Make ${label}s`}
+            {picked.length === opened.pages ? 'Select none' : 'Select all'}
           </button>
-          {job && (
-            <Progress
-              name="Making the images"
-              done={job.done}
-              total={job.total}
-              label={`Page ${Math.min(job.done + 1, job.total)} of ${job.total}`}
-              onCancel={() => running.current?.abort()}
-            />
-          )}
-          <p
-            role="status"
-            className="min-h-5 text-[13px] leading-relaxed [overflow-wrap:anywhere] text-muted"
-          >
-            {status ||
-              (opening
-                ? `Opening ${opening}…`
-                : !opened
-                  ? 'Choose a PDF to begin.'
-                  : picked.length === 0
-                    ? 'Pick the pages to convert.'
-                    : '')}
-          </p>
-        </Surface>
+        </div>
 
-        <div
-          ref={imagesCard}
-          className={cn(
-            'scroll-mb-4 rounded-[24px] p-5 transition-colors duration-300 sm:p-6',
-            rendered?.images.length
-              ? ACCENT_TINT
-              : rendered && busy
-                ? 'bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)]'
-                : 'hidden bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)] lg:block',
-          )}
+        <ol
+          aria-label="Pages"
+          className="grid grid-cols-3 gap-2 sm:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8"
         >
-          {rendered && (rendered.images.length > 0 || busy) ? (
-            <div className="animate-rise">
-              <div className="flex items-end justify-between gap-3">
-                <div>
-                  <p className="label">Your images</p>
-                  <p
-                    className="mt-1 font-display text-[34px] leading-none font-extrabold tracking-[-0.04em] text-ink"
-                    style={{ fontVariationSettings: "'wdth' 110" }}
-                  >
-                    {rendered.images.length}
-                    <span className="text-[16px] font-semibold tracking-normal text-muted">
-                      {' '}
-                      of {rendered.total}
-                    </span>
-                  </p>
-                </div>
-                <p className="mono-num text-right text-[12px] leading-relaxed text-muted">
-                  {rendered.format === 'png' ? 'PNG' : 'JPG'}
-                  <br />
-                  {formatBytes(weight)}
-                </p>
-              </div>
-              <ol
-                aria-label="Images made"
-                className={cn(
-                  'row-divide mt-4 max-h-[340px] overflow-y-auto rounded-[14px] bg-surface/60 px-2 shadow-[inset_0_0_0_1px_var(--color-line)]',
-                  stale && 'opacity-60',
-                )}
-              >
-                {rendered.images.map((image) => (
-                  <li key={image.index} className="flex items-center gap-3 py-2 pl-1">
-                    <span className="relative block aspect-[3/4] w-9 shrink-0">
-                      {thumbs[image.index] && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={thumbs[image.index] ?? undefined}
-                          alt=""
-                          className="absolute inset-0 h-full w-full object-contain"
-                        />
-                      )}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      {/* The page number stays in view: it's what tells the files apart. */}
-                      <span
-                        className="flex min-w-0 text-[13.5px] font-medium text-ink"
-                        title={image.name}
-                      >
-                        <span className="truncate">
-                          {image.name.slice(0, image.name.lastIndexOf('-page-'))}
-                        </span>
-                        <span className="shrink-0">
-                          {image.name.slice(image.name.lastIndexOf('-page-'))}
-                        </span>
-                      </span>
-                      <span className="mono-num block truncate text-[11.5px] text-muted">
-                        {image.width}×{image.height} · {formatBytes(image.blob.size)}
-                      </span>
-                    </span>
-                    <button
-                      type="button"
-                      aria-label={`Download ${image.name}`}
-                      title={`Download ${image.name}`}
-                      onClick={() => download(image.blob, image.name)}
-                      className="grid size-11 shrink-0 place-items-center rounded-[10px] text-ink-2 hover:bg-ink/5 hover:text-ink lg:size-9"
-                    >
-                      <Icon name="download" size={17} />
-                    </button>
-                  </li>
-                ))}
-              </ol>
-              {rendered.images.length > 0 && (
+          {thumbs.map((src, index) => {
+            const on = chosen.has(index);
+            return (
+              <li key={index}>
                 <button
                   type="button"
-                  onClick={downloadAll}
-                  disabled={zipping || busy}
-                  className="mt-4 w-full inline-flex h-14 items-center justify-center gap-2 rounded-[16px] bg-[var(--accent)] px-5 text-[16.5px] font-semibold text-[#12110d] shadow-[0_14px_32px_-16px_var(--accent)] transition-[transform,opacity] active:scale-[.985] disabled:opacity-40 disabled:shadow-none sm:h-13 sm:text-[16px]"
+                  aria-pressed={on}
+                  aria-label={`Page ${index + 1}`}
+                  disabled={busy}
+                  onClick={() => toggle(index)}
+                  className={cn(
+                    'relative block w-full rounded-[14px] p-1.5 transition-[background-color,transform] active:scale-[.96]',
+                    on
+                      ? 'bg-[color-mix(in_srgb,var(--accent)_13%,transparent)]'
+                      : 'hover:bg-ink/[.04]',
+                  )}
                 >
-                  <Icon name="download" size={17} />
-                  {zipping
-                    ? 'Zipping…'
-                    : rendered.images.length === 1
-                      ? `Download ${rendered.format === 'png' ? 'PNG' : 'JPG'}`
-                      : `Download all ${rendered.images.length} (.zip)`}
-                </button>
-              )}
-              {stale && !busy && (
-                <Note icon="refresh" tone="caution" className="mt-3">
-                  These were made with other settings or pages. Make them again to match.
-                </Note>
-              )}
-              {rendered.failed.length > 0 && (
-                <p className="mt-3 text-[12.5px] text-caution">
-                  {rendered.failed.length === 1 ? 'Page' : 'Pages'} {formatRange(rendered.failed)}{' '}
-                  couldn’t be drawn, so {rendered.failed.length === 1 ? 'it’s' : 'they’re'} not
-                  included.
-                </p>
-              )}
-              {rendered.capped > 0 && (
-                <p className="mt-3 text-[12.5px] text-muted">
-                  {plural(rendered.capped, 'page')} {rendered.capped === 1 ? 'was' : 'were'} too big
-                  for that quality, so {rendered.capped === 1 ? 'it was' : 'they were'} made as
-                  large as a browser can draw.
-                </p>
-              )}
-            </div>
-          ) : (
-            <div className="py-4 text-center">
-              <div className="relative mx-auto h-[110px] w-[150px]" aria-hidden="true">
-                {[-8, 0, 8].map((turn, index) => (
+                  {/* Dimmed on this wrapper: the image's fade-in animation holds its opacity. */}
                   <span
-                    key={turn}
                     className={cn(
-                      'absolute top-3 grid h-[78px] w-[62px] place-items-center rounded-[8px]',
-                      index === 2
-                        ? 'border border-dashed border-line-strong bg-surface'
-                        : 'bg-ink/[.06] shadow-[inset_0_0_0_1px_var(--color-line)]',
+                      'relative block aspect-[3/4] transition-opacity',
+                      picked.length > 0 && !on && 'opacity-35',
                     )}
-                    style={{ left: `${index * 44}px`, transform: `rotate(${turn}deg)` }}
                   >
-                    <Icon name="image" size={22} className="text-faint" />
+                    {src ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={src}
+                        alt=""
+                        className={cn(
+                          'absolute inset-0 m-auto block max-h-full max-w-full animate-fade rounded-[3px] bg-white object-contain',
+                          EDGE,
+                        )}
+                      />
+                    ) : src === null ? (
+                      <span className="absolute inset-[6%] grid place-items-center rounded-[4px] bg-white text-[11px] text-muted">
+                        Can’t preview
+                      </span>
+                    ) : (
+                      <span className="skeleton absolute inset-[8%]" />
+                    )}
                   </span>
-                ))}
-              </div>
-              <p className="mt-4 text-[14px] font-medium text-ink">Your images appear here</p>
-              <p className="mt-1 text-[13px] text-muted">
-                Each page becomes its own {label}, named in page order.
-              </p>
-            </div>
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      'absolute top-2.5 right-2.5 grid size-6 place-items-center rounded-full transition-[transform,background-color]',
+                      on
+                        ? 'scale-100 text-[var(--on-accent,#12110d)]'
+                        : 'scale-90 bg-surface text-transparent shadow-[inset_0_0_0_1.5px_var(--color-line-strong)]',
+                    )}
+                    style={on ? { background: 'var(--accent)' } : undefined}
+                  >
+                    <Icon name="check" size={13} strokeWidth={3} />
+                  </span>
+                  <span
+                    className={cn(
+                      'mono-num mt-1 block text-center text-[12px]',
+                      on ? 'font-semibold text-ink' : 'text-muted',
+                    )}
+                  >
+                    {index + 1}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+
+        <div aria-live="polite" className={cn(!notice && 'sr-only')}>
+          {notice && (
+            <p className="text-[13.5px] leading-relaxed [overflow-wrap:anywhere] text-muted">
+              {notice}
+            </p>
           )}
         </div>
-        {rendered && rendered.images.length > 0 && (
-          <p className="px-1 text-[12.5px] leading-relaxed text-muted">
-            Links, forms and text you can select don’t carry over into images.
-          </p>
-        )}
-      </aside>
+
+        <Advanced summary={`${RESOLUTIONS[resolution].label} · ${range || 'no pages'}`}>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Choice<Resolution>
+              label="Quality"
+              value={resolution}
+              disabled={busy}
+              onChange={setResolution}
+              options={(Object.keys(RESOLUTIONS) as Resolution[]).map((value) => ({
+                value,
+                label: RESOLUTIONS[value].label,
+                detail: `${RESOLUTIONS[value].dpi} dpi`,
+              }))}
+              hint={
+                format === 'png' && resolution === 'print'
+                  ? `${RESOLUTIONS[resolution].use} Print-size PNGs are big files.`
+                  : RESOLUTIONS[resolution].use
+              }
+            />
+            <div className="grid content-start gap-1.5">
+              <label htmlFor={`${id}-range`} className="text-[13.5px] font-medium text-ink-2">
+                Pages to convert <span className="font-normal text-muted">(1–{opened.pages})</span>
+              </label>
+              <Input
+                id={`${id}-range`}
+                value={range}
+                disabled={busy}
+                onChange={(event) => typeRange(event.target.value)}
+                placeholder="Like 1-3, 5"
+                aria-invalid={rangeInvalid}
+                className={cn(rangeInvalid && '!shadow-[inset_0_0_0_1.5px_var(--color-caution)]')}
+              />
+              {rangeInvalid && (
+                <p className="text-[12.5px] text-caution">
+                  Pages go from 1 to {opened.pages}. Try something like 1-3, 5.
+                </p>
+              )}
+            </div>
+          </div>
+        </Advanced>
+
+        <DeskBar
+          summary={
+            <span role="status" className="block truncate">
+              {picked.length
+                ? `${plural(picked.length, 'page')} → ${label}`
+                : 'Pick the pages to convert.'}
+            </span>
+          }
+        >
+          <DeskButton icon="file-image" onClick={makeImages} disabled={!picked.length || busy}>
+            {picked.length ? `Make ${plural(picked.length, label)}` : `Make ${label}s`}
+          </DeskButton>
+        </DeskBar>
+      </div>
     </section>
   );
 }

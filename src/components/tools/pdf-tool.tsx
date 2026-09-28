@@ -1,525 +1,283 @@
 'use client';
 import Link from 'next/link';
-import {
-  useEffect,
-  useId,
-  useRef,
-  useState,
-  type CSSProperties,
-  type DragEvent,
-  type ReactNode,
-} from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { SaveProgress, useSaveToFiles } from '@/components/files/save-to-files';
+import { useOptionalWorkspace } from '@/components/shell/workspace-context';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/components/ui/cn';
-import { Input } from '@/components/ui/form';
 import { Icon } from '@/components/ui/icon';
 import { useToast } from '@/components/ui/toast';
-import { useOptionalWorkspace } from '@/components/shell/workspace-context';
-import { AttachPicker } from './attach-picker';
+import { download } from '@/lib/files/download';
+import { zip } from '@/lib/files/zip';
 import { formatBytes, plural } from '@/lib/platform/format';
-import { formatRange, parseRange } from '@/lib/tools/pdf';
-import { ActionBar, ActionButton, MoreOptions, SampleButton } from './kit';
-import { PdfOrganize, PdfSplit } from './pdf-pages';
-import type { PdfPreview } from '@/lib/tools/pdf-preview';
+import { AttachPicker } from './attach-picker';
+import { DropObject, Payoff, PillButton, SampleButton } from './kit';
+import { PdfPages, type MadeFile, type PageJob } from './pdf-pages';
+import {
+  DeskBar,
+  DeskButton,
+  CornerButton,
+  DocStack,
+  GrabNumber,
+  PagesArt,
+  ResultStack,
+  SETTLE,
+  type Cover,
+} from './pdf-parts';
+import { useSortable } from './pdf-sortable';
 
 /*
- * PDF tools. Merge is Hyphy Studio's PDF Merge (src/components/pdf-merger.tsx) with the same
- * limits and error handling; Extract is new. Everything runs on this device: pdf-lib builds the
- * file, PDF.js draws the page thumbnails. Both load only when a PDF is chosen.
+ * PDF: drop PDFs first, and the tool works out the job. Several PDFs become a stack to put in
+ * order and merge (Hyphy Studio's PDF Merge, with the same limits and error handling); one PDF
+ * opens onto the desk page by page, to arrange, keep pages from, or split (pdf-pages.tsx).
+ * Everything runs on this device: pdf-lib builds the files and PDF.js draws the pages, and both
+ * load only once a PDF is chosen.
  */
 
 const MAX_FILES = 20;
 const MAX_BYTES = 50 * 1024 * 1024;
 const MAX_PAGES = 500;
-/** Extract draws this many page thumbnails; longer files show numbered pages after that. */
-const MAX_THUMBS = 120;
 
-type Entry = { id: number; file: File; pages?: number; thumb?: string; unreadable?: boolean };
-type Result = {
-  url: string;
-  name: string;
-  pages: number;
-  size: number;
-  covers: string[];
-  /** The PDF itself, kept so Save to Files stores these exact bytes. */
-  blob: Blob;
+type Doc = { id: number; file: File; pages?: number; thumb?: string; unreadable?: boolean };
+type Job = PageJob | 'merge';
+type Made = { job: Job; files: (MadeFile & { url: string })[]; from: number };
+
+const STAMP: Record<Job, string> = {
+  merge: 'Merged',
+  arrange: 'Arranged',
+  keep: 'Extracted',
+  split: 'Split',
 };
 
-async function preview(file: File, width: number) {
+const isPdf = (file: File) =>
+  file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+
+async function firstPage(file: File) {
   const { openPdf } = await import('@/lib/tools/pdf-preview');
-  return openPdf(file, width);
-}
-
-/** A page as it looks: the thumbnail when it's drawn, a blank sheet until then. */
-function Sheet({ src, label, className }: { src?: string; label?: string; className?: string }) {
-  return (
-    <span
-      className={cn(
-        'relative block aspect-[8.5/11] overflow-hidden rounded-[6px] bg-white shadow-[0_0_0_1px_rgb(22_21_15/.08),0_6px_16px_-8px_rgb(22_21_15/.35)]',
-        className,
-      )}
-    >
-      {src ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={src}
-          alt=""
-          className="block h-full w-full animate-fade object-cover object-top"
-        />
-      ) : (
-        <span className="absolute inset-0 grid place-items-center">
-          {label ? (
-            <span className="mono-num text-[12px] text-faint">{label}</span>
-          ) : (
-            <span className="skeleton absolute inset-2.5" />
-          )}
-        </span>
-      )}
-    </span>
-  );
-}
-
-type PdfMode = 'merge' | 'organize' | 'extract' | 'split';
-
-/** Little pages, drawn: what each job does to them. */
-function JobArt({ mode }: { mode: PdfMode }) {
-  const sheet = (x: number, y: number, key: string | number, dim = false, turn = 0) => (
-    <rect
-      key={key}
-      x={x}
-      y={y}
-      width="15"
-      height="20"
-      rx="2.5"
-      transform={turn ? `rotate(${turn} ${x + 7.5} ${y + 10})` : undefined}
-      className={cn('fill-white stroke-[rgb(0_0_0/.14)]', dim && 'opacity-35')}
-    />
-  );
-  const accent = { fill: 'var(--accent)' };
-  return (
-    <svg viewBox="0 0 72 36" aria-hidden="true" className="h-9 w-[72px] overflow-visible">
-      {mode === 'merge' && (
-        <>
-          {sheet(2, 2, 'a', false, -8)}
-          {sheet(2, 14, 'b', false, 6)}
-          <path d="M22 18h14" className="stroke-[var(--accent)]" strokeWidth="2.2" />
-          <path d="M33 14l4 4-4 4" className="fill-none stroke-[var(--accent)]" strokeWidth="2.2" />
-          {sheet(47, 5, 'c')}
-          {sheet(50, 8, 'd')}
-          <rect x="53" y="11" width="15" height="20" rx="2.5" style={accent} />
-        </>
-      )}
-      {mode === 'organize' && (
-        <>
-          {sheet(4, 8, 'a')}
-          <rect
-            x="28"
-            y="6"
-            width="15"
-            height="20"
-            rx="2.5"
-            transform="rotate(12 35.5 16)"
-            style={accent}
-          />
-          {sheet(52, 8, 'c')}
-          <path
-            d="M12 33c8 4 16 4 23 0"
-            className="fill-none stroke-[var(--accent)]"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-        </>
-      )}
-      {mode === 'extract' && (
-        <>
-          {[0, 1, 2, 3].map((index) =>
-            index % 2 ? (
-              sheet(index * 18, 8, index, true)
-            ) : (
-              <g key={index}>
-                <rect x={index * 18} y="8" width="15" height="20" rx="2.5" style={accent} />
-                <path
-                  d={`M${index * 18 + 4} 18l3 3 5-6`}
-                  className="fill-none stroke-[#12110d]"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </g>
-            ),
-          )}
-        </>
-      )}
-      {mode === 'split' && (
-        <>
-          {sheet(4, 8, 'a')}
-          <path
-            d="M24 18h10"
-            className="stroke-[var(--accent)]"
-            strokeWidth="2.2"
-            strokeDasharray="3 3"
-          />
-          <rect
-            x="40"
-            y="2"
-            width="15"
-            height="20"
-            rx="2.5"
-            transform="rotate(-8 47.5 12)"
-            style={accent}
-          />
-          {sheet(52, 14, 'c', false, 8)}
-        </>
-      )}
-    </svg>
-  );
-}
-
-/** The four jobs, as pictures to pick from. */
-const JOBS: { value: PdfMode; label: string; hint: string }[] = [
-  { value: 'merge', label: 'Merge', hint: 'Many PDFs into one' },
-  { value: 'organize', label: 'Organize', hint: 'Reorder, turn, remove' },
-  { value: 'extract', label: 'Keep pages', hint: 'Pull out the ones you need' },
-  { value: 'split', label: 'Split', hint: 'One PDF into several' },
-];
-
-/**
- * What to do with the PDFs: big picture cards to start, a slim row of chips once there's a file
- * (picking another job starts it fresh).
- */
-function JobPicker({
-  value,
-  onChange,
-  compact,
-}: {
-  value: PdfMode;
-  onChange: (mode: PdfMode) => void;
-  compact: boolean;
-}) {
-  return (
-    <div
-      role="radiogroup"
-      aria-label="What to do"
-      className={cn(
-        compact
-          ? 'scroller -mx-4 flex gap-1.5 overflow-x-auto px-4 sm:mx-0 sm:flex-wrap sm:px-0'
-          : 'grid grid-cols-2 gap-2.5 sm:grid-cols-4',
-      )}
-    >
-      {JOBS.map((job) => {
-        const on = job.value === value;
-        return compact ? (
-          <button
-            key={job.value}
-            type="button"
-            role="radio"
-            aria-checked={on}
-            onClick={() => !on && onChange(job.value)}
-            className={cn(
-              'inline-flex min-h-11 shrink-0 items-center rounded-full px-4 text-[14.5px] font-medium whitespace-nowrap transition-[background-color,color,transform] active:scale-[.97] lg:min-h-10 lg:text-[14px]',
-              on ? 'text-[#12110d]' : 'bg-well text-ink-2 hover:bg-ink/10 hover:text-ink',
-            )}
-            style={on ? { background: 'var(--accent)' } : undefined}
-          >
-            {job.label}
-          </button>
-        ) : (
-          <button
-            key={job.value}
-            type="button"
-            role="radio"
-            aria-checked={on}
-            onClick={() => onChange(job.value)}
-            className={cn(
-              'flex min-w-0 flex-col items-start gap-2 rounded-[18px] p-3.5 text-left transition-[background-color,box-shadow,transform] active:scale-[.98]',
-              on
-                ? 'bg-[color-mix(in_srgb,var(--accent)_13%,transparent)] shadow-[inset_0_0_0_2px_var(--accent)]'
-                : 'bg-well shadow-[inset_0_0_0_1px_var(--color-line)] hover:bg-ink/[.09]',
-            )}
-          >
-            <JobArt mode={job.value} />
-            <span className="text-[15.5px] leading-tight font-semibold text-ink">{job.label}</span>
-            <span className="-mt-1.5 text-[12.5px] leading-snug text-muted">{job.hint}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
+  const doc = await openPdf(file, 220);
+  try {
+    return { pages: doc.pages, thumb: await doc.thumb(0) };
+  } finally {
+    doc.close();
+  }
 }
 
 /**
- * Runs anywhere. Inside a Space (`slug`, `canSave`) merged and extracted PDFs can also be saved to
- * Files and attached to a project; in the public world it's the tool alone, and nothing leaves
- * the device.
+ * Runs anywhere. Inside a Space (`slug`, `canSave`) a finished PDF can also be saved to Files and
+ * attached to a project; in the public world it's the tool alone, and nothing leaves the device.
  */
 export function PdfTool({ slug = '', canSave = false }: { slug?: string; canSave?: boolean }) {
-  const [mode, setMode] = useState<PdfMode>('merge');
-  const [started, setStarted] = useState(false);
-  const pick = (next: PdfMode) => {
-    setMode(next);
-    setStarted(false);
-  };
-  const picker = <JobPicker value={mode} onChange={pick} compact={started} />;
   return (
-    // The tool's own color, even inside a Space where there's no world around it.
-    <div style={{ '--pdf': 'var(--accent, #ff6a3d)' } as CSSProperties}>
-      <div style={{ '--accent': 'var(--pdf)' } as CSSProperties}>
-        {mode === 'organize' || mode === 'split' ? (
-          <div className="min-w-0 rounded-[22px] bg-surface p-4 shadow-card sm:p-5">
-            {picker}
-            <div className="mt-4">
-              {mode === 'organize' ? (
-                <PdfOrganize onStarted={setStarted} />
-              ) : (
-                <PdfSplit onStarted={setStarted} />
-              )}
-            </div>
-          </div>
-        ) : (
-          <PdfCombine
-            key={mode}
-            slug={slug}
-            canSave={canSave}
-            mode={mode}
-            picker={picker}
-            onStarted={setStarted}
-          />
-        )}
+    // The tool's own clay, even inside a Space where there's no world around it.
+    <div
+      style={
+        {
+          '--pdf': 'var(--accent, #ff6a3d)',
+          '--pdf-ink': 'var(--accent-ink, #b8421b)',
+        } as CSSProperties
+      }
+    >
+      <div
+        className="min-w-0"
+        style={{ '--accent': 'var(--pdf)', '--accent-ink': 'var(--pdf-ink)' } as CSSProperties}
+      >
+        <PdfDesk slug={slug} canSave={canSave} />
       </div>
     </div>
   );
 }
 
-/** Merge (Hyphy Studio's PDF Merge) and Extract: many files in, or one file's chosen pages out. */
-function PdfCombine({
-  slug,
-  canSave,
-  mode,
-  picker,
-  onStarted,
-}: {
-  slug: string;
-  canSave: boolean;
-  mode: 'merge' | 'extract';
-  picker: ReactNode;
-  onStarted: (started: boolean) => void;
-}) {
+function PdfDesk({ slug, canSave }: { slug: string; canSave: boolean }) {
   const id = useId();
-  const toast = useToast();
-  const [files, setFiles] = useState<Entry[]>([]);
-  const [thumbs, setThumbs] = useState<(string | undefined)[]>([]);
-  const [keep, setKeep] = useState<number[]>([]);
-  const [range, setRange] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [dragging, setDragging] = useState<number | null>(null);
-  const [message, setMessage] = useState('');
-  const [result, setResult] = useState<Result | null>(null);
-  const saver = useSaveToFiles(slug);
-  const saving = saver.busy;
-  const [saved, setSaved] = useState<string | null>(null);
-  const [projectId, setProjectId] = useState('');
   const workspace = useOptionalWorkspace();
-  const savable = canSave && workspace !== null;
+  const [docs, setDocs] = useState<Doc[]>([]);
+  /** The one PDF open page by page; null shows the stack (or the way in). */
+  const [focus, setFocus] = useState<number | null>(null);
+  const [made, setMade] = useState<Made | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [sampling, setSampling] = useState(false);
+  const [message, setMessage] = useState('');
+  const [over, setOver] = useState(false);
   const nextId = useRef(0);
-  const resultUrl = useRef<string | null>(null);
-  const input = useRef<HTMLInputElement>(null);
-  const resultCard = useRef<HTMLDivElement>(null);
-  const open = useRef<PdfPreview | null>(null);
-  const generation = useRef(0);
+  const urls = useRef<string[]>([]);
+  const payoff = useRef<HTMLDivElement>(null);
 
-  useEffect(
-    () => () => {
-      if (resultUrl.current) URL.revokeObjectURL(resultUrl.current);
-      open.current?.close();
-    },
-    [],
-  );
+  const working = docs.length > 0;
+  const focused = docs.find((doc) => doc.id === focus) ?? null;
 
-  useEffect(() => onStarted(files.length > 0), [files.length, onStarted]);
+  useEffect(() => () => urls.current.forEach((url) => URL.revokeObjectURL(url)), []);
 
-  // On a phone the new PDF lands below the pages: bring its Download button into view.
+  function clearMade() {
+    urls.current.forEach((url) => URL.revokeObjectURL(url));
+    urls.current = [];
+    setMade(null);
+  }
+
+  function show(job: Job, files: MadeFile[]) {
+    clearMade();
+    const withUrls = files.map((file) => ({ ...file, url: URL.createObjectURL(file.blob) }));
+    urls.current = withUrls.map((file) => file.url);
+    setMade({ job, files: withUrls, from: job === 'merge' ? docs.length : 1 });
+    setMessage('');
+    void fillCovers(withUrls);
+  }
+
+  /** Pages that weren't drawn yet (a quick merge, a long file) are drawn from the result itself. */
+  async function fillCovers(files: Made['files']) {
+    const { openPdf } = await import('@/lib/tools/pdf-preview');
+    for (const file of files.slice(0, 24)) {
+      if (file.covers.length && file.covers.every((cover) => cover.src)) continue;
+      try {
+        const doc = await openPdf(file.blob, 220);
+        const covers: Cover[] = [];
+        for (let index = 0; index < Math.min(3, doc.pages); index += 1)
+          covers.push({ src: await doc.thumb(index) });
+        doc.close();
+        setMade((current) =>
+          current && current.files.includes(file)
+            ? {
+                ...current,
+                files: current.files.map((item) => (item === file ? { ...item, covers } : item)),
+              }
+            : current,
+        );
+      } catch {
+        // The stack keeps its blank sheets.
+      }
+    }
+  }
+
+  // The result takes the stage: bring it into view.
   useEffect(() => {
-    if (!result || !window.matchMedia('(max-width: 1023px)').matches) return;
+    if (!made) return;
     const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    resultCard.current?.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'end' });
-  }, [result]);
+    payoff.current?.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'start' });
+  }, [made]);
 
-  function clearResult() {
-    if (resultUrl.current) URL.revokeObjectURL(resultUrl.current);
-    resultUrl.current = null;
-    setResult(null);
-    setSaved(null);
-    saver.reset();
+  function patch(docId: number, change: Partial<Doc>) {
+    setDocs((current) => current.map((doc) => (doc.id === docId ? { ...doc, ...change } : doc)));
+  }
+
+  async function describe(doc: Doc) {
+    try {
+      patch(doc.id, await firstPage(doc.file));
+    } catch {
+      patch(doc.id, { unreadable: true });
+    }
+  }
+
+  /** PDFs in: one opens page by page, more than one makes a stack to merge. */
+  function add(list: File[]) {
+    if (!list.length || busy) return;
+    const pdfs = list.filter(isPdf);
+    if (!pdfs.length) {
+      setMessage('Those aren’t PDFs. Choose PDF files.');
+      return;
+    }
+    const next = [...docs.map((doc) => doc.file), ...pdfs];
+    if (next.length > MAX_FILES || next.reduce((sum, file) => sum + file.size, 0) > MAX_BYTES) {
+      setMessage(`Up to ${MAX_FILES} PDFs, 50 MB in all.`);
+      return;
+    }
+    clearMade();
+    setMessage(pdfs.length < list.length ? 'Only the PDFs were added.' : '');
+    const entries = pdfs.map((file) => ({ file, id: nextId.current++ }));
+    const all = [...docs, ...entries];
+    setDocs(all);
+    entries.forEach((entry) => void describe(entry));
+    setFocus(all.length === 1 ? all[0].id : null);
+  }
+
+  // While working, a PDF dropped anywhere on the page joins the others.
+  const latestAdd = useRef(add);
+  useLayoutEffect(() => {
+    latestAdd.current = add;
+  });
+  useEffect(() => {
+    if (!working) return;
+    let depth = 0;
+    const has = (event: DragEvent) => Boolean(event.dataTransfer?.types.includes('Files'));
+    const enter = (event: DragEvent) => {
+      if (!has(event)) return;
+      depth += 1;
+      setOver(true);
+    };
+    const leave = (event: DragEvent) => {
+      if (!has(event)) return;
+      depth = Math.max(0, depth - 1);
+      if (!depth) setOver(false);
+    };
+    const dragOver = (event: DragEvent) => {
+      if (has(event)) event.preventDefault();
+    };
+    const drop = (event: DragEvent) => {
+      depth = 0;
+      setOver(false);
+      if (!event.dataTransfer?.files.length) return;
+      event.preventDefault();
+      latestAdd.current(Array.from(event.dataTransfer.files));
+    };
+    window.addEventListener('dragenter', enter);
+    window.addEventListener('dragleave', leave);
+    window.addEventListener('dragover', dragOver);
+    window.addEventListener('drop', drop);
+    return () => {
+      window.removeEventListener('dragenter', enter);
+      window.removeEventListener('dragleave', leave);
+      window.removeEventListener('dragover', dragOver);
+      window.removeEventListener('drop', drop);
+    };
+  }, [working]);
+
+  function startOver() {
+    clearMade();
+    setDocs([]);
+    setFocus(null);
     setMessage('');
   }
 
-  function patch(entryId: number, change: Partial<Entry>) {
-    setFiles((current) =>
-      current.map((item) => (item.id === entryId ? { ...item, ...change } : item)),
-    );
-  }
-
-  /** Merge: each file's page count and first page. */
-  async function describe(entry: Entry) {
-    try {
-      const doc = await preview(entry.file, 200);
-      patch(entry.id, { pages: doc.pages });
-      patch(entry.id, { thumb: await doc.thumb(0) });
-      doc.close();
-    } catch {
-      patch(entry.id, { unreadable: true });
-    }
-  }
-
-  /** Extract: every page, drawn in order so the first ones appear first. */
-  async function drawPages(entry: Entry) {
-    const run = ++generation.current;
-    open.current?.close();
-    setThumbs([]);
-    try {
-      const doc = await preview(entry.file, 150);
-      if (run !== generation.current) return doc.close();
-      open.current = doc;
-      patch(entry.id, { pages: doc.pages });
-      setThumbs(Array.from({ length: doc.pages }, () => undefined));
-      const count = Math.min(doc.pages, MAX_THUMBS);
-      for (const index of Array.from({ length: count }, (_, position) => position)) {
-        const src = await doc.thumb(index);
-        if (run !== generation.current) return;
-        setThumbs((current) => current.map((item, position) => (position === index ? src : item)));
-      }
-    } catch {
-      patch(entry.id, { unreadable: true });
-    }
-  }
-
-  function add(list: FileList | File[] | null) {
-    if (!list) return;
-    const incoming = Array.from(list);
-    if (incoming.some((file) => !file.name.toLowerCase().endsWith('.pdf'))) {
-      setMessage('Please choose PDF files only.');
-      return;
-    }
-    const limit = mode === 'extract' ? 1 : MAX_FILES;
-    const next =
-      mode === 'extract'
-        ? incoming.slice(0, 1)
-        : [...files.map((entry) => entry.file), ...incoming];
-    if (next.length > limit || next.reduce((sum, file) => sum + file.size, 0) > MAX_BYTES) {
-      setMessage(`Choose up to ${MAX_FILES} PDFs, totaling no more than 50 MB.`);
-      return;
-    }
-    clearResult();
-    const entries = incoming.slice(0, limit).map((file) => ({ file, id: nextId.current++ }));
-    if (mode === 'extract') {
-      setFiles(entries);
-      setKeep([]);
-      setRange('');
-      void drawPages(entries[0]);
-    } else {
-      setFiles((current) => [...current, ...entries]);
-      entries.forEach((entry) => void describe(entry));
-    }
-  }
-
-  // Files picked before the page finished loading never reached the change handler: take them now.
-  useEffect(() => {
-    const element = input.current;
-    if (!element?.files?.length) return;
-    const picked = element.files;
-    queueMicrotask(() => {
-      add(picked);
-      element.value = '';
-    });
-    // Once, on mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  function reorder(from: number, to: number) {
-    if (from === to || to < 0 || to >= files.length) return;
-    clearResult();
-    const next = [...files];
-    const [moved] = next.splice(from, 1);
-    next.splice(to, 0, moved);
-    setFiles(next);
-  }
-
-  function toggle(index: number) {
-    clearResult();
-    const next = keep.includes(index)
-      ? keep.filter((item) => item !== index)
-      : [...keep, index].sort((a, b) => a - b);
-    setKeep(next);
-    setRange(formatRange(next));
-  }
-
-  function typeRange(text: string) {
-    clearResult();
-    setRange(text);
-    const pages = files[0]?.pages;
-    const parsed = pages ? parseRange(text, pages) : null;
-    setKeep(parsed ?? []);
-  }
-
-  /** No PDF handy: make a few on this device so the tool can be felt right away. */
-  async function trySamples() {
-    setBusy(true);
+  async function trySamples(kind: 'merge' | 'extract') {
+    setSampling(true);
     try {
       const { samplePdfs } = await import('@/lib/tools/pdf-samples');
-      add(await samplePdfs(mode));
+      add(await samplePdfs(kind));
     } catch {
       setMessage('We couldn’t make the samples here. Choose your own PDFs instead.');
     } finally {
-      setBusy(false);
+      setSampling(false);
     }
   }
 
-  async function run() {
-    clearResult();
+  async function merge() {
+    if (docs.length < 2 || busy) return;
     setBusy(true);
+    setMessage('');
     try {
       const { PDFDocument } = await import('pdf-lib');
       const output = await PDFDocument.create();
-      const load = async (entry: Entry) => {
+      for (const doc of docs) {
+        let input;
         try {
-          return await PDFDocument.load(await entry.file.arrayBuffer());
+          input = await PDFDocument.load(await doc.file.arrayBuffer());
         } catch {
           throw new Error(
-            `“${entry.file.name}” could not be read. Use an unencrypted, undamaged PDF.`,
+            `“${doc.file.name}” could not be read. Use an unencrypted, undamaged PDF.`,
           );
         }
-      };
-      let name = 'hyphy-merged.pdf';
-      let covers: string[] = [];
-      if (mode === 'merge') {
-        for (const entry of files) {
-          const input = await load(entry);
-          if (output.getPageCount() + input.getPageCount() > MAX_PAGES)
-            throw new Error('This batch has more than 500 pages. Please use a smaller batch.');
-          const pages = await output.copyPages(input, input.getPageIndices());
-          pages.forEach((page) => output.addPage(page));
-        }
-        name = `${files[0].file.name.replace(/\.pdf$/i, '')}-merged.pdf`;
-        covers = files.map((entry) => entry.thumb).filter(Boolean) as string[];
-      } else {
-        const input = await load(files[0]);
-        const indexes = keep.length ? keep : parseRange(range, input.getPageCount());
-        if (!indexes?.length)
-          throw new Error(`Pick pages, or type them — pages go from 1 to ${input.getPageCount()}.`);
-        const pages = await output.copyPages(input, indexes);
+        if (output.getPageCount() + input.getPageCount() > MAX_PAGES)
+          throw new Error('This batch has more than 500 pages. Please use a smaller batch.');
+        const pages = await output.copyPages(input, input.getPageIndices());
         pages.forEach((page) => output.addPage(page));
-        name = `${files[0].file.name.replace(/\.pdf$/i, '')}-pages-${formatRange(indexes).replace(/\s+/g, '').replace(/,/g, '_')}.pdf`;
-        covers = indexes.map((index) => thumbs[index]).filter(Boolean) as string[];
       }
       const bytes = await output.save();
-      const blob = new Blob([new Uint8Array(bytes)], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      resultUrl.current = url;
-      setResult({ url, name, pages: output.getPageCount(), size: blob.size, covers, blob });
-      setMessage(
-        `Ready: ${plural(output.getPageCount(), 'page')}${mode === 'merge' ? ', in the order shown' : ''}.`,
-      );
+      show('merge', [
+        {
+          name: `${docs[0].file.name.replace(/\.pdf$/i, '')}-merged.pdf`,
+          blob: new Blob([new Uint8Array(bytes)], { type: 'application/pdf' }),
+          pages: output.getPageCount(),
+          covers: docs.map((doc) => ({ src: doc.thumb })),
+        },
+      ]);
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : 'We couldn’t make that PDF. Try a smaller batch.',
@@ -529,510 +287,503 @@ function PdfCombine({
     }
   }
 
-  const saveToFiles = async () => {
-    if (!result) return;
-    const saved = await saver.save(result.blob, result.name, {
-      purpose: 'file',
-      source: 'pdf',
-      folder: 'Made with PDF',
-      pages: result.pages,
-      attachTo: projectId ? { type: 'project', id: projectId } : null,
-    });
-    if (!saved) return;
-    setSaved(saved.fileId);
-    toast({
-      title: saved.name,
-      description: projectId
-        ? `Saved to Files · ${workspace?.options.projects.find((item) => item.id === projectId)?.name}`
-        : 'Saved to Files',
-      href: workspace?.href(`/files?file=${saved.fileId}`),
-      action: 'Open',
-    });
-  };
-
-  const totalPages = files.reduce((sum, entry) => sum + (entry.pages ?? 0), 0);
-  const ready = mode === 'merge' ? files.length >= 2 : files.length === 1 && keep.length > 0;
-  const rangeInvalid = mode === 'extract' && range.trim() !== '' && keep.length === 0;
+  // One way to add files while working: a label for this input (only one file input on the page).
+  const addInput = working && (
+    <input
+      id={`${id}-add`}
+      type="file"
+      accept=".pdf,application/pdf"
+      multiple
+      disabled={busy}
+      className="sr-only"
+      onChange={(event) => {
+        add(Array.from(event.target.files ?? []));
+        event.target.value = '';
+      }}
+    />
+  );
+  const addLabel = (text: string) => (
+    <label
+      htmlFor={`${id}-add`}
+      className="inline-flex min-h-11 shrink-0 cursor-pointer items-center gap-1.5 rounded-full bg-ink/[.05] px-4 text-[14px] font-medium text-ink-2 transition-colors hover:bg-ink/[.09] hover:text-ink lg:min-h-10"
+    >
+      <Icon name="plus" size={15} />
+      {text}
+    </label>
+  );
+  const closeButton = (
+    <button
+      type="button"
+      onClick={startOver}
+      aria-label="Start over"
+      title="Start over"
+      className="grid size-11 shrink-0 place-items-center rounded-full text-muted transition-colors hover:bg-ink/[.06] hover:text-ink lg:size-10"
+    >
+      <Icon name="x" size={18} />
+    </button>
+  );
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
-      <div className="min-w-0 rounded-[22px] bg-surface p-4 shadow-card sm:p-5">
-        {picker}
-        <input
-          ref={input}
-          id={`${id}-files`}
-          type="file"
-          accept=".pdf,application/pdf"
-          multiple={mode === 'merge'}
-          disabled={busy}
-          className="sr-only"
-          onChange={(event) => {
-            add(event.target.files);
-            event.target.value = '';
-          }}
-        />
-
-        <div className="mt-4">
-          {files.length === 0 && (
-            <>
-              <DropZone htmlFor={`${id}-files`} mode={mode} busy={busy} onFiles={add} />
-              <SampleButton onClick={trySamples} disabled={busy} className="mt-2">
-                {mode === 'merge' ? 'No PDFs handy? Try three samples' : 'Try a 7-page sample'}
-              </SampleButton>
-            </>
-          )}
-
-          {mode === 'merge' && files.length > 0 && (
-            <>
-              <p className="mb-3 flex items-center gap-2 text-[12.5px] text-muted">
-                <Icon name="grip" size={14} /> Drag to reorder — they’re merged left to right
-              </p>
-              <ol className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-                {files.map((entry, index) => (
-                  <li
-                    key={entry.id}
-                    draggable={!busy}
-                    onDragStart={(event) => {
-                      setDragging(index);
-                      event.dataTransfer.effectAllowed = 'move';
-                    }}
-                    onDragEnd={() => setDragging(null)}
-                    onDragOver={(event) => {
-                      if (dragging === null) return;
-                      event.preventDefault();
-                      if (dragging !== index) {
-                        reorder(dragging, index);
-                        setDragging(index);
-                      }
-                    }}
-                    className={cn(
-                      'group relative animate-rise cursor-grab rounded-[16px] p-2 transition-all active:cursor-grabbing',
-                      dragging === index
-                        ? 'bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] opacity-70'
-                        : 'hover:bg-subtle',
-                    )}
-                  >
-                    <div className="relative px-1.5 pt-1.5">
-                      {(entry.pages ?? 1) > 1 && (
-                        <span
-                          className="absolute inset-x-3 top-0 bottom-2 rotate-[3deg] rounded-[6px] bg-white shadow-[0_0_0_1px_rgb(22_21_15/.08)]"
-                          aria-hidden="true"
-                        />
-                      )}
-                      <Sheet
-                        src={entry.thumb}
-                        label={entry.unreadable ? 'Can’t preview' : undefined}
-                        className="relative"
-                      />
-                      <span className="mono-num absolute top-3 left-3 grid size-6 place-items-center rounded-full bg-ink text-[11px] font-medium text-on-ink shadow-lift">
-                        {index + 1}
-                      </span>
-                    </div>
-                    <p
-                      className="mt-2 truncate px-1 text-[13px] font-medium"
-                      title={entry.file.name}
-                    >
-                      {entry.file.name}
-                    </p>
-                    <p className="px-1 text-[12px] text-muted">
-                      {entry.pages ? plural(entry.pages, 'page') : '…'} ·{' '}
-                      {formatBytes(entry.file.size)}
-                    </p>
-                    <div className="mt-1.5 flex gap-0.5 px-0.5 opacity-100 transition-opacity lg:opacity-0 lg:group-focus-within:opacity-100 lg:group-hover:opacity-100">
-                      <button
-                        type="button"
-                        disabled={busy || index === 0}
-                        aria-label={`Move ${entry.file.name} earlier`}
-                        onClick={() => reorder(index, index - 1)}
-                        className="grid size-10 place-items-center rounded-[8px] text-muted hover:bg-ink/5 hover:text-ink disabled:opacity-30 lg:size-8"
-                      >
-                        <Icon name="arrow-left" size={15} />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy || index === files.length - 1}
-                        aria-label={`Move ${entry.file.name} later`}
-                        onClick={() => reorder(index, index + 1)}
-                        className="grid size-10 place-items-center rounded-[8px] text-muted hover:bg-ink/5 hover:text-ink disabled:opacity-30 lg:size-8"
-                      >
-                        <Icon name="arrow-right" size={15} />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        aria-label={`Remove ${entry.file.name}`}
-                        onClick={() => {
-                          clearResult();
-                          setFiles(files.filter((item) => item.id !== entry.id));
-                        }}
-                        className="ml-auto grid size-10 place-items-center rounded-[8px] text-muted hover:bg-critical-soft hover:text-critical lg:size-8"
-                      >
-                        <Icon name="x" size={15} />
-                      </button>
-                    </div>
-                  </li>
-                ))}
-                {files.length < MAX_FILES && (
-                  <li className="p-2">
-                    <DropZone
-                      htmlFor={`${id}-files`}
-                      mode={mode}
-                      busy={busy}
-                      onFiles={add}
-                      compact
-                    />
-                  </li>
-                )}
-              </ol>
-            </>
-          )}
-
-          {mode === 'extract' && files.length === 1 && (
-            <>
-              <div className="mb-3 flex items-center gap-3 rounded-[14px] bg-subtle p-2.5 shadow-[inset_0_0_0_1px_var(--color-line)]">
-                <Icon name="pdf" size={18} className="ml-1 text-[var(--accent)]" />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13.5px] font-medium">
-                    {files[0].file.name}
-                  </span>
-                  <span className="block text-[12px] text-muted">
-                    {files[0].pages ? plural(files[0].pages, 'page') : 'Reading…'} ·{' '}
-                    {formatBytes(files[0].file.size)}
-                  </span>
-                </span>
-                <label
-                  htmlFor={`${id}-files`}
-                  className="inline-flex min-h-11 cursor-pointer items-center rounded-[9px] px-3 text-[14px] font-medium text-ink-2 hover:bg-ink/5 lg:min-h-9 lg:text-[13px]"
-                >
-                  Change
-                </label>
-              </div>
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <p className="text-[14px] font-medium text-ink">
-                  {keep.length ? `Keeping ${plural(keep.length, 'page')}` : 'Tap the pages to keep'}
-                </p>
-                <button
-                  type="button"
-                  disabled={!files[0].pages}
-                  onClick={() => {
-                    const all = Array.from({ length: files[0].pages ?? 0 }, (_, index) => index);
-                    setKeep(keep.length === all.length ? [] : all);
-                    setRange(keep.length === all.length ? '' : formatRange(all));
-                    clearResult();
-                  }}
-                  className="inline-flex min-h-11 items-center rounded-full bg-well px-4 text-[14px] font-medium text-ink-2 transition-colors hover:bg-ink/10 hover:text-ink disabled:opacity-45 lg:min-h-9 lg:text-[13.5px]"
-                >
-                  {keep.length && keep.length === files[0].pages ? 'Select none' : 'Select all'}
-                </button>
-              </div>
-              <ol className="grid grid-cols-3 gap-2.5 sm:grid-cols-4 xl:grid-cols-5">
-                {thumbs.map((src, index) => {
-                  const on = keep.includes(index);
-                  return (
-                    <li key={index}>
-                      <button
-                        type="button"
-                        aria-pressed={on}
-                        aria-label={`Page ${index + 1}`}
-                        onClick={() => toggle(index)}
-                        className={cn(
-                          'group relative block w-full rounded-[10px] p-1.5 transition-all',
-                          on
-                            ? 'bg-[color-mix(in_srgb,var(--accent)_16%,transparent)]'
-                            : 'hover:bg-subtle',
-                        )}
-                      >
-                        <Sheet
-                          src={src}
-                          label={index >= MAX_THUMBS ? String(index + 1) : undefined}
-                          className={cn(
-                            'transition-[opacity,transform] duration-200',
-                            keep.length > 0 && !on && 'opacity-45',
-                            on && 'shadow-[0_0_0_2px_var(--accent),0_8px_18px_-8px_var(--accent)]',
-                          )}
-                        />
-                        <span
-                          className={cn(
-                            'absolute top-3 right-3 grid size-5 place-items-center rounded-full transition-all',
-                            on
-                              ? 'scale-100 bg-[var(--accent)] text-[#12110d]'
-                              : 'scale-90 bg-white/90 text-transparent shadow-[inset_0_0_0_1.5px_var(--color-line-strong)]',
-                          )}
-                          aria-hidden="true"
-                        >
-                          <Icon name="check" size={12} strokeWidth={3} />
-                        </span>
-                        <span
-                          className={cn(
-                            'mono-num mt-1 block text-center text-[11px]',
-                            on ? 'font-semibold text-ink' : 'text-muted',
-                          )}
-                        >
-                          {index + 1}
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ol>
-              <MoreOptions
-                label="Type page numbers instead"
-                summary={range || undefined}
-                className="mt-3"
-              >
-                <label
-                  htmlFor={`${id}-range`}
-                  className="mb-1.5 block text-[13px] font-medium text-ink-2"
-                >
-                  Pages to keep{' '}
-                  {files[0].pages ? (
-                    <span className="font-normal text-muted">(1–{files[0].pages})</span>
-                  ) : null}
-                </label>
-                <Input
-                  id={`${id}-range`}
-                  value={range}
-                  inputMode="numeric"
-                  enterKeyHint="done"
-                  autoComplete="off"
-                  onChange={(event) => typeRange(event.target.value)}
-                  placeholder="Like 1-3, 5"
-                  aria-invalid={rangeInvalid}
-                  className={cn(rangeInvalid && '!shadow-[inset_0_0_0_1.5px_var(--color-caution)]')}
-                />
-              </MoreOptions>
-            </>
+    <div className="min-w-0">
+      {!working && (
+        <div className="mx-auto max-w-[620px] py-2 sm:py-6">
+          <DropObject
+            shape="pages"
+            accept=".pdf,application/pdf"
+            multiple
+            onFiles={add}
+            art={<PagesArt />}
+            title="Drop your PDFs"
+            hint="One to fix up, or a few to merge."
+          >
+            <SampleButton onClick={() => trySamples('merge')} disabled={sampling}>
+              Try three samples
+            </SampleButton>
+            <SampleButton onClick={() => trySamples('extract')} disabled={sampling}>
+              Try a 7-page sample
+            </SampleButton>
+          </DropObject>
+          {message && (
+            <p role="status" className="mt-4 text-center text-[14px] text-caution">
+              {message}
+            </p>
           )}
         </div>
+      )}
 
-        {files.length > 0 && (
-          <div className="mt-5 border-t border-line pt-4">
-            {mode === 'merge' && totalPages > 0 && (
-              <p className="mb-2 text-[12.5px] text-muted">{plural(totalPages, 'page')} in total</p>
-            )}
-            <ActionBar
-              className={cn('!mt-0', workspace && '!static !mx-0 !bg-none !px-0 !pt-0 !pb-0')}
-            >
-              <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-                <ActionButton
-                  onClick={run}
-                  disabled={!ready || busy}
-                  icon={busy ? 'loader' : mode === 'merge' ? 'file-stack' : 'check'}
-                  className={cn(busy && '[&>svg]:animate-spin')}
-                >
-                  {busy
-                    ? 'Working…'
-                    : mode === 'merge'
-                      ? `Merge ${files.length >= 2 ? `${files.length} PDFs` : 'PDFs'}`
-                      : `Extract ${keep.length ? plural(keep.length, 'page') : 'pages'}`}
-                </ActionButton>
-                <ActionButton
-                  variant="quiet"
-                  disabled={busy}
-                  className="!w-auto"
-                  onClick={() => {
-                    generation.current += 1;
-                    clearResult();
-                    setFiles([]);
-                    setThumbs([]);
-                    setKeep([]);
-                    setRange('');
-                  }}
-                >
-                  Start over
-                </ActionButton>
-              </div>
-            </ActionBar>
-          </div>
-        )}
-        <p
-          role="status"
-          className={cn('mt-2 text-[13px] text-muted', files.length ? 'min-h-5' : 'text-center')}
-        >
-          {message ||
-            (mode === 'merge'
-              ? files.length === 1
-                ? 'Add one more PDF to merge.'
-                : ''
-              : files.length && !keep.length
-                ? 'Tap the pages you want to keep.'
-                : '')}
-        </p>
-      </div>
+      {addInput}
 
-      <div
-        className={cn(
-          'content-start gap-4 lg:sticky lg:top-6 lg:grid lg:self-start',
-          result ? 'grid' : 'hidden',
-        )}
-      >
+      {working && over && (
         <div
-          ref={resultCard}
-          className={cn(
-            'scroll-mt-24 scroll-mb-4 rounded-[24px] p-6 transition-colors duration-300',
-            result
-              ? 'bg-[color-mix(in_srgb,var(--accent)_22%,transparent)]'
-              : 'bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)]',
-          )}
+          aria-hidden="true"
+          className="fx-pop pointer-events-none fixed inset-3 z-40 grid place-items-center rounded-[28px] border-2 border-dashed border-[var(--accent-ink)] bg-[color-mix(in_srgb,var(--accent)_10%,transparent)]"
         >
-          {result ? (
-            <div className="animate-rise">
-              <div className="relative mx-auto h-[190px] w-[150px]">
-                {(result.covers.length ? result.covers.slice(0, 3) : [undefined])
-                  .map((src, index) => ({ src, index }))
-                  .reverse()
-                  .map(({ src, index }) => (
-                    // Fanned out, first page on top.
-                    <span
-                      key={index}
-                      className="absolute inset-x-0 top-0 transition-transform duration-500"
-                      style={{
-                        transform: `translateX(${[0, 14, -14][index]}px) rotate(${[0, 5, -5][index]}deg)`,
-                      }}
+          <span className="rounded-full bg-surface px-5 py-2.5 text-[16px] font-semibold text-ink shadow-lift">
+            Let go to add
+          </span>
+        </div>
+      )}
+
+      {working && (
+        <div hidden={made !== null}>
+          {focused ? (
+            <PdfPages
+              key={focused.id}
+              file={focused.file}
+              fixedBar={!workspace}
+              onMade={show}
+              top={
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {docs.length > 1 ? (
+                    <button
+                      type="button"
+                      onClick={() => setFocus(null)}
+                      className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-ink/[.05] px-4 text-[14px] font-medium text-ink-2 hover:bg-ink/[.09] hover:text-ink lg:min-h-10"
                     >
-                      <Sheet src={src} />
-                    </span>
-                  ))}
-                <span className="absolute -right-3 -bottom-2 rounded-full bg-ink px-2.5 py-1 text-[12px] font-medium text-on-ink shadow-lift">
-                  {plural(result.pages, 'page')}
-                </span>
-              </div>
-              <p className="mt-6 text-center font-display text-[24px] leading-tight font-bold tracking-[-0.02em] text-ink">
-                Your PDF is ready
-              </p>
-              <p className="mt-1 truncate text-center text-[14px] font-medium text-ink-2">
-                {result.name}
-              </p>
-              <p className="text-center text-[13px] text-ink/60">
-                {plural(result.pages, 'page')} · {formatBytes(result.size)}
-              </p>
-              <div className="mt-5 grid gap-2">
-                <a
-                  href={result.url}
-                  download={result.name}
-                  className="inline-flex h-14 items-center justify-center gap-2 rounded-[16px] bg-[var(--accent)] px-5 text-[16.5px] font-semibold text-[#12110d] shadow-[0_14px_32px_-16px_var(--accent)] transition-transform active:scale-[.985] sm:h-13 sm:text-[16px]"
-                >
-                  <Icon name="download" size={19} /> Download PDF
-                </a>
-                {savable &&
-                  (saved !== null ? (
-                    <Link
-                      href={workspace!.href(`/files?file=${saved}`)}
-                      className="inline-flex h-11 items-center justify-center gap-2 rounded-[11px] bg-positive-soft px-4 text-[15px] font-medium text-positive lg:h-10 lg:text-[14px]"
-                    >
-                      <Icon name="check" size={16} /> Saved to Files · Open
-                    </Link>
+                      <Icon name="chevron-left" size={15} />
+                      All {docs.length}
+                    </button>
                   ) : (
-                    <>
-                      <AttachPicker value={projectId} onChange={setProjectId} />
-                      <Button onClick={saveToFiles} disabled={saving}>
-                        <Icon name="files" size={16} />
-                        {saving ? 'Saving…' : 'Save to Files'}
-                      </Button>
-                      <SaveProgress state={saver.state} className="text-center" />
-                    </>
-                  ))}
-              </div>
-            </div>
+                    addLabel('Add PDFs')
+                  )}
+                  {closeButton}
+                </div>
+              }
+            />
           ) : (
-            <div className="py-6 text-center">
-              <div className="relative mx-auto h-[120px] w-[96px] opacity-70">
-                <span className="absolute inset-0 rotate-[-6deg] rounded-[6px] bg-white shadow-card" />
-                <span className="absolute inset-0 rotate-[4deg] rounded-[6px] bg-white shadow-card" />
-                <span className="absolute inset-0 grid place-items-center rounded-[6px] bg-white shadow-card">
-                  <Icon name="pdf" size={28} className="text-faint" />
-                </span>
-              </div>
-              <p className="mt-5 text-[14px] font-medium">Your new PDF appears here</p>
-              <p className="mt-1 text-[13px] text-muted">
-                {savable ? 'Download it, or save it to Files.' : 'Ready to download in a moment.'}
-              </p>
-            </div>
+            <PdfStack
+              docs={docs}
+              busy={busy}
+              fixedBar={!workspace}
+              message={message}
+              addLabel={addLabel}
+              closeButton={closeButton}
+              onMerge={merge}
+              onOpen={(doc) => setFocus(doc.id)}
+              onReorder={setDocs}
+              onRemove={(doc) => {
+                const rest = docs.filter((item) => item.id !== doc.id);
+                if (!rest.length) startOver();
+                else setDocs(rest);
+              }}
+            />
           )}
         </div>
-        {result && (
-          <p className="px-1 text-[12.5px] leading-relaxed text-muted">
-            Pages are copied as they are. Form fields, bookmarks and signatures may not carry over,
-            so keep your originals.
-          </p>
-        )}
-      </div>
+      )}
+
+      {made && (
+        <div ref={payoff} className="scroll-mt-24">
+          <PdfPayoff
+            made={made}
+            slug={slug}
+            canSave={canSave}
+            onBack={clearMade}
+            onReset={startOver}
+            onOpenPages={(file) => {
+              clearMade();
+              const doc = { id: nextId.current++, file };
+              setDocs([doc]);
+              setFocus(doc.id);
+              void describe(doc);
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }
 
-const hasFiles = (event: DragEvent) => Array.from(event.dataTransfer.types).includes('Files');
+/* ---------------- Several PDFs: the stack ---------------- */
 
-/** Where PDFs go in: a big target to start, a page-sized tile once there are files. */
-function DropZone({
-  htmlFor,
-  mode,
+function PdfStack({
+  docs,
   busy,
-  onFiles,
-  compact = false,
+  fixedBar,
+  message,
+  addLabel,
+  closeButton,
+  onMerge,
+  onOpen,
+  onReorder,
+  onRemove,
 }: {
-  htmlFor: string;
-  mode: 'merge' | 'extract';
+  docs: Doc[];
   busy: boolean;
-  onFiles: (files: FileList | null) => void;
-  compact?: boolean;
+  fixedBar: boolean;
+  message: string;
+  addLabel: (text: string) => React.ReactNode;
+  closeButton: React.ReactNode;
+  onMerge: () => void;
+  onOpen: (doc: Doc) => void;
+  onReorder: (docs: Doc[]) => void;
+  onRemove: (doc: Doc) => void;
 }) {
-  const [over, setOver] = useState(false);
+  const sort = useSortable({
+    keys: docs.map((doc) => doc.id),
+    disabled: busy,
+    onMove: (from, to) => {
+      const next = [...docs];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      onReorder(next);
+    },
+  });
+  const totalPages = docs.reduce((sum, doc) => sum + (doc.pages ?? 0), 0);
+  const reading = docs.some((doc) => doc.pages === undefined && !doc.unreadable);
+
   return (
-    <label
-      htmlFor={htmlFor}
-      onDragEnter={(event) => {
-        if (!hasFiles(event) || busy) return;
-        event.preventDefault();
-        setOver(true);
-      }}
-      onDragOver={(event) => hasFiles(event) && event.preventDefault()}
-      onDragLeave={() => setOver(false)}
-      onDrop={(event) => {
-        if (!hasFiles(event)) return;
-        event.preventDefault();
-        setOver(false);
-        onFiles(event.dataTransfer.files);
-      }}
-      className={cn(
-        'flex cursor-pointer flex-col items-center justify-center gap-2 rounded-[18px] border-[1.5px] border-dashed text-center transition-colors',
-        compact ? 'aspect-[8.5/11] px-2' : 'px-4 py-9',
-        over
-          ? 'border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]'
-          : 'border-line-strong bg-subtle hover:bg-well/60',
-      )}
+    <div className="grid min-w-0 gap-5">
+      <div className="flex min-w-0 items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <h2
+            className="font-display text-[28px] leading-[1.02] font-bold tracking-[-0.03em] text-ink sm:text-[34px]"
+            style={{ fontVariationSettings: "'wdth' 108" }}
+          >
+            {docs.length === 1 ? '1 PDF' : `${docs.length} PDFs ready`}
+          </h2>
+          <p className="mt-1 flex items-center gap-1.5 text-[14.5px] text-muted">
+            {docs.length > 1 ? (
+              <>
+                <Icon name="grip" size={15} /> Drag to reorder
+              </>
+            ) : (
+              'Add one more to merge'
+            )}
+          </p>
+        </div>
+        {closeButton}
+      </div>
+
+      <ol
+        aria-label="PDFs, in order"
+        className="grid grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-3 lg:grid-cols-5"
+      >
+        {docs.map((doc, index) => {
+          const up = sort.lifted === doc.id;
+          const resting = sort.pending === doc.id;
+          return (
+            <li
+              key={doc.id}
+              {...sort.item(doc.id)}
+              className={cn(
+                'group relative min-w-0',
+                !busy && 'cursor-grab active:cursor-grabbing',
+              )}
+            >
+              <div
+                className={cn(
+                  'relative rounded-[18px] p-1 transition-[scale,rotate,background-color,box-shadow] motion-reduce:transition-none',
+                  up
+                    ? 'scale-[1.06] rotate-[-2deg] bg-surface shadow-[0_28px_44px_-22px_rgb(42_37_33/.55)]'
+                    : resting
+                      ? 'scale-[.97]'
+                      : busy
+                        ? 'scale-[.97] opacity-70'
+                        : 'hover:bg-ink/[.035]',
+                )}
+                style={SETTLE}
+              >
+                <DocStack src={doc.thumb} pages={doc.pages} problem={doc.unreadable} />
+                <GrabNumber handle={sort.handle(doc.id)} label={`Move ${doc.file.name}`}>
+                  {index + 1}
+                </GrabNumber>
+                <CornerButton
+                  icon="x"
+                  label={`Remove ${doc.file.name}`}
+                  disabled={busy}
+                  onClick={() => onRemove(doc)}
+                />
+              </div>
+              <div className="mt-1.5 flex min-w-0 items-start gap-1 px-1">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[14px] font-medium text-ink" title={doc.file.name}>
+                    {doc.file.name}
+                  </p>
+                  <p className="text-[12.5px] text-muted">
+                    {doc.unreadable
+                      ? 'Can’t be opened'
+                      : doc.pages
+                        ? plural(doc.pages, 'page')
+                        : 'Reading…'}
+                    <span className="max-sm:hidden"> · {formatBytes(doc.file.size)}</span>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  data-no-drag=""
+                  disabled={busy || doc.unreadable}
+                  onClick={() => onOpen(doc)}
+                  aria-label={`Open the pages of ${doc.file.name}`}
+                  title="Its pages"
+                  className="-mr-1 grid size-11 shrink-0 place-items-center rounded-full text-muted transition-colors hover:bg-ink/[.07] hover:text-ink disabled:opacity-30 lg:size-9"
+                >
+                  <Icon name="layers" size={16} />
+                </button>
+              </div>
+            </li>
+          );
+        })}
+        {docs.length < MAX_FILES && (
+          <li className="min-w-0">
+            <div className="grid aspect-[5/6] place-items-center rounded-[18px] border-[1.5px] border-dashed border-line-strong p-2">
+              {addLabel('Add PDFs')}
+            </div>
+          </li>
+        )}
+      </ol>
+
+      <DeskBar
+        fixed={fixedBar}
+        summary={
+          <span role="status" className="block truncate">
+            {message ||
+              (docs.length < 2
+                ? 'Add one more PDF to merge.'
+                : reading
+                  ? 'Reading…'
+                  : `${plural(totalPages, 'page')} in total`)}
+          </span>
+        }
+      >
+        {docs.length === 1 && (
+          <button
+            type="button"
+            onClick={() => onOpen(docs[0])}
+            disabled={docs[0].unreadable}
+            className="inline-flex h-14 items-center gap-2 rounded-[16px] bg-ink/[.05] px-5 text-[15px] font-semibold text-ink-2 hover:bg-ink/10 hover:text-ink disabled:opacity-40 sm:h-13"
+          >
+            <Icon name="layers" size={17} /> Its pages
+          </button>
+        )}
+        <DeskButton busy={busy} icon="merge" onClick={onMerge} disabled={docs.length < 2}>
+          {busy ? 'Merging…' : docs.length >= 2 ? `Merge ${docs.length} PDFs` : 'Merge PDFs'}
+        </DeskButton>
+      </DeskBar>
+    </div>
+  );
+}
+
+/* ---------------- The payoff ---------------- */
+
+function PdfPayoff({
+  made,
+  slug,
+  canSave,
+  onBack,
+  onReset,
+  onOpenPages,
+}: {
+  made: Made;
+  slug: string;
+  canSave: boolean;
+  onBack: () => void;
+  onReset: () => void;
+  onOpenPages: (file: File) => void;
+}) {
+  const toast = useToast();
+  const workspace = useOptionalWorkspace();
+  const saver = useSaveToFiles(slug);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [projectId, setProjectId] = useState('');
+  const [zipping, setZipping] = useState(false);
+  const savable = canSave && workspace !== null;
+  const [only] = made.files;
+  const many = made.files.length > 1;
+  const pages = made.files.reduce((sum, file) => sum + file.pages, 0);
+  const weight = made.files.reduce((sum, file) => sum + file.blob.size, 0);
+
+  const headline =
+    made.job === 'merge'
+      ? `✓ ${made.from} PDFs merged`
+      : made.job === 'keep'
+        ? `✓ ${plural(pages, 'page')} pulled out`
+        : made.job === 'split'
+          ? `✓ Split into ${made.files.length} files`
+          : '✓ Pages arranged';
+
+  const saveToFiles = async () => {
+    const result = await saver.save(only.blob, only.name, {
+      purpose: 'file',
+      source: 'pdf',
+      folder: 'Made with PDF',
+      pages: only.pages,
+      attachTo: projectId ? { type: 'project', id: projectId } : null,
+    });
+    if (!result) return;
+    setSaved(result.fileId);
+    toast({
+      title: result.name,
+      description: projectId
+        ? `Saved to Files · ${workspace?.options.projects.find((item) => item.id === projectId)?.name}`
+        : 'Saved to Files',
+      href: workspace?.href(`/files?file=${result.fileId}`),
+      action: 'Open',
+    });
+  };
+
+  const downloadAll = async () => {
+    setZipping(true);
+    try {
+      const base = only.name.replace(/-part-\d+-pages-.*$/, '') || 'split';
+      download(
+        await zip(made.files.map((file) => ({ name: file.name, data: file.blob }))),
+        `${base}-split.zip`,
+      );
+    } finally {
+      setZipping(false);
+    }
+  };
+
+  return (
+    <Payoff
+      headline={headline}
+      action={
+        many
+          ? {
+              label: zipping ? 'Zipping…' : `Download all (.zip)`,
+              icon: 'download',
+              onClick: downloadAll,
+            }
+          : { label: 'Download PDF', icon: 'download', href: only.url, download: only.name }
+      }
+      secondary={
+        <>
+          <PillButton icon="undo" onClick={onBack}>
+            Make changes
+          </PillButton>
+          {made.job === 'merge' && (
+            <PillButton
+              icon="layers"
+              onClick={() =>
+                onOpenPages(new File([only.blob], only.name, { type: 'application/pdf' }))
+              }
+            >
+              Arrange its pages
+            </PillButton>
+          )}
+        </>
+      }
+      onReset={onReset}
     >
-      <span
-        className={cn(
-          'grid place-items-center rounded-full bg-[var(--accent)] text-[#12110d] shadow-[inset_0_0_0_1px_rgb(0_0_0/.08)]',
-          compact ? 'size-9' : 'size-12',
-        )}
-      >
-        <Icon name={compact ? 'plus' : 'pdf'} size={compact ? 18 : 22} />
-      </span>
-      <span
-        className={cn(
-          'font-semibold',
-          compact
-            ? 'text-[13px]'
-            : 'mt-1 inline-flex h-12 items-center rounded-[13px] bg-ink px-6 text-[16px] text-on-ink shadow-card',
-        )}
-      >
-        {over
-          ? 'Drop to add'
-          : compact
-            ? 'Add PDFs'
-            : mode === 'merge'
-              ? 'Choose PDFs to merge'
-              : 'Choose a PDF'}
-      </span>
-      {!compact && (
-        <span className="text-[13px] text-muted">
-          {mode === 'merge'
-            ? 'Two or more, in any order: you can rearrange them next'
-            : 'Then tap the pages you want to keep'}
-        </span>
+      {many ? (
+        <div className="grid gap-5">
+          <ol
+            aria-label="Your files"
+            className="mx-auto flex w-full max-w-[880px] flex-wrap justify-center gap-x-4 gap-y-6"
+          >
+            {made.files.slice(0, 24).map((file, index) => (
+              <li
+                key={file.url}
+                className="fx-settle flex w-[calc(50%-8px)] min-w-0 flex-col items-center sm:w-[180px]"
+                style={{ '--i': index } as CSSProperties}
+              >
+                <ResultStack
+                  size="sm"
+                  covers={file.covers}
+                  pages={file.pages}
+                  stamp={index === 0 ? STAMP.split : undefined}
+                />
+                <div className="mt-3 flex w-full min-w-0 items-center gap-1">
+                  <p
+                    className="min-w-0 flex-1 truncate text-left text-[13px] font-medium text-ink"
+                    title={file.name}
+                  >
+                    File {index + 1}
+                    <span className="block truncate text-[12px] font-normal text-muted">
+                      {formatBytes(file.blob.size)}
+                    </span>
+                  </p>
+                  <a
+                    href={file.url}
+                    download={file.name}
+                    aria-label={`Download ${file.name}`}
+                    className="grid size-11 shrink-0 place-items-center rounded-full bg-ink/[.05] text-ink-2 hover:bg-ink/10 hover:text-ink"
+                  >
+                    <Icon name="download" size={16} />
+                  </a>
+                </div>
+              </li>
+            ))}
+          </ol>
+          {made.files.length > 24 && (
+            <p className="text-[13.5px] text-muted">
+              …and {made.files.length - 24} more in the zip
+            </p>
+          )}
+          <p className="text-[13.5px] text-muted tabular-nums">
+            {plural(pages, 'page')} · {formatBytes(weight)}
+          </p>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center">
+          <ResultStack covers={only.covers} pages={only.pages} stamp={STAMP[made.job]} />
+          <p className="mt-7 max-w-full truncate text-[16px] font-semibold text-ink">{only.name}</p>
+          <p className="text-[13.5px] text-muted tabular-nums">
+            {plural(only.pages, 'page')} · {formatBytes(only.blob.size)}
+          </p>
+          {savable && (
+            <div className="mt-5 grid w-full max-w-[360px] gap-2">
+              {saved !== null ? (
+                <Link
+                  href={workspace!.href(`/files?file=${saved}`)}
+                  className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-positive-soft px-5 text-[15px] font-semibold text-positive"
+                >
+                  <Icon name="check" size={16} /> Saved to Files · Open
+                </Link>
+              ) : (
+                <>
+                  <AttachPicker value={projectId} onChange={setProjectId} />
+                  <Button onClick={saveToFiles} disabled={saver.busy}>
+                    <Icon name="files" size={16} />
+                    {saver.busy ? 'Saving…' : 'Save to Files'}
+                  </Button>
+                  <SaveProgress state={saver.state} className="text-center" />
+                </>
+              )}
+            </div>
+          )}
+        </div>
       )}
-    </label>
+    </Payoff>
   );
 }
