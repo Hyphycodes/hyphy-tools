@@ -14,17 +14,18 @@ import { useToast } from '@/components/ui/toast';
 import { downloadText } from '@/lib/files/download';
 import { newId } from '@/lib/share/link-state';
 import { useLocalState } from '@/lib/share/local';
-import { formatMoney } from '@/lib/tools/split';
+import { allocate, formatMoney } from '@/lib/tools/split';
 import {
   CATEGORY_IDS,
   CATEGORY_LABELS,
   changeCurrency,
+  chargeAt,
   CURRENCIES,
+  daysBetween,
   draftOf,
   emptyDraft,
   exportJson,
   formatDay,
-  FREQUENCIES,
   frequencyLabel,
   localToday,
   MAX_EVERY,
@@ -62,18 +63,21 @@ import {
   type SubscriptionList,
   type Summary,
 } from '@/lib/tools/subscriptions';
-import { Label, Note, Surface } from './kit';
+import { ActionButton, Choices, Label, Note, SampleButton, StartPanel, Surface } from './kit';
 import { MoneyInput } from './money-input';
 
 /*
  * Subscriptions: what you pay for, kept in this browser, and what it all really costs — a month,
- * a year, the next 30 days — with free trials that are about to turn paid called out.
- * Nothing is connected to a bank or an inbox: people type their list, and can take it with them.
+ * a year, what charges next — with free trials that are about to turn paid called out.
+ * Nothing is connected to a bank or an inbox: people tap what they pay for, type what it costs,
+ * and can take the list with them.
  */
 
 const STORAGE_KEY = 'hyphy.subscriptions.v1';
 const MAX_IMPORT_BYTES = 2_000_000;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const ACCENT = 'var(--accent, var(--color-ink))';
+const GLOW = 'var(--glow, var(--accent, var(--color-ink)))';
 
 /** Each category's mark: an icon on a color, so the list reads at a glance (the name says it too). */
 const LOOK: Record<CategoryId, { icon: IconName; color: string }> = {
@@ -89,10 +93,43 @@ const LOOK: Record<CategoryId, { icon: IconName; color: string }> = {
   other: { icon: 'tag', color: '#b9b4a8' },
 };
 
+/** The kinds of things most people pay for: one tap to start one. No prices: only you know yours. */
+type Preset = {
+  id: string;
+  name: string;
+  category: CategoryId;
+  icon: IconName;
+  unit: 'week' | 'month' | 'year';
+};
+const PRESETS: Preset[] = [
+  { id: 'streaming', name: 'Streaming', category: 'streaming', icon: 'play', unit: 'month' },
+  { id: 'music', name: 'Music', category: 'music', icon: 'music', unit: 'month' },
+  { id: 'cloud', name: 'Cloud storage', category: 'cloud', icon: 'archive', unit: 'month' },
+  { id: 'gym', name: 'Gym', category: 'fitness', icon: 'activity', unit: 'month' },
+  { id: 'phone', name: 'Phone plan', category: 'utilities', icon: 'phone', unit: 'month' },
+  { id: 'internet', name: 'Internet', category: 'utilities', icon: 'wifi', unit: 'month' },
+  { id: 'news', name: 'News', category: 'news', icon: 'file-text', unit: 'month' },
+  { id: 'apps', name: 'Apps', category: 'software', icon: 'command', unit: 'month' },
+  { id: 'games', name: 'Games', category: 'other', icon: 'dice', unit: 'month' },
+  { id: 'meals', name: 'Meal kit', category: 'food', icon: 'utensils', unit: 'week' },
+  { id: 'delivery', name: 'Delivery pass', category: 'shopping', icon: 'truck', unit: 'month' },
+];
+
 const SORT_LABELS: Record<SortBy, string> = { next: 'Next charge', cost: 'Cost', name: 'Name' };
 
+/** How often, as chips. "Other" opens "every N days/weeks/months/years". */
+type Cycle = 'month' | 'year' | 'week' | 'other';
+const CYCLES: { value: Cycle; label: string }[] = [
+  { value: 'month', label: 'Monthly' },
+  { value: 'year', label: 'Yearly' },
+  { value: 'week', label: 'Weekly' },
+  { value: 'other', label: 'Other' },
+];
+const cycleOf = (draft: Draft): Cycle =>
+  draft.frequency === 'months' || draft.frequency === 'custom' ? 'other' : draft.frequency;
+
 const field =
-  'h-11 w-full min-w-0 rounded-[11px] bg-subtle px-3 text-[16px] text-ink shadow-[inset_0_0_0_1px_var(--color-line-strong)] outline-none transition-shadow placeholder:text-faint focus:shadow-[inset_0_0_0_1.5px_var(--color-signal),0_0_0_4px_rgb(106_116_255/.14)] aria-[invalid=true]:shadow-[inset_0_0_0_1.5px_var(--color-critical)] lg:h-10 lg:text-[14.5px]';
+  'h-11 w-full min-w-0 rounded-[11px] bg-subtle px-3 text-[16px] text-ink shadow-[inset_0_0_0_1px_var(--color-line-strong)] outline-none transition-shadow placeholder:text-faint focus:shadow-[inset_0_0_0_1.5px_var(--color-signal),0_0_0_4px_color-mix(in_srgb,var(--color-signal)_18%,transparent)] aria-[invalid=true]:shadow-[inset_0_0_0_1.5px_var(--color-critical)] lg:h-10 lg:text-[14.5px]';
 const quietButton =
   'inline-flex h-11 items-center justify-center gap-2 rounded-[11px] bg-well px-3.5 text-[14.5px] font-medium text-ink-2 transition-colors hover:bg-ink/10 hover:text-ink disabled:opacity-40 lg:h-9 lg:text-[13.5px]';
 const inkButton =
@@ -122,18 +159,34 @@ const percent = (share: number) =>
 const dayText = (date: string, today: string, weekday = false) =>
   formatDay(date, { weekday, year: date.slice(0, 4) !== today.slice(0, 4) });
 
-function CategoryMark({ category, size = 'md' }: { category: CategoryId; size?: 'sm' | 'md' }) {
+/** A first guess for the next charge: one cycle from today. Changed under More options. */
+function guessNext(draft: Draft, today: string) {
+  const schedule = scheduleOf(draft);
+  return schedule ? chargeAt({ next: today, ...schedule }, 1) : '';
+}
+
+function CategoryMark({
+  category,
+  icon,
+  size = 'md',
+}: {
+  category: CategoryId;
+  icon?: IconName;
+  size?: 'sm' | 'md' | 'lg';
+}) {
   const look = LOOK[category];
   return (
     <span
       aria-hidden="true"
       className={cn(
         'grid shrink-0 place-items-center text-[#12110d] shadow-[inset_0_0_0_1px_rgb(0_0_0/.08)]',
-        size === 'md' ? 'size-10 rounded-[12px]' : 'size-8 rounded-[10px]',
+        size === 'lg' && 'size-12 rounded-[15px]',
+        size === 'md' && 'size-10 rounded-[12px]',
+        size === 'sm' && 'size-8 rounded-[10px]',
       )}
       style={{ background: look.color }}
     >
-      <Icon name={look.icon} size={size === 'md' ? 18 : 15} />
+      <Icon name={icon ?? look.icon} size={size === 'lg' ? 21 : size === 'md' ? 18 : 15} />
     </span>
   );
 }
@@ -148,14 +201,15 @@ export function SubscriptionsTool() {
     newList(),
   );
   const [adding, setAdding] = useState(false);
+  const [picked, setPicked] = useState<Preset | 'other' | null>(null);
   const [formKey, setFormKey] = useState(0);
-  const [focusForm, setFocusForm] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [removed, setRemoved] = useState<{ item: Subscription; index: number } | null>(null);
   const [incoming, setIncoming] = useState<{ file: string; data: Imported } | null>(null);
   const [importError, setImportError] = useState('');
   const fileInput = useRef<HTMLInputElement>(null);
+  const overviewRef = useRef<HTMLElement>(null);
 
   const ready = loaded && today !== '';
   const { items, currency } = list;
@@ -166,21 +220,42 @@ export function SubscriptionsTool() {
   );
   const money = (amount: number) => formatMoney(amount, currency);
   const samples = items.filter((item) => item.sample).length;
-  const formOpen = items.length === 0 || adding;
+  const empty = items.length === 0;
   const full = items.length >= MAX_ITEMS;
 
   const updateItems = (change: (current: Subscription[]) => Subscription[]) =>
     setList((current) => ({ ...current, items: change(current.items) }));
 
+  const focusLater = (elementId: string) =>
+    requestAnimationFrame(() => document.getElementById(elementId)?.focus());
+
+  const pick = (choice: Preset | 'other') => {
+    setPicked(choice);
+    setFormKey((key) => key + 1);
+  };
+
+  const unpick = () => {
+    const from = picked;
+    setPicked(null);
+    if (from) focusLater(`${id}-tile-${from === 'other' ? 'other' : from.id}`);
+  };
+
   const add = (value: SubscriptionFields) => {
     const item: Subscription = { id: `s${newId(8)}`, ...value, paused: false };
     updateItems((current) => (current.length >= MAX_ITEMS ? current : [...current, item]));
     setRemoved(null);
-    // Keep the form open for the next one: most people add several in a row.
+    // Back to the tiles for the next one: most people add several in a row.
     setAdding(true);
-    setFormKey((key) => key + 1);
-    setFocusForm(true);
+    unpick();
     toast({ title: `Added ${item.name}`, description: priceText(item, currency) });
+  };
+
+  const finishAdding = () => {
+    setAdding(false);
+    setPicked(null);
+    requestAnimationFrame(() =>
+      overviewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+    );
   };
 
   const save = (item: Subscription, value: SubscriptionFields, shownNext: string) => {
@@ -227,13 +302,12 @@ export function SubscriptionsTool() {
   const trySample = () => {
     updateItems(() => sampleItems(today));
     setAdding(false);
-    setFocusForm(false);
+    setPicked(null);
     setRemoved(null);
   };
 
   const clearSample = () => {
     updateItems((current) => current.filter((item) => !item.sample));
-    setFocusForm(false);
     setOpen(null);
     setEditing(null);
     setRemoved(null);
@@ -282,6 +356,8 @@ export function SubscriptionsTool() {
       });
     }
     setIncoming(null);
+    setAdding(false);
+    setPicked(null);
     setOpen(null);
     setEditing(null);
     setRemoved(null);
@@ -293,7 +369,8 @@ export function SubscriptionsTool() {
     )
       return;
     setList(newList(currency));
-    setFocusForm(false);
+    setAdding(false);
+    setPicked(null);
     setOpen(null);
     setEditing(null);
     setRemoved(null);
@@ -302,9 +379,9 @@ export function SubscriptionsTool() {
 
   if (!ready || !summary)
     return (
-      <div aria-busy="true" className="grid gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,.85fr)]">
-        <div className="skeleton h-[420px] !rounded-[22px]" />
-        <div className="skeleton hidden h-[420px] !rounded-[22px] lg:block" />
+      <div aria-busy="true" className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,.9fr)]">
+        <div className="skeleton h-[520px] !rounded-[26px]" />
+        <div className="skeleton hidden h-[520px] !rounded-[22px] lg:block" />
       </div>
     );
 
@@ -326,8 +403,200 @@ export function SubscriptionsTool() {
     </select>
   );
 
+  const addedNames = new Set(items.map((item) => item.name.trim().toLowerCase()));
+
+  // The way in: tiles to tap, or the short form for the one that was tapped.
+  const adder = full ? (
+    <p className="text-[13.5px] text-muted">
+      A list holds {MAX_ITEMS} subscriptions. Remove one to add another.
+    </p>
+  ) : picked ? (
+    <SubscriptionForm
+      key={formKey}
+      variant={picked === 'other' ? 'full' : 'quick'}
+      icon={picked === 'other' ? undefined : picked.icon}
+      initial={
+        picked === 'other'
+          ? emptyDraft()
+          : {
+              ...emptyDraft(),
+              name: picked.name,
+              category: picked.category,
+              frequency: picked.unit,
+            }
+      }
+      currency={currency}
+      today={today}
+      submitLabel={picked === 'other' ? 'Add it' : `Add ${picked.name}`}
+      submitIcon="plus"
+      autoFocus
+      onSubmit={add}
+      onCancel={unpick}
+      cancelLabel="Back"
+    />
+  ) : (
+    <TileGrid idPrefix={id} added={addedNames} onPick={pick} />
+  );
+
+  const backup = (
+    // Backups are housekeeping, not the job: one folded line, opened when needed.
+    <Surface as="section" aria-labelledby={`${id}-data`} className="!py-1">
+      <details className="group/data">
+        <summary className="flex min-h-14 cursor-pointer list-none items-center gap-2.5 text-[14.5px] font-medium text-ink-2 hover:text-ink [&::-webkit-details-marker]:hidden">
+          <Icon name="download" size={16} className="shrink-0 text-muted" />
+          <span id={`${id}-data`} className="min-w-0 flex-1">
+            Back up or move your list
+          </span>
+          <Icon
+            name="chevron-right"
+            size={15}
+            className="shrink-0 text-muted transition-transform group-open/data:rotate-90"
+          />
+        </summary>
+        <div className="grid gap-4 pt-1 pb-5">
+          <p className="text-[13.5px] leading-relaxed text-muted">
+            Your list stays in this browser, and clearing your browsing data clears it too. Download
+            a backup to keep it safe or to open it somewhere else.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => exportAs('json')}
+              disabled={!items.length}
+              className={quietButton}
+            >
+              <Icon name="download" size={16} /> Download a backup
+            </button>
+            <button
+              type="button"
+              onClick={() => fileInput.current?.click()}
+              className={quietButton}
+            >
+              <Icon name="upload" size={16} /> Restore a backup
+            </button>
+            <button
+              type="button"
+              onClick={() => exportAs('csv')}
+              disabled={!items.length}
+              className={quietButton}
+            >
+              <Icon name="file-text" size={16} /> Spreadsheet (CSV)
+            </button>
+            <input
+              ref={fileInput}
+              type="file"
+              accept=".json,application/json"
+              tabIndex={-1}
+              aria-hidden="true"
+              className="sr-only"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                if (file) void chooseImport(file);
+              }}
+            />
+          </div>
+          {importError && (
+            <p role="alert" className="flex items-start gap-2 text-[13.5px] text-critical">
+              <Icon name="alert" size={15} className="mt-0.5 shrink-0" /> {importError}
+            </p>
+          )}
+          {incoming && (
+            <ImportChoice
+              file={incoming.file}
+              data={incoming.data}
+              current={items.length}
+              currency={currency}
+              onChoose={(mode) => applyImport(mode, incoming.data)}
+              onCancel={() => setIncoming(null)}
+            />
+          )}
+          {items.length > 0 && (
+            <button
+              type="button"
+              onClick={clearAll}
+              className="inline-flex min-h-11 items-center justify-self-start text-[13px] text-muted underline-offset-2 hover:text-critical hover:underline lg:min-h-0"
+            >
+              Clear the whole list
+            </button>
+          )}
+        </div>
+      </details>
+    </Surface>
+  );
+
+  const removedNote = (
+    <>
+      <p aria-live="polite" className="sr-only">
+        {removed ? `Removed ${removed.item.name}. Undo is below the list.` : ''}
+      </p>
+      {removed && (
+        <Note icon="trash" className="!items-center">
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span>Removed {removed.item.name}.</span>
+            <button
+              type="button"
+              onClick={undoRemove}
+              className="inline-flex min-h-11 items-center gap-1 font-semibold text-ink underline underline-offset-2 lg:min-h-0"
+            >
+              Undo
+            </button>
+          </span>
+        </Note>
+      )}
+    </>
+  );
+
+  /* ---------- Nothing yet: tap what you pay for ---------- */
+  if (empty)
+    return (
+      <div className="mx-auto grid w-full max-w-[680px] gap-5">
+        <StartPanel
+          art={picked ? undefined : <LedgerArt />}
+          title={picked ? 'What does it cost?' : 'What do you pay for?'}
+          lead={
+            picked
+              ? 'Type what one charge costs. Everything else can wait.'
+              : 'Tap everything you pay for again and again. You’ll add what each one costs, and see what it all really adds up to.'
+          }
+          footer={
+            !picked && (
+              <div className="grid justify-items-center gap-3">
+                <SampleButton onClick={trySample}>See it with a sample list</SampleButton>
+                <p className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
+                  <Icon name="lock" size={13} className="text-faint" />
+                  <span>Stays in this browser. Nothing connects to your bank.</span>
+                  <span className="inline-flex items-center gap-1.5">
+                    Prices in {currencyPicker}
+                  </span>
+                </p>
+              </div>
+            )
+          }
+        >
+          <div className="text-left">{adder}</div>
+        </StartPanel>
+        {removedNote}
+        {backup}
+      </div>
+    );
+
+  /* ---------- A list: the overview, and the list itself ---------- */
   return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,.85fr)] lg:grid-rows-[auto_1fr] lg:items-start">
+    <div className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,.9fr)] lg:items-start">
+      <aside
+        ref={overviewRef}
+        aria-label="What it all costs"
+        className={cn(
+          'grid min-w-0 scroll-mt-24 gap-4 lg:col-start-2 lg:row-start-1',
+          // On a phone, adding keeps the tiles on top; otherwise the total leads.
+          adding && 'order-last lg:order-none',
+        )}
+      >
+        <Overview summary={summary} currency={currency} />
+        <Timeline summary={summary} items={items} today={today} currency={currency} />
+      </aside>
+
       <div className="grid min-w-0 gap-5 lg:col-start-1 lg:row-start-1">
         {samples > 0 && (
           <Note icon="sparkles" className="!items-center">
@@ -347,59 +616,45 @@ export function SubscriptionsTool() {
           </Note>
         )}
 
-        {formOpen ? (
-          <Surface as="section" aria-labelledby={`${id}-add`} className="grid gap-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <Label id={`${id}-add`}>{items.length ? 'Add another' : 'Add a subscription'}</Label>
-              {items.length === 0 ? (
-                <button
-                  type="button"
-                  onClick={trySample}
-                  className="-my-2 inline-flex h-11 items-center gap-1.5 rounded-full px-3 text-[13.5px] font-medium text-signal-ink transition-colors hover:bg-signal-soft lg:h-9"
-                >
-                  <Icon name="sparkles" size={15} /> Try a sample list
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAdding(false);
-                    // The form goes away: keep keyboard focus where the form was opened from.
-                    requestAnimationFrame(() =>
-                      document.getElementById(`${id}-open-form`)?.focus(),
-                    );
-                  }}
-                  className="-my-2 inline-flex h-11 items-center rounded-full px-3 text-[13.5px] font-medium text-ink-2 hover:bg-ink/5 hover:text-ink lg:h-9"
-                >
-                  Done
-                </button>
-              )}
+        {adding ? (
+          <Surface
+            as="section"
+            aria-labelledby={`${id}-add`}
+            className="relative isolate grid gap-4 overflow-hidden"
+          >
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 -z-10"
+              style={{
+                background: `radial-gradient(80% 60% at 50% 0%, color-mix(in srgb, ${ACCENT} 12%, transparent), transparent 70%)`,
+              }}
+            />
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <Label id={`${id}-add`}>{picked ? 'What does it cost?' : 'Tap to add more'}</Label>
+                <p className="mt-1 text-[13.5px] text-muted" aria-live="polite">
+                  {items.length} on your list ·{' '}
+                  <span className="mono-num font-semibold text-ink">{money(summary.monthly)}</span>{' '}
+                  a month
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={finishAdding}
+                className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-full px-4 text-[14.5px] font-semibold text-[#12110d] transition-transform active:scale-[.97] lg:h-10 lg:text-[14px]"
+                style={{ background: ACCENT }}
+              >
+                <Icon name="check" size={16} /> Done
+              </button>
             </div>
-            {full ? (
-              <p className="text-[13.5px] text-muted">
-                A list holds {MAX_ITEMS} subscriptions. Remove one to add another.
-              </p>
-            ) : (
-              <SubscriptionForm
-                key={formKey}
-                initial={emptyDraft()}
-                currency={currency}
-                today={today}
-                submitLabel="Add subscription"
-                submitIcon="plus"
-                autoFocus={focusForm}
-                currencyPicker={items.length === 0 ? currencyPicker : undefined}
-                onSubmit={add}
-              />
-            )}
+            {adder}
           </Surface>
         ) : (
           <button
-            id={`${id}-open-form`}
             type="button"
             onClick={() => {
               setAdding(true);
-              setFocusForm(true);
+              setPicked(null);
             }}
             className="flex h-14 items-center justify-center gap-2 rounded-[18px] border-[1.5px] border-dashed border-line-strong text-[15px] font-medium text-ink-2 transition-colors hover:border-ink/30 hover:bg-ink/5 hover:text-ink"
           >
@@ -407,176 +662,171 @@ export function SubscriptionsTool() {
           </button>
         )}
 
-        {items.length > 0 && (
-          <Surface as="section" aria-labelledby={`${id}-list`} className="grid gap-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="min-w-0">
-                <Label id={`${id}-list`}>Your subscriptions · {items.length}</Label>
-                <p className="mono-num mt-1 text-[12.5px] text-muted">
-                  {money(summary.monthly)} a month
-                  {summary.paused > 0 && ` · ${summary.paused} paused`}
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <div
-                  role="radiogroup"
-                  aria-label="Sort by"
-                  className="flex rounded-[12px] bg-well p-0.5 lg:p-1"
-                >
-                  {SORTS.map((sort) => (
-                    <button
-                      key={sort}
-                      type="button"
-                      role="radio"
-                      aria-checked={list.sort === sort}
-                      onClick={() => setList((current) => ({ ...current, sort }))}
-                      className={cn(
-                        'h-11 rounded-[10px] px-3 text-[13.5px] font-medium transition-colors lg:h-8 lg:rounded-[9px] lg:text-[13px]',
-                        list.sort === sort
-                          ? 'bg-surface text-ink shadow-card'
-                          : 'text-muted hover:text-ink',
-                      )}
-                    >
-                      {SORT_LABELS[sort]}
-                    </button>
-                  ))}
-                </div>
-                {currencyPicker}
-              </div>
-            </div>
-            <ul className="grid gap-2">
-              {sorted.map((item) => (
-                <SubscriptionRow
-                  key={item.id}
-                  item={item}
-                  today={today}
-                  currency={currency}
-                  expanded={open === item.id}
-                  editing={editing === item.id}
-                  onToggle={() => {
-                    setOpen(open === item.id ? null : item.id);
-                    setEditing(null);
-                  }}
-                  onEdit={() => setEditing(item.id)}
-                  onCancelEdit={() => setEditing(null)}
-                  onSave={(value, shownNext) => save(item, value, shownNext)}
-                  onPause={() => togglePause(item)}
-                  onRemove={() => remove(item)}
-                />
-              ))}
-            </ul>
-          </Surface>
-        )}
-
-        <p aria-live="polite" className="sr-only">
-          {removed ? `Removed ${removed.item.name}. Undo is below the list.` : ''}
-        </p>
-        {removed && (
-          <Note icon="trash" className="!items-center">
-            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span>Removed {removed.item.name}.</span>
-              <button
-                type="button"
-                onClick={undoRemove}
-                className="inline-flex min-h-11 items-center gap-1 font-semibold text-ink underline underline-offset-2 lg:min-h-0"
-              >
-                Undo
-              </button>
-            </span>
-          </Note>
-        )}
-      </div>
-
-      <SummaryPanel summary={summary} items={items} today={today} currency={currency} />
-
-      {/* Backups are housekeeping, not the job: one folded line, opened when needed. */}
-      <Surface
-        as="section"
-        aria-labelledby={`${id}-data`}
-        className="!py-1 lg:col-start-1 lg:row-start-2"
-      >
-        <details className="group/data">
-          <summary className="flex min-h-14 cursor-pointer list-none items-center gap-2.5 text-[14.5px] font-medium text-ink-2 hover:text-ink [&::-webkit-details-marker]:hidden">
-            <Icon name="download" size={16} className="shrink-0 text-muted" />
-            <span id={`${id}-data`} className="min-w-0 flex-1">
-              Back up or move your list
-            </span>
-            <Icon
-              name="chevron-right"
-              size={15}
-              className="shrink-0 text-muted transition-transform group-open/data:rotate-90"
-            />
-          </summary>
-          <div className="grid gap-4 pt-1 pb-5">
-            <p className="text-[13.5px] leading-relaxed text-muted">
-              Your list stays in this browser, and clearing your browsing data clears it too.
-              Download a backup to keep it safe or to open it somewhere else.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => exportAs('json')}
-                disabled={!items.length}
-                className={quietButton}
-              >
-                <Icon name="download" size={16} /> Download a backup
-              </button>
-              <button
-                type="button"
-                onClick={() => fileInput.current?.click()}
-                className={quietButton}
-              >
-                <Icon name="upload" size={16} /> Restore a backup
-              </button>
-              <button
-                type="button"
-                onClick={() => exportAs('csv')}
-                disabled={!items.length}
-                className={quietButton}
-              >
-                <Icon name="file-text" size={16} /> Spreadsheet (CSV)
-              </button>
-              <input
-                ref={fileInput}
-                type="file"
-                accept=".json,application/json"
-                tabIndex={-1}
-                aria-hidden="true"
-                className="sr-only"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  event.target.value = '';
-                  if (file) void chooseImport(file);
-                }}
-              />
-            </div>
-            {importError && (
-              <p role="alert" className="flex items-start gap-2 text-[13.5px] text-critical">
-                <Icon name="alert" size={15} className="mt-0.5 shrink-0" /> {importError}
+        <Surface as="section" aria-labelledby={`${id}-list`} className="grid gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <Label id={`${id}-list`}>Your subscriptions · {items.length}</Label>
+              <p className="mono-num mt-1 text-[12.5px] text-muted">
+                {money(summary.monthly)} a month
+                {summary.paused > 0 && ` · ${summary.paused} paused`}
               </p>
-            )}
-            {incoming && (
-              <ImportChoice
-                file={incoming.file}
-                data={incoming.data}
-                current={items.length}
-                currency={currency}
-                onChoose={(mode) => applyImport(mode, incoming.data)}
-                onCancel={() => setIncoming(null)}
-              />
-            )}
-            {items.length > 0 && (
-              <button
-                type="button"
-                onClick={clearAll}
-                className="inline-flex min-h-11 items-center justify-self-start text-[13px] text-muted underline-offset-2 hover:text-critical hover:underline lg:min-h-0"
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div
+                role="radiogroup"
+                aria-label="Sort by"
+                className="flex rounded-[12px] bg-well p-0.5 lg:p-1"
               >
-                Clear the whole list
-              </button>
-            )}
+                {SORTS.map((sort) => (
+                  <button
+                    key={sort}
+                    type="button"
+                    role="radio"
+                    aria-checked={list.sort === sort}
+                    onClick={() => setList((current) => ({ ...current, sort }))}
+                    className={cn(
+                      'h-11 rounded-[10px] px-3 text-[13.5px] font-medium transition-colors lg:h-8 lg:rounded-[9px] lg:text-[13px]',
+                      list.sort === sort
+                        ? 'bg-surface text-ink shadow-card'
+                        : 'text-muted hover:text-ink',
+                    )}
+                  >
+                    {SORT_LABELS[sort]}
+                  </button>
+                ))}
+              </div>
+              {currencyPicker}
+            </div>
           </div>
-        </details>
-      </Surface>
+          <ul className="grid gap-2">
+            {sorted.map((item) => (
+              <SubscriptionRow
+                key={item.id}
+                item={item}
+                today={today}
+                currency={currency}
+                expanded={open === item.id}
+                editing={editing === item.id}
+                onToggle={() => {
+                  setOpen(open === item.id ? null : item.id);
+                  setEditing(null);
+                }}
+                onEdit={() => setEditing(item.id)}
+                onCancelEdit={() => setEditing(null)}
+                onSave={(value, shownNext) => save(item, value, shownNext)}
+                onPause={() => togglePause(item)}
+                onRemove={() => remove(item)}
+              />
+            ))}
+          </ul>
+        </Surface>
+
+        {removedNote}
+        {backup}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- The way in ---------------- */
+
+function TileGrid({
+  idPrefix,
+  added,
+  onPick,
+}: {
+  idPrefix: string;
+  added: Set<string>;
+  onPick: (choice: Preset | 'other') => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="What do you pay for?"
+      className="grid grid-cols-3 gap-2 sm:grid-cols-4 sm:gap-2.5"
+    >
+      {PRESETS.map((preset) => {
+        const on = added.has(preset.name.toLowerCase());
+        return (
+          <button
+            key={preset.id}
+            id={`${idPrefix}-tile-${preset.id}`}
+            type="button"
+            onClick={() => onPick(preset)}
+            className={cn(
+              'relative flex min-h-[96px] min-w-0 flex-col items-center justify-center gap-2 rounded-[18px] px-1.5 py-3 text-center transition-[background-color,box-shadow,transform] active:scale-[.97]',
+              on
+                ? 'bg-signal-soft shadow-[inset_0_0_0_1.5px_color-mix(in_srgb,var(--glow,var(--color-signal))_55%,transparent)]'
+                : 'bg-well shadow-[inset_0_0_0_1px_var(--color-line)] hover:bg-ink/[.09]',
+            )}
+          >
+            <CategoryMark category={preset.category} icon={preset.icon} />
+            <span className="text-[13.5px] leading-tight font-medium text-ink">{preset.name}</span>
+            {on && (
+              <span
+                className="absolute top-2 right-2 grid size-5 place-items-center rounded-full text-[#12110d]"
+                style={{ background: GLOW }}
+              >
+                <Icon name="check" size={12} strokeWidth={3} />
+                <span className="sr-only">(on your list, tap to add another)</span>
+              </span>
+            )}
+          </button>
+        );
+      })}
+      <button
+        id={`${idPrefix}-tile-other`}
+        type="button"
+        onClick={() => onPick('other')}
+        className="flex min-h-[96px] min-w-0 flex-col items-center justify-center gap-2 rounded-[18px] border-[1.5px] border-dashed border-line-strong px-1.5 py-3 text-center transition-[background-color,transform] hover:bg-ink/5 active:scale-[.97]"
+      >
+        <span
+          aria-hidden="true"
+          className="grid size-10 place-items-center rounded-[12px] text-[#12110d]"
+          style={{ background: ACCENT }}
+        >
+          <Icon name="plus" size={19} />
+        </span>
+        <span className="text-[13.5px] leading-tight font-medium text-ink">Something else</span>
+      </button>
+    </div>
+  );
+}
+
+/** The picture on the first screen: a little ledger that adds up, with its circle of colors. */
+function LedgerArt() {
+  const rows: [CategoryId, number][] = [
+    ['streaming', 70],
+    ['music', 52],
+    ['cloud', 60],
+    ['fitness', 44],
+  ];
+  return (
+    <div aria-hidden="true" className="relative mx-auto h-[200px] w-[272px]">
+      <div className="absolute top-2 left-3 w-[204px] -rotate-[4deg] rounded-[18px] bg-subtle p-3.5 shadow-[inset_0_0_0_1px_var(--color-line-strong),0_26px_44px_-26px_rgb(0_0_0/.7)]">
+        {rows.map(([category, width]) => (
+          <div key={category} className="flex items-center gap-2.5 py-[5px]">
+            <span className="size-5 rounded-[7px]" style={{ background: LOOK[category].color }} />
+            <span className="h-2 rounded-full bg-ink/15" style={{ width }} />
+            <span className="ml-auto h-2 w-7 rounded-full bg-ink/25" />
+          </div>
+        ))}
+        <div className="mt-2 flex items-center justify-between border-t border-line pt-2.5">
+          <span className="h-2 w-12 rounded-full bg-ink/15" />
+          <span className="h-3 w-14 rounded-full" style={{ background: ACCENT }} />
+        </div>
+      </div>
+      <div className="absolute right-1 bottom-0 rotate-[8deg] rounded-full bg-surface p-1.5 shadow-[0_18px_36px_-20px_rgb(0_0_0/.8)]">
+        <Donut
+          size={86}
+          parts={[
+            { id: 'streaming', share: 0.34 },
+            { id: 'fitness', share: 0.26 },
+            { id: 'music', share: 0.22 },
+            { id: 'cloud', share: 0.18 },
+          ]}
+        />
+      </div>
     </div>
   );
 }
@@ -632,36 +882,55 @@ const described = (fieldId: string, error?: string, hint?: unknown) => ({
 });
 
 const FIELD_ORDER = ['name', 'cost', 'every', 'next', 'trialEnds', 'cancelUrl'] as const;
+const LATER_FIELDS: readonly string[] = ['next', 'trialEnds', 'cancelUrl'];
 
+/**
+ * One subscription's form. "quick" came from a tile: the name and category are already known, so
+ * it asks only what it costs and how often. "full" also asks the name and category. The next
+ * charge, free trial, cancel link and notes wait under More options.
+ */
 function SubscriptionForm({
+  variant,
+  icon,
   initial,
   currency,
   today,
   submitLabel,
   submitIcon,
   autoFocus,
-  currencyPicker,
   onSubmit,
   onCancel,
+  cancelLabel = 'Cancel',
+  contained = false,
 }: {
+  variant: 'quick' | 'full';
+  icon?: IconName;
   initial: Draft;
   currency: Currency;
   today: string;
   submitLabel: string;
   submitIcon: IconName;
   autoFocus?: boolean;
-  currencyPicker?: ReactNode;
   onSubmit: (value: SubscriptionFields) => void;
   onCancel?: () => void;
+  cancelLabel?: string;
+  /** Inside a list row: the sideways row of kinds stops at the row's edge. */
+  contained?: boolean;
 }) {
   const id = useId();
+  const form = useRef<HTMLFormElement>(null);
   const [draft, setDraft] = useState(initial);
   const [errors, setErrors] = useState<DraftErrors>({});
   const [more, setMore] = useState(
-    Boolean(
-      initial.trialEnds || initial.cancelUrl || initial.notes || initial.category !== 'other',
-    ),
+    Boolean(initial.trialEnds || initial.cancelUrl || initial.notes),
   );
+  const quick = variant === 'quick';
+
+  // Until a date is picked, the next charge is a guess one cycle out, and follows the cycle.
+  const complete = (value: Draft): Draft => ({
+    ...value,
+    next: value.next || guessNext(value, today),
+  });
 
   const change = (patch: Partial<Draft>) => {
     const next = { ...draft, ...patch };
@@ -670,7 +939,7 @@ function SubscriptionForm({
     setDraft(next);
     // Errors already showing clear as they're fixed; nothing new lights up while typing.
     if (Object.keys(errors).length) {
-      const result = readDraft(next);
+      const result = readDraft(complete(next));
       const kept: DraftErrors = {};
       if (!result.ok)
         for (const key of FIELD_ORDER) if (errors[key]) kept[key] = result.errors[key];
@@ -680,186 +949,232 @@ function SubscriptionForm({
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const result = readDraft(draft);
+    const result = readDraft(complete(draft));
     if (result.ok) {
       onSubmit(result.value);
       return;
     }
     setErrors(result.errors);
     const first = FIELD_ORDER.find((key) => result.errors[key]);
-    if (first === 'trialEnds' || first === 'cancelUrl') setMore(true);
+    if (first && (LATER_FIELDS.includes(first) || (quick && first === 'name'))) setMore(true);
     requestAnimationFrame(() => document.getElementById(`${id}-${first}`)?.focus());
   };
 
+  const setCycle = (cycle: Cycle) =>
+    change(
+      cycle === 'other'
+        ? {
+            frequency: 'custom',
+            unit:
+              draft.frequency === 'week' || draft.frequency === 'year' ? draft.frequency : 'month',
+            every: draft.frequency === 'custom' || draft.frequency === 'months' ? draft.every : '3',
+          }
+        : { frequency: cycle },
+    );
+
   const schedule = scheduleOf(draft);
+  const shownNext = complete(draft).next;
   const past =
     schedule && parseDay(draft.next) && draft.next < today
       ? nextCharge({ next: draft.next, ...schedule }, today)
       : null;
   const errorCount = Object.keys(errors).length;
+  const money = (amount: number) => formatMoney(amount, currency);
+  const otherUnit = draft.frequency === 'months' ? 'month' : draft.unit;
+
+  // What that works out to: the satisfying bit while typing a price.
+  const worksOut =
+    schedule && draft.cost > 0
+      ? schedule.every === 1 && schedule.unit === 'month'
+        ? `That’s ${money(Math.round(yearlyCost({ cost: draft.cost, ...schedule })))} a year.`
+        : `${frequencyLabel(schedule.every, schedule.unit)}: about ${money(Math.round(monthlyCost({ cost: draft.cost, ...schedule })))} a month.`
+      : null;
+
+  const nameField = (
+    <Row label="Name" htmlFor={`${id}-name`} error={errors.name}>
+      <input
+        id={`${id}-name`}
+        value={draft.name}
+        maxLength={80}
+        autoFocus={autoFocus && !quick && !initial.name}
+        autoComplete="off"
+        autoCapitalize="words"
+        enterKeyHint="next"
+        placeholder="Music app"
+        onChange={(event) => change({ name: event.target.value })}
+        className={field}
+        {...described(`${id}-name`, errors.name)}
+      />
+    </Row>
+  );
+
+  const categoryField = (
+    <div className="grid min-w-0 gap-2">
+      <p className="text-[13.5px] font-medium text-ink-2">Kind</p>
+      <div className={cn(contained && 'overflow-hidden')}>
+        <Choices
+          label="Kind"
+          value={draft.category}
+          scroll
+          options={CATEGORY_IDS.map((category) => ({
+            value: category,
+            label: CATEGORY_LABELS[category],
+            swatch: LOOK[category].color,
+          }))}
+          onChange={(category) => change({ category })}
+        />
+      </div>
+    </div>
+  );
 
   return (
-    <form onSubmit={submit} noValidate className="grid gap-4">
-      <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,.8fr)]">
-        <Row label="What is it?" htmlFor={`${id}-name`} error={errors.name}>
-          <input
-            id={`${id}-name`}
-            value={draft.name}
-            maxLength={80}
-            autoFocus={autoFocus}
-            autoComplete="off"
-            autoCapitalize="words"
-            enterKeyHint="next"
-            placeholder="Music app"
-            onChange={(event) => change({ name: event.target.value })}
-            className={field}
-            {...described(`${id}-name`, errors.name)}
-          />
-        </Row>
-        <Row label="What one charge costs" htmlFor={`${id}-cost`} error={errors.cost}>
-          <div className="flex gap-2">
-            <MoneyInput
-              id={`${id}-cost`}
-              label={errors.cost ? `Cost. ${errors.cost}` : 'What one charge costs'}
-              value={draft.cost}
-              currency={currency}
-              onChange={(cost) => change({ cost })}
-              className="min-w-0 flex-1"
-              inputClassName={cn(
-                errors.cost && '!shadow-[inset_0_0_0_1.5px_var(--color-critical)]',
-              )}
-            />
-            {currencyPicker}
-          </div>
-        </Row>
+    <form ref={form} onSubmit={submit} noValidate className="grid animate-fade gap-5">
+      {quick ? (
+        <div className="flex items-center gap-3">
+          <CategoryMark category={draft.category} icon={icon} size="lg" />
+          <p className="min-w-0 flex-1 truncate font-display text-[22px] leading-tight font-bold tracking-[-0.02em] text-ink">
+            {draft.name.trim() || 'Subscription'}
+          </p>
+        </div>
+      ) : (
+        nameField
+      )}
+
+      <div className="grid min-w-0 gap-1.5">
+        <label htmlFor={`${id}-cost`} className="text-[13.5px] font-medium text-ink-2">
+          What one charge costs
+        </label>
+        <MoneyInput
+          id={`${id}-cost`}
+          label={errors.cost ? `What one charge costs. ${errors.cost}` : 'What one charge costs'}
+          value={draft.cost}
+          currency={currency}
+          autoFocus={autoFocus && (quick || Boolean(initial.name))}
+          onChange={(cost) => change({ cost })}
+          onEnter={() => form.current?.requestSubmit()}
+          inputClassName={cn(
+            '!h-14 !text-[24px] font-semibold !text-left',
+            errors.cost && '!shadow-[inset_0_0_0_1.5px_var(--color-critical)]',
+          )}
+        />
+        <p
+          className={cn('min-h-[18px] text-[12.5px]', errors.cost ? 'text-critical' : 'text-muted')}
+        >
+          {errors.cost ?? worksOut ?? 'A close guess is fine. You can change it any time.'}
+        </p>
       </div>
 
       <div className="grid min-w-0 gap-2">
-        <p id={`${id}-often`} className="text-[13.5px] font-medium text-ink-2">
-          How often it charges
-        </p>
-        <div role="radiogroup" aria-labelledby={`${id}-often`} className="flex flex-wrap gap-1.5">
-          {FREQUENCIES.map((frequency) => (
-            <button
-              key={frequency.id}
-              type="button"
-              role="radio"
-              aria-checked={draft.frequency === frequency.id}
-              onClick={() => change({ frequency: frequency.id })}
-              className={cn(
-                'h-11 rounded-[11px] px-3.5 text-[14px] font-medium transition-colors lg:h-9 lg:text-[13.5px]',
-                draft.frequency === frequency.id
-                  ? 'bg-ink text-on-ink'
-                  : 'bg-well text-ink-2 hover:bg-ink/10 hover:text-ink',
-              )}
-            >
-              {frequency.label}
-            </button>
-          ))}
+        <p className="text-[13.5px] font-medium text-ink-2">How often</p>
+        <div role="radiogroup" aria-label="How often" className="grid grid-cols-4 gap-1.5">
+          {CYCLES.map((cycle) => {
+            const on = cycleOf(draft) === cycle.value;
+            return (
+              <button
+                key={cycle.value}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                onClick={() => setCycle(cycle.value)}
+                className={cn(
+                  'h-12 min-w-0 rounded-[13px] px-1 text-[14.5px] font-medium transition-[background-color,color,transform] active:scale-[.97] lg:h-11 lg:text-[14px]',
+                  on ? 'text-[#12110d]' : 'bg-well text-ink-2 hover:bg-ink/10 hover:text-ink',
+                )}
+                style={on ? { background: ACCENT } : undefined}
+              >
+                {cycle.label}
+              </button>
+            );
+          })}
         </div>
-        {(draft.frequency === 'months' || draft.frequency === 'custom') && (
+        {cycleOf(draft) === 'other' && (
           <div className="flex animate-fade flex-wrap items-center gap-2 pt-1 text-[14px] text-ink-2">
             <label htmlFor={`${id}-every`}>Every</label>
             <input
               id={`${id}-every`}
               inputMode="numeric"
               autoComplete="off"
+              enterKeyHint="done"
               value={draft.every}
               maxLength={3}
               onChange={(event) => change({ every: event.target.value.replace(/\D/g, '') })}
               className={cn(field, 'num !w-20 text-center')}
               {...described(`${id}-every`, errors.every, true)}
             />
-            {draft.frequency === 'months' ? (
-              <span>{unitWord('month', Number(draft.every) || 2)}</span>
-            ) : (
-              <select
-                aria-label="Days, weeks, months or years"
-                value={draft.unit}
-                onChange={(event) => change({ unit: event.target.value as Draft['unit'] })}
-                className={cn(field, '!w-auto pr-8')}
-              >
-                {UNITS.map((unit) => (
-                  <option key={unit} value={unit}>
-                    {unitWord(unit, Number(draft.every) || 2)}
-                  </option>
-                ))}
-              </select>
-            )}
+            <select
+              aria-label="Days, weeks, months or years"
+              value={otherUnit}
+              onChange={(event) =>
+                change({ frequency: 'custom', unit: event.target.value as Draft['unit'] })
+              }
+              className={cn(field, '!w-auto pr-8')}
+            >
+              {UNITS.map((unit) => (
+                <option key={unit} value={unit}>
+                  {unitWord(unit, Number(draft.every) || 2)}
+                </option>
+              ))}
+            </select>
+            <p
+              id={`${id}-every-note`}
+              className={cn('w-full text-[12.5px]', errors.every ? 'text-critical' : 'text-muted')}
+            >
+              {errors.every ?? (schedule ? '' : `A whole number from 1 to ${MAX_EVERY}.`)}
+            </p>
           </div>
         )}
-        {(draft.frequency === 'months' || draft.frequency === 'custom') && (
-          <p
-            id={`${id}-every-note`}
-            className={cn('text-[12.5px]', errors.every ? 'text-critical' : 'text-muted')}
-          >
-            {errors.every ??
-              (schedule
-                ? `${frequencyLabel(schedule.every, schedule.unit)}, about ${formatMoney(Math.round(monthlyCost({ cost: draft.cost, ...schedule })), currency)} a month.`
-                : `A whole number from 1 to ${MAX_EVERY}.`)}
-          </p>
-        )}
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Row
-          label="Next charge"
-          htmlFor={`${id}-next`}
-          error={errors.next}
-          hint={
-            past
-              ? `That’s past, so the next one is ${dayText(past, today)}.`
-              : 'A close guess is fine.'
-          }
-        >
-          <input
-            id={`${id}-next`}
-            type="date"
-            value={draft.next}
-            onChange={(event) => change({ next: event.target.value })}
-            className={cn(field, 'text-left')}
-            {...described(`${id}-next`, errors.next, true)}
-          />
-        </Row>
-      </div>
+      {!quick && categoryField}
 
-      <div className="grid gap-4">
+      <div className="grid min-w-0">
         <button
           type="button"
           aria-expanded={more}
           aria-controls={`${id}-more`}
           onClick={() => setMore((value) => !value)}
-          className="-my-1 inline-flex h-11 items-center gap-2 justify-self-start rounded-[10px] text-[14px] font-medium text-ink-2 hover:text-ink lg:h-9 lg:text-[13.5px]"
+          className="flex min-h-11 w-full items-center gap-2 rounded-[12px] text-left text-[14.5px] font-medium text-ink-2 transition-colors hover:text-ink"
         >
-          <Icon
-            name="chevron-down"
-            size={16}
-            className={cn('transition-transform', more && 'rotate-180')}
-          />
-          Category, free trial, notes
+          <span
+            aria-hidden="true"
+            className={cn(
+              'grid size-7 shrink-0 place-items-center rounded-full bg-well transition-transform',
+              more && 'rotate-45',
+            )}
+          >
+            <Icon name="plus" size={15} />
+          </span>
+          <span className="min-w-0 flex-1">More options</span>
+          {!more && parseDay(shownNext) && (
+            <span className="truncate text-[13px] font-normal text-muted">
+              Next charge {dayText(shownNext, today)}
+            </span>
+          )}
         </button>
         {more && (
-          <div id={`${id}-more`} className="grid animate-fade gap-4 sm:grid-cols-2">
-            <Row label="Category" htmlFor={`${id}-category`}>
-              <div className="relative">
-                <select
-                  id={`${id}-category`}
-                  value={draft.category}
-                  onChange={(event) => change({ category: event.target.value as CategoryId })}
-                  className={cn(field, 'appearance-none pr-9')}
-                >
-                  {CATEGORY_IDS.map((category) => (
-                    <option key={category} value={category}>
-                      {CATEGORY_LABELS[category]}
-                    </option>
-                  ))}
-                </select>
-                <Icon
-                  name="chevron-down"
-                  size={16}
-                  className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-muted"
-                />
-              </div>
+          <div id={`${id}-more`} className="grid animate-fade gap-4 pt-3 sm:grid-cols-2">
+            {quick && <div className="sm:col-span-2">{nameField}</div>}
+            {quick && <div className="sm:col-span-2">{categoryField}</div>}
+            <Row
+              label="Next charge"
+              htmlFor={`${id}-next`}
+              error={errors.next}
+              hint={
+                past
+                  ? `That’s past, so the next one is ${dayText(past, today)}.`
+                  : draft.next
+                    ? 'A close guess is fine.'
+                    : 'A guess, one charge from today. Pick the real day if you know it.'
+              }
+            >
+              <input
+                id={`${id}-next`}
+                type="date"
+                value={shownNext}
+                onChange={(event) => change({ next: event.target.value })}
+                className={cn(field, 'text-left')}
+                {...described(`${id}-next`, errors.next, true)}
+              />
             </Row>
             <Row
               label="Free trial ends"
@@ -899,7 +1214,7 @@ function SubscriptionForm({
                 {...described(`${id}-cancelUrl`, errors.cancelUrl, true)}
               />
             </Row>
-            <Row label="Notes" htmlFor={`${id}-notes`} optional className="sm:col-span-2">
+            <Row label="Notes" htmlFor={`${id}-notes`} optional>
               <textarea
                 id={`${id}-notes`}
                 value={draft.notes}
@@ -907,24 +1222,24 @@ function SubscriptionForm({
                 rows={2}
                 placeholder="Shared with the family. Cancel by phone."
                 onChange={(event) => change({ notes: event.target.value })}
-                className={cn(field, '!h-auto min-h-20 py-2.5 leading-relaxed')}
+                className={cn(field, '!h-auto min-h-11 py-2.5 leading-relaxed')}
               />
             </Row>
           </div>
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <button type="submit" className={inkButton}>
-          <Icon name={submitIcon} size={16} /> {submitLabel}
-        </button>
+      <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-center">
+        <ActionButton type="submit" icon={submitIcon} className="sm:w-auto sm:min-w-[200px]">
+          {submitLabel}
+        </ActionButton>
         {onCancel && (
           <button
             type="button"
             onClick={onCancel}
-            className="inline-flex h-11 items-center rounded-[11px] px-4 text-[14.5px] font-medium text-ink-2 hover:bg-ink/5 hover:text-ink lg:h-10 lg:text-[14px]"
+            className="inline-flex h-11 items-center justify-center rounded-[11px] px-4 text-[14.5px] font-medium text-ink-2 hover:bg-ink/5 hover:text-ink"
           >
-            Cancel
+            {cancelLabel}
           </button>
         )}
         <p aria-live="polite" className="text-[13px] text-critical">
@@ -969,20 +1284,26 @@ function SubscriptionRow({
   const trial = item.trialEnds && item.trialEnds >= today ? item.trialEnds : '';
   const cancel = item.cancelUrl ? webLink(item.cancelUrl) : null;
   const perMonth = item.every === 1 && item.unit === 'month';
+  const color = LOOK[item.category].color;
 
   return (
     <li
       className={cn(
-        'min-w-0 rounded-[16px] bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)]',
+        'relative min-w-0 overflow-hidden rounded-[16px] bg-subtle shadow-[inset_0_0_0_1px_var(--color-line)]',
         expanded && 'shadow-[inset_0_0_0_1px_var(--color-line-strong)]',
       )}
     >
+      <span
+        aria-hidden="true"
+        className={cn('absolute inset-y-0 left-0 w-[3px]', item.paused && 'opacity-40')}
+        style={{ background: color }}
+      />
       <button
         type="button"
         aria-expanded={expanded}
         aria-controls={`${id}-details`}
         onClick={onToggle}
-        className="flex w-full items-center gap-3 px-3 py-3 text-left sm:px-3.5"
+        className="flex w-full items-center gap-3 py-3 pr-3 pl-3.5 text-left sm:pr-3.5 sm:pl-4"
       >
         <span className={cn('contents', item.paused && '[&>*]:opacity-55')}>
           <CategoryMark category={item.category} />
@@ -1027,10 +1348,12 @@ function SubscriptionRow({
       {expanded && (
         <div
           id={`${id}-details`}
-          className="grid animate-fade gap-3 border-t border-line px-3 pt-3 pb-3.5 sm:px-3.5"
+          className="grid animate-fade gap-3 border-t border-line pt-3 pr-3 pb-3.5 pl-3.5 sm:pr-3.5 sm:pl-4"
         >
           {editing ? (
             <SubscriptionForm
+              variant="full"
+              contained
               initial={{ ...draftOf(item), next }}
               currency={currency}
               today={today}
@@ -1060,7 +1383,7 @@ function SubscriptionRow({
                     .map((date) => dayText(date, today))
                     .join(', ')}
                 </Detail>
-                <Detail term="Category">{CATEGORY_LABELS[item.category]}</Detail>
+                <Detail term="Kind">{CATEGORY_LABELS[item.category]}</Detail>
                 {trial && (
                   <Detail term="Free trial ends">
                     {dayText(trial, today, true)} · {relativeDay(today, trial)}
@@ -1204,9 +1527,190 @@ function ImportChoice({
   );
 }
 
-/* ---------------- The summary ---------------- */
+/* ---------------- The overview ---------------- */
 
-function SummaryPanel({
+/** A ring of colors, one arc per part, drawn in SVG. */
+function Donut({
+  parts,
+  size = 120,
+  children,
+}: {
+  parts: { id: CategoryId; share: number }[];
+  size?: number;
+  children?: ReactNode;
+}) {
+  const gap = parts.length > 1 ? 1.2 : 0;
+  const starts = parts.map((_, index) =>
+    parts.slice(0, index).reduce((sum, part) => sum + part.share * 100, 0),
+  );
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg viewBox="0 0 120 120" aria-hidden="true" className="size-full -rotate-90">
+        <circle
+          cx="60"
+          cy="60"
+          r="46"
+          fill="none"
+          strokeWidth="15"
+          style={{ stroke: 'var(--color-well)' }}
+        />
+        {parts.map((part, index) => {
+          const length = Math.max(0, part.share * 100 - gap);
+          return (
+            <circle
+              key={part.id}
+              cx="60"
+              cy="60"
+              r="46"
+              fill="none"
+              strokeWidth="15"
+              pathLength={100}
+              strokeDasharray={`${length} ${100 - length}`}
+              strokeDashoffset={-starts[index]}
+              style={{ stroke: LOOK[part.id].color }}
+            />
+          );
+        })}
+      </svg>
+      {children && (
+        <div className="absolute inset-0 grid place-items-center text-center">{children}</div>
+      )}
+    </div>
+  );
+}
+
+function Overview({ summary, currency }: { summary: Summary; currency: Currency }) {
+  const id = useId();
+  const [period, setPeriod] = useState<'month' | 'year'>('month');
+  const money = (amount: number) => formatMoney(amount, currency);
+  const yearly = period === 'year';
+  const parts = yearly
+    ? allocate(
+        summary.yearly,
+        summary.categories.map((part) => part.share),
+      )
+    : summary.categories.map((part) => part.monthly);
+  const biggest = summary.biggest[0];
+
+  return (
+    <Surface
+      as="section"
+      aria-labelledby={`${id}-title`}
+      className="relative isolate grid gap-5 overflow-hidden !p-5 sm:!p-6"
+    >
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 -z-10"
+        style={{
+          background: `radial-gradient(70% 60% at 100% 0%, color-mix(in srgb, ${ACCENT} 16%, transparent), transparent 70%), radial-gradient(60% 50% at 0% 100%, color-mix(in srgb, ${GLOW} 9%, transparent), transparent 70%)`,
+        }}
+      />
+      <div className="flex items-center justify-between gap-3">
+        <h2 id={`${id}-title`} className="label flex items-center gap-2">
+          <span aria-hidden="true" className="size-2 rounded-full" style={{ background: GLOW }} />
+          It all costs
+        </h2>
+        <div
+          role="radiogroup"
+          aria-label="Show the total"
+          className="flex rounded-full bg-well p-1"
+        >
+          {(['month', 'year'] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={period === value}
+              onClick={() => setPeriod(value)}
+              className={cn(
+                'h-9 rounded-full px-3.5 text-[13.5px] font-medium transition-colors',
+                period === value ? 'text-[#12110d]' : 'text-muted hover:text-ink',
+              )}
+              style={period === value ? { background: ACCENT } : undefined}
+            >
+              {value === 'month' ? 'Month' : 'Year'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div aria-live="polite" aria-atomic="true">
+        <p className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+          <span
+            className="font-display text-[50px] leading-[0.9] font-extrabold tracking-[-0.045em] text-ink sm:text-[60px]"
+            style={{ fontVariationSettings: "'wdth' 112" }}
+          >
+            {money(yearly ? summary.yearly : summary.monthly)}
+          </span>
+          <span className="text-[17px] font-medium text-muted">a {period}</span>
+        </p>
+        <p className="mt-2.5 text-[14px] text-muted">
+          That’s{' '}
+          <span className="mono-num font-medium text-ink-2">
+            {money(yearly ? summary.monthly : summary.yearly)}
+          </span>{' '}
+          a {yearly ? 'month' : 'year'}, from {summary.active}{' '}
+          {summary.active === 1 ? 'subscription' : 'subscriptions'}
+          {summary.paused > 0 && ` (${summary.paused} paused, not counted)`}.
+        </p>
+      </div>
+
+      {summary.categories.length > 0 ? (
+        <section aria-label="Where it goes" className="flex items-center gap-5 sm:gap-6">
+          <Donut parts={summary.categories} size={116}>
+            <span>
+              <span className="mono-num block text-[20px] leading-none font-bold text-ink">
+                {summary.categories.length}
+              </span>
+              <span className="mt-1 block text-[11px] text-muted">
+                {summary.categories.length === 1 ? 'kind' : 'kinds'}
+              </span>
+            </span>
+          </Donut>
+          <ul className="grid min-w-0 flex-1 gap-2">
+            {summary.categories.map((part, index) => (
+              <li key={part.id} className="flex min-w-0 items-center gap-2 text-[13.5px]">
+                <span
+                  aria-hidden="true"
+                  className="size-2.5 shrink-0 rounded-full"
+                  style={{ background: LOOK[part.id].color }}
+                />
+                <span className="min-w-0 flex-1 truncate text-ink-2">{part.label}</span>
+                <span className="mono-num shrink-0 text-ink">{money(parts[index])}</span>
+                <span className="mono-num hidden w-9 shrink-0 text-right text-[12px] text-muted min-[400px]:block">
+                  {percent(part.share)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : (
+        <p className="text-[13.5px] text-muted">Everything is paused, so nothing is counted.</p>
+      )}
+
+      {biggest && summary.active > 1 && (
+        <p className="flex items-start gap-2.5 rounded-[14px] bg-well px-3.5 py-3 text-[13.5px] leading-snug text-ink-2">
+          <Icon name="target" size={16} className="mt-0.5 shrink-0 text-signal-ink" />
+          <span>
+            Biggest: <span className="font-semibold text-ink">{biggest.name}</span>,{' '}
+            <span className="mono-num">{money(biggest.yearly)}</span> a year,{' '}
+            {percent(biggest.share)} of it all.
+          </span>
+        </p>
+      )}
+
+      {summary.averaged && (
+        <p className="text-[12.5px] leading-relaxed text-muted">
+          Weekly and daily charges are averaged over a year: a weekly charge counts about 4.35 times
+          a month.
+        </p>
+      )}
+    </Surface>
+  );
+}
+
+/** What charges next, as a line of days: every active subscription's next charge, soonest first. */
+function Timeline({
   summary,
   items,
   today,
@@ -1218,268 +1722,151 @@ function SummaryPanel({
   currency: Currency;
 }) {
   const id = useId();
-  const [allUpcoming, setAllUpcoming] = useState(false);
+  const [all, setAll] = useState(false);
   const money = (amount: number) => formatMoney(amount, currency);
-  const byId = new Map(items.map((item) => [item.id, item]));
-  const upcoming = allUpcoming ? summary.upcoming : summary.upcoming.slice(0, 5);
-  const empty = items.length === 0;
+  const inWindow = new Map(summary.upcoming.map((charge) => [charge.id, charge.count]));
+  const charges = items
+    .filter((item) => !item.paused)
+    .map((item) => ({ item, date: nextCharge(item, today) }))
+    .sort((a, b) => a.date.localeCompare(b.date) || b.item.cost - a.item.cost);
+  const shown = all ? charges : charges.slice(0, 5);
+
+  if (!charges.length && !summary.trials.length) return null;
 
   return (
-    <aside
-      aria-label="What it all costs"
-      className="grid gap-4 lg:sticky lg:top-24 lg:col-start-2 lg:row-span-2 lg:row-start-1"
-    >
-      <Surface className="grid gap-5 !p-5 sm:!p-6">
-        <div aria-live="polite" aria-atomic="true">
-          <p className="label flex items-center gap-2">
-            <span
-              aria-hidden="true"
-              className="size-2 rounded-full bg-[var(--accent,var(--color-signal))]"
-            />
-            Your subscriptions cost
-          </p>
-          <p className="mt-2.5 flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-            <span
-              className={cn(
-                'font-display text-[46px] leading-[0.9] font-extrabold tracking-[-0.045em] sm:text-[56px]',
-                empty ? 'text-faint' : 'text-ink',
-              )}
-              style={{ fontVariationSettings: "'wdth' 112" }}
-            >
-              {money(summary.monthly)}
-            </span>
-            <span className="text-[16px] font-medium text-muted">a month</span>
-          </p>
-          <p className="mt-3 flex flex-wrap items-baseline gap-x-2">
-            <span
-              className={cn(
-                'font-display text-[28px] leading-none font-bold tracking-[-0.03em]',
-                empty ? 'text-faint' : 'text-ink-2',
-              )}
-              style={{ fontVariationSettings: "'wdth' 108" }}
-            >
-              {money(summary.yearly)}
-            </span>
-            <span className="text-[14px] text-muted">a year</span>
-          </p>
-          {!empty && (
-            <p className="mt-3 text-[13px] text-muted">
-              {summary.active} counted
-              {summary.paused > 0 && ` · ${summary.paused} paused, not counted`}
-            </p>
-          )}
-        </div>
-        {empty ? (
-          <p className="text-[13.5px] leading-relaxed text-muted">
-            Add what you pay for. Weekly, monthly, yearly: it all turns into one honest monthly
-            number, plus what charges next.
-          </p>
-        ) : (
-          summary.averaged && (
-            <p className="text-[12.5px] leading-relaxed text-muted">
-              Weekly and daily charges are averaged over a year: a weekly charge counts about 4.35
-              times a month.
-            </p>
-          )
-        )}
+    <Surface as="section" aria-labelledby={`${id}-title`} className="grid gap-4 !p-5 sm:!p-6">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <Label id={`${id}-title`}>Charges next</Label>
+        <p className="text-[13px] text-muted">
+          Next {SOON_DAYS} days:{' '}
+          <span className="mono-num font-semibold text-ink">{money(summary.upcomingTotal)}</span>
+        </p>
+      </div>
 
-        {!empty && (
-          <section aria-labelledby={`${id}-soon`} className="grid gap-3 border-t border-line pt-5">
-            <div className="flex items-baseline justify-between gap-3">
-              <Label id={`${id}-soon`}>Next {SOON_DAYS} days</Label>
-              <p className="mono-num text-[13px] text-ink-2">
-                {money(summary.upcomingTotal)}
-                <span className="text-muted">
-                  {' '}
-                  · {summary.upcomingCount} {summary.upcomingCount === 1 ? 'charge' : 'charges'}
-                </span>
-              </p>
-            </div>
-            {summary.upcoming.length === 0 ? (
-              <p className="text-[13.5px] text-muted">
-                Nothing charges in the next {SOON_DAYS} days.
-              </p>
-            ) : (
-              <ul className="row-divide">
-                {upcoming.map((charge) => {
-                  const [, month, day] = charge.date.split('-');
-                  return (
-                    <li key={charge.id} className="flex items-center gap-3 py-2.5">
-                      <span
-                        aria-hidden="true"
-                        className="grid w-11 shrink-0 justify-items-center rounded-[10px] bg-well py-1.5"
-                      >
-                        <span className="text-[10px] font-semibold tracking-[0.06em] text-muted uppercase">
-                          {MONTHS[Number(month) - 1]}
-                        </span>
-                        <span className="font-display text-[17px] leading-none font-bold text-ink">
-                          {Number(day)}
-                        </span>
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[14.5px] font-medium text-ink">
-                          {charge.name}
-                        </span>
-                        <span className="block text-[12.5px] text-muted">
-                          <span className="sr-only">{dayText(charge.date, today, true)}, </span>
-                          {relativeDay(today, charge.date)}
-                          {charge.count > 1 &&
-                            ` · then ${charge.count - 1} more ${charge.count === 2 ? 'time' : 'times'}`}
-                        </span>
-                      </span>
-                      <span className="shrink-0 text-right">
-                        <span className="mono-num block text-[14.5px] font-semibold text-ink">
-                          {money(charge.amount)}
-                        </span>
-                        {charge.count > 1 && (
-                          <span className="mono-num block text-[11.5px] text-muted">
-                            {money(charge.amount * charge.count)} in all
-                          </span>
-                        )}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-            {summary.upcoming.length > 5 && (
-              <button
-                type="button"
-                aria-expanded={allUpcoming}
-                onClick={() => setAllUpcoming((value) => !value)}
-                className="inline-flex min-h-11 items-center gap-1.5 justify-self-start text-[13.5px] font-medium text-ink-2 hover:text-ink lg:min-h-0"
+      {summary.trials.length > 0 && (
+        <ul className="grid gap-2">
+          {summary.trials.map((trial) => {
+            const cancel = trial.item.cancelUrl ? webLink(trial.item.cancelUrl) : null;
+            return (
+              <li
+                key={trial.id}
+                className="grid gap-1 rounded-[14px] bg-caution-soft px-3.5 py-3 text-[13.5px] text-caution"
               >
-                <Icon
-                  name="chevron-down"
-                  size={15}
-                  className={cn('transition-transform', allUpcoming && 'rotate-180')}
-                />
-                {allUpcoming ? 'Show fewer' : `Show all ${summary.upcoming.length}`}
-              </button>
-            )}
-          </section>
-        )}
-
-        {summary.trials.length > 0 && (
-          <section aria-labelledby={`${id}-trials`} className="grid gap-2.5">
-            <Label id={`${id}-trials`}>Free trials ending soon</Label>
-            <ul className="grid gap-2">
-              {summary.trials.map((trial) => {
-                const cancel = trial.item.cancelUrl ? webLink(trial.item.cancelUrl) : null;
-                return (
-                  <li
-                    key={trial.id}
-                    className="grid gap-1 rounded-[14px] bg-caution-soft px-3.5 py-3 text-[13.5px] text-caution"
-                  >
-                    <p className="flex items-start gap-2 font-semibold">
-                      <Icon name="bell" size={15} className="mt-0.5 shrink-0" />
-                      <span>
-                        {trial.name} turns paid{' '}
-                        {trial.days === 0 ? 'today' : `on ${dayText(trial.date, today)}`}
-                        {trial.days > 0 && ` (${relativeDay(today, trial.date)})`}
-                      </span>
-                    </p>
-                    <p className="pl-[23px] leading-relaxed">
-                      Then {priceText(trial.item, currency)}. Cancel before then if you don’t want
-                      to keep it.
-                      {cancel && (
-                        <>
-                          {' '}
-                          <a
-                            href={cancel}
-                            target="_blank"
-                            rel="noopener noreferrer nofollow"
-                            className="font-semibold underline underline-offset-2"
-                          >
-                            How to cancel
-                            <span className="sr-only"> {trial.name} (opens in a new tab)</span>
-                          </a>
-                        </>
-                      )}
-                    </p>
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-        )}
-      </Surface>
-
-      {summary.categories.length > 0 && (
-        <Surface className="grid gap-5 !p-5 sm:!p-6">
-          <section aria-labelledby={`${id}-where`} className="grid gap-3.5">
-            <div className="flex items-baseline justify-between gap-3">
-              <Label id={`${id}-where`}>Where it goes</Label>
-              <span className="text-[12px] text-muted">a month</span>
-            </div>
-            <ul className="grid gap-3">
-              {summary.categories.map((part) => (
-                <li key={part.id} className="grid gap-1.5">
-                  <div className="flex items-baseline justify-between gap-3 text-[13.5px]">
-                    <span className="flex min-w-0 items-center gap-2 text-ink-2">
-                      <span
-                        aria-hidden="true"
-                        className="size-2.5 shrink-0 rounded-full"
-                        style={{ background: LOOK[part.id].color }}
-                      />
-                      <span className="truncate">{part.label}</span>
-                    </span>
-                    <span className="mono-num shrink-0 text-ink">
-                      {money(part.monthly)}
-                      <span className="text-muted"> · {percent(part.share)}</span>
-                    </span>
-                  </div>
-                  <div aria-hidden="true" className="h-2 overflow-hidden rounded-full bg-well">
-                    <div
-                      className="h-full rounded-full"
-                      style={{
-                        width: `${Math.max(1.5, part.share * 100)}%`,
-                        background: LOOK[part.id].color,
-                      }}
-                    />
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
-
-          {summary.biggest.length > 1 && (
-            <section
-              aria-labelledby={`${id}-biggest`}
-              className="grid gap-3 border-t border-line pt-5"
-            >
-              <Label id={`${id}-biggest`}>Biggest costs</Label>
-              <ol className="grid gap-2.5">
-                {summary.biggest.map((entry) => {
-                  const item = byId.get(entry.id);
-                  return (
-                    <li key={entry.id} className="flex items-center gap-3">
-                      {item && <CategoryMark category={item.category} size="sm" />}
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[14.5px] font-medium text-ink">
-                          {entry.name}
-                        </span>
-                        <span className="block text-[12.5px] text-muted">
-                          {percent(entry.share)} of the total
-                        </span>
-                      </span>
-                      <span className="shrink-0 text-right">
-                        <span className="mono-num block text-[14.5px] font-semibold text-ink">
-                          {money(entry.monthly)}
-                          <span className="text-[12px] font-normal text-muted"> a month</span>
-                        </span>
-                        <span className="mono-num block text-[11.5px] text-muted">
-                          {money(entry.yearly)} a year
-                        </span>
-                      </span>
-                    </li>
-                  );
-                })}
-              </ol>
-            </section>
-          )}
-        </Surface>
+                <p className="flex items-start gap-2 font-semibold">
+                  <Icon name="bell" size={15} className="mt-0.5 shrink-0" />
+                  <span>
+                    {trial.name} turns paid{' '}
+                    {trial.days === 0 ? 'today' : `on ${dayText(trial.date, today)}`}
+                    {trial.days > 0 && ` (${relativeDay(today, trial.date)})`}
+                  </span>
+                </p>
+                <p className="pl-[23px] leading-relaxed">
+                  Then {priceText(trial.item, currency)}. Cancel before then if you don’t want to
+                  keep it.
+                  {cancel && (
+                    <>
+                      {' '}
+                      <a
+                        href={cancel}
+                        target="_blank"
+                        rel="noopener noreferrer nofollow"
+                        className="font-semibold underline underline-offset-2"
+                      >
+                        How to cancel
+                        <span className="sr-only"> {trial.name} (opens in a new tab)</span>
+                      </a>
+                    </>
+                  )}
+                </p>
+              </li>
+            );
+          })}
+        </ul>
       )}
-    </aside>
+
+      <ol className="grid">
+        {shown.map(({ item, date }, index) => {
+          const [, month, day] = date.split('-');
+          const days = daysBetween(today, date);
+          const soon = days <= 1;
+          const count = inWindow.get(item.id) ?? 0;
+          const first = index === 0;
+          const last = index === shown.length - 1;
+          return (
+            <li
+              key={item.id}
+              className="grid grid-cols-[44px_18px_minmax(0,1fr)_auto] items-center gap-x-2.5"
+            >
+              <span
+                aria-hidden="true"
+                className={cn(
+                  'grid justify-items-center rounded-[11px] py-1.5',
+                  soon ? 'text-[#12110d]' : 'bg-well',
+                )}
+                style={soon ? { background: ACCENT } : undefined}
+              >
+                <span
+                  className={cn(
+                    'text-[10px] font-semibold tracking-[0.06em] uppercase',
+                    soon ? 'text-[#12110d]/70' : 'text-muted',
+                  )}
+                >
+                  {MONTHS[Number(month) - 1]}
+                </span>
+                <span
+                  className={cn(
+                    'font-display text-[17px] leading-none font-bold',
+                    !soon && 'text-ink',
+                  )}
+                >
+                  {Number(day)}
+                </span>
+              </span>
+              <span aria-hidden="true" className="relative flex h-full min-h-[60px] justify-center">
+                <span
+                  className="absolute left-1/2 w-px -translate-x-1/2 bg-line-strong"
+                  style={{ top: first ? '50%' : 0, bottom: last ? '50%' : 0 }}
+                />
+                <span
+                  className="relative my-auto size-3 rounded-full shadow-[0_0_0_3px_var(--color-surface)]"
+                  style={{ background: LOOK[item.category].color }}
+                />
+              </span>
+              <span className="min-w-0 py-2.5">
+                <span className="block truncate text-[14.5px] font-medium text-ink">
+                  {item.name}
+                </span>
+                <span className="block text-[12.5px] text-muted">
+                  <span className="sr-only">{dayText(date, today, true)}, </span>
+                  {days < 7 && days > 1
+                    ? `${formatDay(date, { weekday: true }).split(',')[0]}, ${relativeDay(today, date)}`
+                    : relativeDay(today, date)}
+                  {count > 1 && ` · ${count}× in ${SOON_DAYS} days`}
+                </span>
+              </span>
+              <span className="mono-num shrink-0 text-right text-[14.5px] font-semibold text-ink">
+                {money(item.cost)}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+
+      {charges.length > 5 && (
+        <button
+          type="button"
+          aria-expanded={all}
+          onClick={() => setAll((value) => !value)}
+          className="inline-flex min-h-11 items-center gap-1.5 justify-self-start text-[13.5px] font-medium text-ink-2 hover:text-ink lg:min-h-0"
+        >
+          <Icon
+            name="chevron-down"
+            size={15}
+            className={cn('transition-transform', all && 'rotate-180')}
+          />
+          {all ? 'Show fewer' : `Show all ${charges.length}`}
+        </button>
+      )}
+    </Surface>
   );
 }
