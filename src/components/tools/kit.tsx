@@ -764,7 +764,7 @@ export function ActionBar({ children, className }: { children: ReactNode; classN
   return (
     <div
       className={cn(
-        'sticky bottom-0 z-20 -mx-4 mt-5 bg-gradient-to-t from-surface via-surface/95 to-transparent px-4 pt-5 pb-[max(12px,env(safe-area-inset-bottom))] sm:static sm:mx-0 sm:bg-none sm:px-0 sm:pt-0 sm:pb-0',
+        'sticky bottom-0 z-20 mt-5 bg-gradient-to-t from-surface via-surface/95 to-transparent pt-5 pb-[max(12px,env(safe-area-inset-bottom))] sm:static sm:bg-none sm:pt-0 sm:pb-0',
         className,
       )}
     >
