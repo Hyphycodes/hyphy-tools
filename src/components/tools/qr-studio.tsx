@@ -1,7 +1,7 @@
 'use client';
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { cn } from '@/components/ui/cn';
-import { Field, Input, Textarea } from '@/components/ui/form';
+import { Input } from '@/components/ui/form';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { download, slugName } from '@/lib/files/download';
 import { qrMatrix, type QrLevel } from '@/lib/tools/qr';
@@ -9,37 +9,48 @@ import {
   describeContent,
   emptyContact,
   isWebLink,
-  normalizeLink,
   payloadFor,
-  type Contact,
   type QrContent,
   type QrKind,
 } from '@/lib/tools/qr-payloads';
 import {
   captionBand,
+  contrast,
   drawShapes,
   LOGO_MAX,
   LOGO_MIN,
+  luminance,
   qrShapes,
-  scanRisks,
   shapesToSvg,
   type CornerStyle,
   type DotStyle,
   type QrLogo,
   type QrLook,
-  type Shape,
 } from '@/lib/tools/qr-style';
 import {
   ActionBar,
   ActionButton,
-  ChoiceCards,
+  Advanced,
   Choices,
-  MoreOptions,
-  Note,
   SampleButton,
-  StartPanel,
-  Surface,
+  Stage,
+  useReducedMotion,
 } from './kit';
+import { ContentFields, type Fields } from './qr-studio-fields';
+import {
+  KINDS,
+  KindTiles,
+  loadImage,
+  logoFrom,
+  LookThumb,
+  QrShapes,
+  Stamp,
+  StudioArt,
+  StyleTiles,
+  SwatchRow,
+  Viewfinder,
+  type Swatch,
+} from './qr-studio-parts';
 
 /*
  * QR Studio: codes for links, Wi-Fi, contacts, calls, texts and email — styled, and still
@@ -47,80 +58,10 @@ import {
  * contrast checks); new here are the kinds, the looks, logos, and guardrails that keep a styled
  * code readable. Everything is drawn on the device; nothing is uploaded or tracked.
  *
- * It walks one path: pick what the code opens, fill in just that, pick a look, download. On a
- * phone the code draws right under what you type, and the download stays under your thumb.
+ * One tap says what the code is for; from then on the code itself is the screen. It draws as you
+ * type, every style is a picture you tap, a logo can be dropped straight onto it, and downloading
+ * stamps it: ready to scan. The technical settings wait under Advanced.
  */
-
-const ACCENT = 'var(--accent, var(--color-ink))';
-
-type Kind = {
-  value: QrKind;
-  label: string;
-  icon: IconName;
-  hint: string;
-  title: string;
-  lead: string;
-};
-
-const KINDS: Kind[] = [
-  {
-    value: 'link',
-    label: 'Link',
-    icon: 'link',
-    hint: 'A site, menu or booking page',
-    title: 'Which link?',
-    lead: 'Paste it or type it. We’ll add the https:// for you.',
-  },
-  {
-    value: 'wifi',
-    label: 'Wi-Fi',
-    icon: 'wifi',
-    hint: 'Guests join without typing',
-    title: 'Which network?',
-    lead: 'Guests point their camera and they’re on. Anyone who can see it can join.',
-  },
-  {
-    value: 'contact',
-    label: 'Contact',
-    icon: 'contact',
-    hint: 'Saves your details',
-    title: 'Whose contact?',
-    lead: 'Scanning offers to save it. Fill in only what people need.',
-  },
-  {
-    value: 'phone',
-    label: 'Call',
-    icon: 'phone',
-    hint: 'Rings your number',
-    title: 'Which number?',
-    lead: 'Include the country code for people abroad.',
-  },
-  {
-    value: 'sms',
-    label: 'Text message',
-    icon: 'sms',
-    hint: 'Opens a text to you',
-    title: 'Who should they text?',
-    lead: 'Their messages app opens, addressed to you.',
-  },
-  {
-    value: 'email',
-    label: 'Email',
-    icon: 'mail',
-    hint: 'Starts an email to you',
-    title: 'Where should emails go?',
-    lead: 'Their mail app opens with your address filled in.',
-  },
-  {
-    value: 'text',
-    label: 'Plain text',
-    icon: 'file-text',
-    hint: 'Shows a short note',
-    title: 'What should it say?',
-    lead: 'Shown as plain text when scanned.',
-  },
-];
-const PICKABLE = KINDS.filter((kind) => kind.value !== 'text');
 
 type LookPreset = { name: string } & Omit<QrLook, 'margin'>;
 
@@ -180,67 +121,72 @@ const CORNERS: { value: CornerStyle; label: string }[] = [
   { value: 'rounded', label: 'Rounded' },
   { value: 'circle', label: 'Round' },
 ];
-const LEVELS: { value: QrLevel; label: string }[] = [
-  { value: 'L', label: 'Light' },
-  { value: 'M', label: 'Standard' },
-  { value: 'Q', label: 'Sturdy' },
-  { value: 'H', label: 'Sturdiest' },
+
+const CODE_COLORS: Swatch[] = [
+  { value: '#12110d', name: 'Ink' },
+  { value: '#1d2b3a', name: 'Slate' },
+  { value: '#083f3b', name: 'Deep teal' },
+  { value: '#101a3f', name: 'Midnight' },
+  { value: '#5a1043', name: 'Plum' },
+  { value: '#0f3d2e', name: 'Forest' },
+  { value: '#3a1508', name: 'Espresso' },
 ];
-const SIZES: { value: string; label: string; hint: string }[] = [
-  { value: '512', label: 'Small', hint: '512' },
-  { value: '1024', label: 'Medium', hint: '1024' },
-  { value: '2048', label: 'Large', hint: '2048' },
+const BACKGROUNDS: Swatch[] = [
+  { value: '#ffffff', name: 'White' },
+  { value: '#e9fbf8', name: 'Aqua' },
+  { value: '#fff6d8', name: 'Butter' },
+  { value: '#fff0f7', name: 'Blush' },
+  { value: '#eef2ff', name: 'Ice' },
+  { value: '#f1f8ec', name: 'Mint' },
+  { value: '', name: 'See-through' },
 ];
-const CAPTIONS: Partial<Record<QrKind, string[]>> = {
+const CORNER_COLORS: Swatch[] = [
+  { value: '', name: 'Same as the code' },
+  { value: '#0b8a80', name: 'Teal' },
+  { value: '#2f55d4', name: 'Blue' },
+  { value: '#d8327f', name: 'Pink' },
+  { value: '#2f7d4f', name: 'Green' },
+  { value: '#c2410c', name: 'Orange' },
+];
+
+const LEVELS: { value: QrLevel; label: string; hint: string }[] = [
+  { value: 'L', label: 'Low', hint: '7%' },
+  { value: 'M', label: 'Medium', hint: '15%' },
+  { value: 'Q', label: 'Quartile', hint: '25%' },
+  { value: 'H', label: 'High', hint: '30%' },
+];
+const SIZES: { value: string; label: string }[] = [
+  { value: '512', label: '512 px' },
+  { value: '1024', label: '1024 px' },
+  { value: '2048', label: '2048 px' },
+];
+const CAPTIONS: Record<QrKind, string[]> = {
   link: ['Scan for the menu', 'Scan to book', 'Scan me'],
   wifi: ['Scan to join our Wi-Fi', 'Guest Wi-Fi'],
   contact: ['Scan to save my number', 'Save my contact'],
-  phone: ['Scan to call us'],
-  sms: ['Scan to text us'],
-  email: ['Scan to email us'],
+  phone: ['Scan to call us', 'Scan me'],
+  sms: ['Scan to text us', 'Scan me'],
+  email: ['Scan to email us', 'Scan me'],
+  text: ['Scan me'],
 };
 
 // What the empty stage shows: a real code, faded, in the current look.
 const GHOST = 'https://hyphy.example/your-code-will-look-like-this';
-const THUMB = 'hyphy.example';
 
-type Wifi = { ssid: string; password: string; security: 'WPA' | 'WEP' | 'nopass'; hidden: boolean };
 type Code = { state: 'empty' } | { state: 'too-long' } | { state: 'ready'; matrix: boolean[][] };
+type Panel = 'content' | 'style' | 'logo' | 'words';
+type Status = { text: string; sig: string; tone: 'done' | 'quiet' | 'problem' };
+type Risk = { text: string; fix?: { label: string; apply: () => void } };
 
-/** Draws a logo file onto a square PNG, at most 512 px: raster only, so an SVG can't carry anything else. */
-async function logoFrom(file: File): Promise<string> {
-  if (file.size > 5 * 1024 * 1024) throw new Error('That logo is over 5 MB. Try a smaller file.');
-  const url = URL.createObjectURL(file);
-  try {
-    const image = new Image();
-    image.decoding = 'async';
-    image.src = url;
-    await image.decode();
-    const side = Math.min(512, Math.max(image.naturalWidth, image.naturalHeight) || 512);
-    const canvas = document.createElement('canvas');
-    canvas.width = side;
-    canvas.height = side;
-    const context = canvas.getContext('2d');
-    if (!context) throw new Error('This browser can’t read that logo.');
-    const ratio = Math.min(side / image.naturalWidth, side / image.naturalHeight);
-    const width = image.naturalWidth * ratio;
-    const height = image.naturalHeight * ratio;
-    context.drawImage(image, (side - width) / 2, (side - height) / 2, width, height);
-    return canvas.toDataURL('image/png');
-  } catch (error) {
-    throw error instanceof Error && error.message.includes('logo')
-      ? error
-      : new Error('That file couldn’t be read as an image. Try a PNG, JPG or SVG.');
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
-function loadImage(src: string) {
-  const image = new Image();
-  image.src = src;
-  return image.decode().then(() => image);
-}
+const emptyFields: Fields = {
+  url: '',
+  text: '',
+  wifi: { ssid: '', password: '', security: 'WPA', hidden: false },
+  contact: emptyContact,
+  phone: '',
+  sms: { number: '', message: '' },
+  email: { to: '', subject: '', body: '' },
+};
 
 /** What scanning does, in a few words, under the code. */
 function opensLine(content: QrContent) {
@@ -264,308 +210,81 @@ function opensLine(content: QrContent) {
   }
 }
 
-/** The code as React elements, from the same shapes the downloads use. */
-function QrShapes({ shapes }: { shapes: Shape[] }) {
-  return (
-    <>
-      {shapes.map((shape, index) => {
-        switch (shape.type) {
-          case 'rect':
-            return (
-              <rect
-                key={index}
-                x={shape.x}
-                y={shape.y}
-                width={shape.w}
-                height={shape.h}
-                rx={shape.r}
-                fill={shape.fill}
-              />
-            );
-          case 'circle':
-            return <circle key={index} cx={shape.cx} cy={shape.cy} r={shape.r} fill={shape.fill} />;
-          case 'ring':
-            return (
-              <rect
-                key={index}
-                x={shape.x}
-                y={shape.y}
-                width={shape.size}
-                height={shape.size}
-                rx={shape.r}
-                fill="none"
-                stroke={shape.stroke}
-                strokeWidth={shape.width}
-              />
-            );
-          case 'image':
-            return (
-              <image
-                key={index}
-                x={shape.x}
-                y={shape.y}
-                width={shape.size}
-                height={shape.size}
-                href={shape.href}
-                preserveAspectRatio="xMidYMid meet"
-              />
-            );
-        }
-      })}
-    </>
-  );
-}
-
-/** Motion for the stage: a scan line and a slow float. Transform and opacity only. */
-function StageMotion() {
-  return (
-    <style>{`
-      @keyframes qr-sweep { from { transform: translateY(-100%); } to { transform: translateY(400%); } }
-      @keyframes qr-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
-      .qr-sweep { animation: qr-sweep 2.8s cubic-bezier(.45,0,.55,1) infinite alternate; }
-      .qr-float { animation: qr-float 4.5s ease-in-out infinite; }
-      @media (prefers-reduced-motion: reduce) {
-        .qr-sweep { animation: none; opacity: 0; }
-        .qr-float { animation: none; }
-      }
-    `}</style>
-  );
-}
-
-/** Viewfinder corners around the code, in the tool's color. */
-function Viewfinder({ inset = '-10px' }: { inset?: string }) {
-  const corner = 'absolute size-6 border-[2.5px] sm:size-7';
-  const style = { borderColor: ACCENT };
-  return (
-    <span aria-hidden="true" className="pointer-events-none absolute" style={{ inset }}>
-      <span
-        className={cn(corner, 'top-0 left-0 rounded-tl-[12px] border-r-0 border-b-0')}
-        style={style}
-      />
-      <span
-        className={cn(corner, 'top-0 right-0 rounded-tr-[12px] border-b-0 border-l-0')}
-        style={style}
-      />
-      <span
-        className={cn(corner, 'bottom-0 left-0 rounded-bl-[12px] border-t-0 border-r-0')}
-        style={style}
-      />
-      <span
-        className={cn(corner, 'right-0 bottom-0 rounded-br-[12px] border-t-0 border-l-0')}
-        style={style}
-      />
-    </span>
-  );
-}
-
-/** The first screen's picture: a code in the tool's color, being read, with what it can open around it. */
-function KindArt() {
-  const shapes = useMemo(
-    () =>
-      qrShapes(
-        qrMatrix(THUMB, 'L'),
-        { dot: 'rounded', corner: 'rounded', fg: 'currentColor', bg: '', corners: '', margin: 0 },
-        null,
-      ),
-    [],
-  );
-  const bubbles: { icon: IconName; className: string; delay: string }[] = [
-    { icon: 'link', className: '-left-14 top-1', delay: '0s' },
-    { icon: 'wifi', className: '-right-14 top-5', delay: '-1.2s' },
-    { icon: 'contact', className: '-left-11 bottom-2', delay: '-2.4s' },
-    { icon: 'mail', className: '-right-11 bottom-0', delay: '-3.3s' },
-  ];
-  return (
-    <div aria-hidden="true" className="relative mx-auto size-[124px] sm:size-[140px]">
-      <Viewfinder inset="0" />
-      <div
-        className="absolute inset-3.5 overflow-hidden rounded-[12px] p-1.5"
-        style={{ color: ACCENT, background: `color-mix(in srgb, ${ACCENT} 8%, transparent)` }}
-      >
-        <svg viewBox={`0 0 ${shapes.total} ${shapes.total}`} className="block size-full">
-          <QrShapes shapes={shapes.shapes} />
-        </svg>
-        <span
-          className="qr-sweep absolute inset-x-0 top-0 h-1/4"
-          style={{
-            background: `linear-gradient(to bottom, transparent, color-mix(in srgb, var(--glow, ${ACCENT}) 45%, transparent), transparent)`,
-          }}
-        />
-      </div>
-      {bubbles.map((bubble) => (
-        <span
-          key={bubble.icon}
-          className={cn(
-            'qr-float absolute grid size-9 place-items-center rounded-full bg-surface shadow-card',
-            bubble.className,
-          )}
-          style={{ color: ACCENT, animationDelay: bubble.delay }}
-        >
-          <Icon name={bubble.icon} size={16} />
-        </span>
-      ))}
-    </div>
-  );
-}
-
-/** A tiny rendering of each dot and corner style, drawn by the real renderer. */
-const SAMPLE = [
-  [true, true, false, true],
-  [false, true, true, true],
-  [true, true, false, false],
-  [true, false, true, true],
-];
-
-function StyleSample({ dot, corner }: { dot?: DotStyle; corner?: CornerStyle }) {
-  const shapes = useMemo(() => {
-    // A 21-module code with a 4×4 patch of data in the middle, clear of the corner squares.
-    const matrix = [...Array(21)].map((_, row) =>
-      [...Array(21)].map(
-        (__, col) => row >= 8 && row < 12 && col >= 8 && col < 12 && SAMPLE[row - 8][col - 8],
-      ),
-    );
-    const { shapes: all } = qrShapes(
-      matrix,
-      {
-        dot: dot ?? 'square',
-        corner: corner ?? 'square',
-        fg: 'currentColor',
-        bg: '',
-        corners: '',
-        margin: 0,
-      },
-      null,
-    );
-    const inPatch = (shape: Shape) =>
-      shape.type === 'circle'
-        ? shape.cx > 8 && shape.cx < 12 && shape.cy > 8 && shape.cy < 12
-        : 'x' in shape && shape.x >= 8 && shape.x < 12 && shape.y >= 8 && shape.y < 12;
-    const inCorner = (shape: Shape) =>
-      shape.type === 'circle'
-        ? shape.cx < 7 && shape.cy < 7
-        : 'x' in shape && shape.x < 7 && shape.y < 7;
-    return all.filter(dot ? inPatch : inCorner);
-  }, [dot, corner]);
-  return (
-    <svg viewBox={dot ? '8 8 4 4' : '0 0 7 7'} className="size-[18px]" aria-hidden="true">
-      <QrShapes shapes={shapes} />
-    </svg>
-  );
-}
-
-/** A small code in a preset's look: the swatch is the result. */
-function LookThumb({ look }: { look: LookPreset }) {
-  const shapes = useMemo(
-    () => qrShapes(qrMatrix(THUMB, 'L'), { ...look, margin: 1 }, null),
-    [look],
-  );
-  return (
-    <svg
-      viewBox={`0 0 ${shapes.total} ${shapes.total}`}
-      className="block aspect-square w-full rounded-[10px]"
-      style={{ background: look.bg }}
-      aria-hidden="true"
-    >
-      <QrShapes shapes={shapes.shapes} />
-    </svg>
-  );
-}
-
-function Choice<T extends string>({
-  value,
-  options,
-  onChange,
+/** A labeled group of controls inside a section. */
+function Group({
   label,
-  render,
+  children,
+  aside,
 }: {
-  value: T;
-  options: { value: T; label: string }[];
-  onChange: (value: T) => void;
   label: string;
-  render?: (value: T) => ReactNode;
+  children: ReactNode;
+  aside?: ReactNode;
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-2">
-      {options.map((option) => {
-        const on = option.value === value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            role="radio"
-            aria-checked={on}
-            onClick={() => onChange(option.value)}
-            className={cn(
-              'flex h-11 items-center gap-2 rounded-full px-3.5 text-[13.5px] font-medium transition-colors lg:h-10',
-              on ? 'text-[#12110d]' : 'bg-well text-ink-2 hover:bg-ink/10 hover:text-ink',
-            )}
-            style={on ? { background: ACCENT } : undefined}
-          >
-            {render?.(option.value)}
-            {option.label}
-          </button>
-        );
-      })}
+    <div className="grid min-w-0 content-start gap-2.5">
+      <p className="flex items-center justify-between gap-3 text-[13px] font-semibold text-ink-2">
+        {label}
+        {aside}
+      </p>
+      {children}
     </div>
   );
 }
 
-/** An optional field, folded to one line until it's wanted (or already has something in it). */
-function Extra({
-  label,
-  filled,
+/** One part of the controls: a tab on a phone, a section with its heading on a desktop. */
+function Section({
+  id,
+  shown,
+  title,
+  icon,
   children,
 }: {
-  label: string;
-  filled: boolean;
+  id: string;
+  shown: boolean;
+  title: string;
+  icon: IconName;
   children: ReactNode;
 }) {
-  const [open, setOpen] = useState(filled);
-  const box = useRef<HTMLDivElement>(null);
-  // Once something's in it, it stays open.
-  if (filled && !open) setOpen(true);
-  if (open)
-    return (
-      <div ref={box} className="grid animate-rise gap-3">
-        {children}
-      </div>
-    );
   return (
-    <button
-      type="button"
-      onClick={() => {
-        setOpen(true);
-        requestAnimationFrame(() =>
-          box.current?.querySelector<HTMLElement>('input, textarea')?.focus(),
-        );
-      }}
-      className="-ml-1 flex min-h-11 items-center gap-2 self-start rounded-full px-1 text-[14px] font-medium text-signal-ink transition-colors hover:text-ink"
+    <section
+      id={id}
+      role="tabpanel"
+      aria-labelledby={`${id}-title`}
+      className={cn(
+        'min-w-0 gap-5 lg:grid lg:py-6 lg:first:pt-1',
+        shown ? 'fx-rise grid lg:animate-none' : 'hidden',
+      )}
     >
-      <span className="grid size-6 place-items-center rounded-full bg-signal-soft">
-        <Icon name="plus" size={14} />
-      </span>
-      {label}
-    </button>
+      <h3
+        id={`${id}-title`}
+        className="hidden items-center gap-2.5 font-display text-[18px] font-bold tracking-[-0.015em] text-ink lg:flex"
+      >
+        <span
+          className="grid size-8 place-items-center rounded-[10px] text-[var(--accent-ink,var(--color-ink))]"
+          style={{
+            background: 'color-mix(in srgb, var(--accent, var(--color-ink)) 20%, transparent)',
+          }}
+        >
+          <Icon name={icon} size={16} />
+        </span>
+        {title}
+      </h3>
+      {children}
+    </section>
   );
 }
-
-const quiet = { autoCapitalize: 'off', autoCorrect: 'off', spellCheck: false } as const;
 
 export function QrStudio() {
   const id = useId();
+  const idFor = useCallback((name: string) => `${id}-${name}`, [id]);
+  const reduced = useReducedMotion();
   const [kind, setKind] = useState<QrKind | null>(null);
-  const [url, setUrl] = useState('');
-  const [text, setText] = useState('');
-  const [wifi, setWifi] = useState<Wifi>({
-    ssid: '',
-    password: '',
-    security: 'WPA',
-    hidden: false,
-  });
-  const [contact, setContact] = useState<Contact>(emptyContact);
-  const [phone, setPhone] = useState('');
-  const [sms, setSms] = useState({ number: '', message: '' });
-  const [email, setEmail] = useState({ to: '', subject: '', body: '' });
+  const [fields, setFields] = useState<Fields>(emptyFields);
+  const set = useCallback(
+    <K extends keyof Fields>(key: K, value: Fields[K]) =>
+      setFields((current) => ({ ...current, [key]: value })),
+    [],
+  );
   const [look, setLook] = useState<QrLook>({
     dot: 'square',
     corner: 'square',
@@ -579,8 +298,12 @@ export function QrStudio() {
   const [chosenLevel, setChosenLevel] = useState<QrLevel>('M');
   const [caption, setCaption] = useState('');
   const [size, setSize] = useState(1024);
-  const [message, setMessage] = useState('');
-  const details = useRef<HTMLDivElement>(null);
+  const [panel, setPanel] = useState<Panel>('content');
+  const [status, setStatus] = useState<Status | null>(null);
+  const [stamps, setStamps] = useState<{ sig: string; count: number } | null>(null);
+  const [dropping, setDropping] = useState(false);
+  const dragDepth = useRef(0);
+  const card = useRef<HTMLDivElement>(null);
 
   // Arriving from Signal Links (or any link to /tools/qr#link=…): start with that link.
   useEffect(() => {
@@ -592,7 +315,7 @@ export function QrStudio() {
         // The address is an outside system, read once when the tool opens.
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setKind('link');
-        setUrl(incoming);
+        setFields((current) => ({ ...current, url: incoming }));
       }
     } catch {
       // A broken link: start empty.
@@ -600,6 +323,7 @@ export function QrStudio() {
   }, []);
 
   const content: QrContent = useMemo(() => {
+    const { url, text, wifi, contact, phone, sms, email } = fields;
     switch (kind ?? 'link') {
       case 'link':
         return { kind: 'link', url };
@@ -616,7 +340,7 @@ export function QrStudio() {
       case 'email':
         return { kind: 'email', ...email };
     }
-  }, [kind, url, text, wifi, contact, phone, sms, email]);
+  }, [kind, fields]);
 
   const value = kind ? payloadFor(content) : '';
   // A logo needs the strongest error correction to stay readable.
@@ -635,15 +359,14 @@ export function QrStudio() {
   );
   const ghostMatrix = useMemo(() => qrMatrix(GHOST, level), [level]);
   const ghost = useMemo(() => qrShapes(ghostMatrix, look, logo), [ghostMatrix, look, logo]);
-  const risks = scanRisks(look, logo);
   const band = caption && drawn ? captionBand(drawn.total) : 0;
   const fileBase = `qr-${slugName(describeContent(content), 'code')}`;
-  const linkWarning =
-    kind === 'link' && url.trim() && !isWebLink(url)
-      ? 'That doesn’t look like a web address yet.'
-      : '';
   const captionColor = look.bg ? look.fg : '#12110d';
   const meta = KINDS.find((option) => option.value === kind) ?? KINDS[0];
+  const linkWarning =
+    kind === 'link' && fields.url.trim() && !isWebLink(fields.url)
+      ? 'That doesn’t look like a web address yet.'
+      : '';
   const preset = LOOKS.find(
     (option) =>
       option.fg === look.fg &&
@@ -653,30 +376,106 @@ export function QrStudio() {
       option.corner === look.corner,
   );
 
+  // Everything that changes how the code looks (not what it says): the preview morphs on these.
+  const styleKey = [
+    look.dot,
+    look.corner,
+    look.fg,
+    look.bg,
+    look.corners,
+    look.margin,
+    logo ? `${logo.src.length}${logo.plate ? 'p' : ''}` : '',
+    level,
+    caption ? 1 : 0,
+  ].join('|');
+  // What a download would hold: a stamp or a "Saved" line only stands while it's still true.
+  const sig = `${value}|${styleKey}|${caption}|${size}|${logo?.size ?? ''}`;
+  const shownStatus = status?.sig === sig ? status : null;
+  const stamped = Boolean(drawn && stamps?.sig === sig);
+
+  // The code morphs, quickly, when its style changes.
+  const lastStyle = useRef(styleKey);
+  useEffect(() => {
+    if (lastStyle.current === styleKey) return;
+    lastStyle.current = styleKey;
+    if (reduced) return;
+    card.current?.animate(
+      [
+        { transform: 'scale(.955)', opacity: 0.55 },
+        { transform: 'scale(1)', opacity: 1 },
+      ],
+      { duration: 200, easing: 'cubic-bezier(.3,1.2,.4,1)' },
+    );
+  }, [styleKey, reduced]);
+
+  /* ---------------- what's risky, in plain words, with a fix ---------------- */
+
+  const risks: Risk[] = [];
+  const background = look.bg || '#ffffff';
+  if (luminance(look.fg) > luminance(background))
+    risks.push({
+      text: 'Light on dark trips up a lot of scanners.',
+      fix: {
+        label: 'Swap colors',
+        apply: () => setLook({ ...look, fg: background, bg: look.fg }),
+      },
+    });
+  else if (contrast(look.fg, background) < 4)
+    risks.push({
+      text: 'A bit faint for some phones.',
+      fix: { label: 'Darken it', apply: () => setLook({ ...look, fg: '#12110d' }) },
+    });
+  if (look.corners && contrast(look.corners, background) < 3)
+    risks.push({
+      text: 'The corners are too faint, and phones look for them first.',
+      fix: { label: 'Match the code', apply: () => setLook({ ...look, corners: '' }) },
+    });
+  if (look.margin < 2)
+    risks.push({
+      text: 'It needs a little room around it.',
+      fix: { label: 'Add room', apply: () => setLook({ ...look, margin: 4 }) },
+    });
+  if (!look.bg)
+    risks.push({
+      text: 'See-through: print it on something plain and light.',
+      fix: { label: 'Add white', apply: () => setLook({ ...look, bg: '#ffffff' }) },
+    });
+  if (logo && logo.size > LOGO_MAX) risks.push({ text: 'The logo is too big to scan reliably.' });
+
+  /* ---------------- actions ---------------- */
+
   const choose = (next: QrKind) => {
+    const first = !kind;
     setKind(next);
-    setMessage('');
-    // Bring the new step into view, and on a desktop put the cursor in it.
+    setPanel('content');
+    // Bring the code into view, and on a desktop put the cursor in the first field.
     requestAnimationFrame(() => {
-      const box = details.current;
-      if (!box) return;
-      if (box.getBoundingClientRect().top < 0) box.scrollIntoView({ block: 'start' });
+      const stage = document.getElementById(idFor('stage'));
+      if (first && stage && stage.getBoundingClientRect().top < 64)
+        stage.scrollIntoView({ block: 'start' });
       if (window.matchMedia('(pointer: fine)').matches)
-        box.querySelector<HTMLElement>('input, textarea')?.focus({ preventScroll: true });
+        document
+          .getElementById(idFor('controls'))
+          ?.querySelector<HTMLElement>('[data-first-field]')
+          ?.focus({ preventScroll: true });
     });
   };
 
   const fillSample = () => {
     switch (kind) {
       case 'link':
-        return setUrl('https://saltandember.example/menu');
+        return set('url', 'https://saltandember.example/menu');
       case 'text':
-        return setText('Welcome in! Ask us about today’s specials.');
+        return set('text', 'Welcome in! Ask us about today’s specials.');
       case 'wifi':
-        return setWifi({ ...wifi, ssid: 'Salt & Ember Guest', password: 'espresso-please' });
+        return set('wifi', {
+          ...fields.wifi,
+          ssid: 'Salt & Ember Guest',
+          password: 'espresso-please',
+        });
       case 'contact':
-        return setContact({
-          ...contact,
+        return set('contact', {
+          ...fields.contact,
           first: 'Rosa',
           last: 'Delgado',
           org: 'Salt & Ember',
@@ -684,483 +483,228 @@ export function QrStudio() {
           email: 'rosa@saltandember.example',
         });
       case 'phone':
-        return setPhone('+1 555 010 0199');
+        return set('phone', '+1 555 010 0199');
       case 'sms':
-        return setSms({ number: '+1 555 010 0199', message: 'Table for 4 tonight at 7?' });
+        return set('sms', { number: '+1 555 010 0199', message: 'Table for 4 tonight at 7?' });
       case 'email':
-        return setEmail({
-          ...email,
+        return set('email', {
+          ...fields.email,
           to: 'hello@saltandember.example',
           subject: 'Catering inquiry',
         });
     }
   };
 
-  const svg = () =>
-    drawn ? shapesToSvg(drawn.shapes, drawn.total, { bg: look.bg, caption, captionColor }) : '';
+  const takeLogo = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      setLogoError('');
+      const src = await logoFrom(file);
+      setLogo((current) => ({ src, size: current?.size ?? 0.2, plate: current?.plate ?? true }));
+      setPanel('logo');
+    } catch (error) {
+      setLogoError(error instanceof Error ? error.message : 'That logo couldn’t be read.');
+      setPanel('logo');
+    }
+  };
 
-  const downloadSvg = () => {
-    if (!drawn) return;
-    download(new Blob([svg()], { type: 'image/svg+xml' }), `${fileBase}.svg`);
-    setMessage(`Downloaded ${fileBase}.svg — sharp at any size.`);
+  /** The code lands: pressed like a stamp, with the stamp on it. */
+  const stamp = () => {
+    setStamps((current) => ({ sig, count: (current?.count ?? 0) + 1 }));
+    if (!reduced)
+      card.current?.animate(
+        [
+          { transform: 'scale(1)' },
+          { transform: 'scale(.93)', offset: 0.35 },
+          { transform: 'scale(1.015)', offset: 0.75 },
+          { transform: 'scale(1)' },
+        ],
+        { duration: 320, easing: 'ease-out' },
+      );
+  };
+
+  const makePng = async () => {
+    if (!drawn) throw new Error('empty');
+    const scale = Math.max(1, Math.round(size / drawn.total));
+    const width = drawn.total * scale;
+    const bandPx = band * scale;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = width + bandPx;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('canvas');
+    if (look.bg) {
+      context.fillStyle = look.bg;
+      context.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    const images = new Map<string, CanvasImageSource>();
+    if (logo) images.set(logo.src, await loadImage(logo.src));
+    drawShapes(context, drawn.shapes, scale, images);
+    if (caption) {
+      const family = getComputedStyle(document.body).fontFamily || 'system-ui, sans-serif';
+      context.fillStyle = captionColor;
+      context.font = `600 ${Math.round(width * 0.07)}px ${family}`;
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      context.fillText(caption, width / 2, width + bandPx * 0.42, width * 0.9);
+    }
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+    if (!blob) throw new Error('png');
+    return { blob, width };
   };
 
   const downloadPng = async () => {
     if (!drawn) return;
     try {
-      const scale = Math.max(1, Math.floor(size / drawn.total));
-      const width = drawn.total * scale;
-      const bandPx = band * scale;
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = width + bandPx;
-      const context = canvas.getContext('2d');
-      if (!context) throw new Error('canvas');
-      if (look.bg) {
-        context.fillStyle = look.bg;
-        context.fillRect(0, 0, canvas.width, canvas.height);
-      }
-      const images = new Map<string, CanvasImageSource>();
-      if (logo) images.set(logo.src, await loadImage(logo.src));
-      drawShapes(context, drawn.shapes, scale, images);
-      if (caption) {
-        const family = getComputedStyle(document.body).fontFamily || 'system-ui, sans-serif';
-        context.fillStyle = captionColor;
-        context.font = `600 ${Math.round(width * 0.07)}px ${family}`;
-        context.textAlign = 'center';
-        context.textBaseline = 'middle';
-        context.fillText(caption, width / 2, width + bandPx * 0.42, width * 0.9);
-      }
-      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
-      if (!blob) throw new Error('png');
+      const { blob, width } = await makePng();
       download(blob, `${fileBase}.png`);
-      setMessage(`Downloaded ${fileBase}.png · ${width} px wide.`);
+      stamp();
+      setStatus({ text: `Saved ${fileBase}.png · ${width} px`, sig, tone: 'done' });
     } catch {
-      setMessage('This browser couldn’t make the PNG. Download the SVG instead.');
+      setStatus({
+        text: 'This browser couldn’t make the picture. Try the SVG instead.',
+        sig,
+        tone: 'problem',
+      });
     }
   };
 
-  // Step 1: what the code opens, as big picture cards.
+  const downloadSvg = () => {
+    if (!drawn) return;
+    const svg = shapesToSvg(drawn.shapes, drawn.total, { bg: look.bg, caption, captionColor });
+    download(new Blob([svg], { type: 'image/svg+xml' }), `${fileBase}.svg`);
+    stamp();
+    setStatus({ text: `Saved ${fileBase}.svg · sharp at any size`, sig, tone: 'done' });
+  };
+
+  const copyImage = async () => {
+    if (!drawn) return;
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({ 'image/png': makePng().then((result) => result.blob) }),
+      ]);
+      setStatus({ text: 'Copied the picture. Paste it anywhere.', sig, tone: 'quiet' });
+    } catch {
+      setStatus({
+        text: 'This browser won’t copy pictures. Download it instead.',
+        sig,
+        tone: 'problem',
+      });
+    }
+  };
+
+  const copyText = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setStatus({
+        text: kind === 'link' ? 'Copied the link.' : 'Copied what the code says.',
+        sig,
+        tone: 'quiet',
+      });
+    } catch {
+      setStatus({ text: 'Couldn’t copy. Find it under Advanced.', sig, tone: 'problem' });
+    }
+  };
+
+  /* ---------------- the first tap: what's it for? ---------------- */
+
   if (!kind)
     return (
-      <>
-        <StageMotion />
-        <StartPanel
-          art={<KindArt />}
-          title="What should your code open?"
-          lead="Pick one. Next you’ll fill in the details, then make it look like yours."
-        >
-          <ChoiceCards
-            label="What the code opens"
-            columns={3}
-            options={PICKABLE.map(({ value, label, icon, hint }) => ({ value, label, icon, hint }))}
-            selected={[]}
-            onToggle={choose}
-          />
-          <button
-            type="button"
-            onClick={() => choose('text')}
-            className="mx-auto mt-3 flex min-h-11 items-center gap-1.5 rounded-full px-4 text-[14px] text-muted transition-colors hover:text-ink"
-          >
-            <Icon name="file-text" size={15} />
-            Or just show some text
-          </button>
-        </StartPanel>
-      </>
-    );
-
-  const hasContent = code.state === 'ready';
-  const field = (name: string) => `${id}-${name}`;
-
-  return (
-    <div className="flex flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,.92fr)] lg:grid-rows-[auto_1fr] lg:gap-6">
-      <StageMotion />
-
-      {/* Step 2: only the fields this kind needs. */}
-      <div
-        ref={details}
-        className="order-1 min-w-0 scroll-mt-24 lg:order-none lg:col-start-1 lg:row-start-1"
+      <section
+        aria-labelledby={idFor('start')}
+        className="relative isolate overflow-hidden rounded-[28px] bg-surface px-4 pt-6 pb-4 shadow-card sm:px-8 sm:py-10 lg:px-12 lg:py-12"
       >
-        <Surface as="section" aria-labelledby={field('what')} className="grid gap-5 sm:!p-6">
-          <div className="flex items-start gap-3">
-            <span
-              className="grid size-11 shrink-0 place-items-center rounded-[14px] text-[#12110d] shadow-[0_10px_24px_-14px_var(--accent,transparent)]"
-              style={{ background: ACCENT }}
+        <div className="grid items-center gap-10 lg:grid-cols-[minmax(0,.8fr)_minmax(0,1.2fr)] lg:gap-14">
+          <div className="hidden lg:block">
+            <StudioArt />
+          </div>
+          <div className="min-w-0">
+            <h2
+              id={idFor('start')}
+              className="mb-5 text-center font-display text-[30px] leading-[1] font-bold tracking-[-0.035em] text-ink sm:mb-7 sm:text-[40px] lg:text-left"
+              style={{ fontVariationSettings: "'wdth' 110" }}
             >
-              <Icon name={meta.icon} size={20} />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-[12.5px] font-medium text-muted">
-                <span className="mono-num">2</span> · {meta.label}
-              </p>
-              <h2
-                id={field('what')}
-                className="font-display text-[21px] leading-tight font-bold tracking-[-0.02em] text-ink sm:text-[23px]"
-              >
-                {meta.title}
-              </h2>
-            </div>
+              What’s it for?
+            </h2>
+            <KindTiles
+              options={KINDS.filter((option) => option.value !== 'text')}
+              value={null}
+              onPick={choose}
+            />
             <button
               type="button"
-              onClick={() => setKind(null)}
-              aria-label="Change what the code opens"
-              className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full bg-well px-3.5 text-[13.5px] font-medium text-ink-2 transition-colors hover:bg-ink/10 hover:text-ink"
+              onClick={() => choose('text')}
+              className="mx-auto mt-2 flex min-h-11 items-center gap-1.5 rounded-full px-4 text-[14px] font-medium text-muted transition-colors hover:bg-ink/[.05] hover:text-ink sm:mt-3 lg:mx-0 lg:-ml-4"
             >
-              <Icon name="repeat" size={14} />
-              Change
+              <Icon name="file-text" size={15} />
+              Or just some plain text
             </button>
           </div>
-          <div className="-mt-3 grid justify-items-start gap-1">
-            <p className="text-[14px] leading-snug text-muted">{meta.lead}</p>
-            {!value && (
-              <SampleButton onClick={fillSample} className="-mb-2 !mx-0 -ml-4! min-h-10">
-                Try an example
-              </SampleButton>
-            )}
-          </div>
+        </div>
+      </section>
+    );
 
-          {kind === 'link' && (
-            <Field label="Link" htmlFor={field('url')} error={linkWarning || undefined}>
-              <Input
-                id={field('url')}
-                aria-label="Link or text"
-                type="url"
-                inputMode="url"
-                enterKeyHint="done"
-                autoComplete="url"
-                {...quiet}
-                placeholder="yourshop.example/menu"
-                value={url}
-                onChange={(event) => setUrl(event.target.value)}
-                onKeyDown={(event) => event.key === 'Enter' && event.currentTarget.blur()}
-                onBlur={() => url.trim() && setUrl(normalizeLink(url))}
-              />
-            </Field>
-          )}
+  /* ---------------- the studio ---------------- */
 
-          {kind === 'text' && (
-            <Field label="Text" htmlFor={field('text')}>
-              <Textarea
-                id={field('text')}
-                rows={4}
-                maxLength={1000}
-                value={text}
-                onChange={(event) => setText(event.target.value)}
-                placeholder="Anything up to about 1,000 letters"
-              />
-            </Field>
-          )}
+  const tabs: { value: Panel; label: string; icon: IconName; set: boolean }[] = [
+    { value: 'content', label: meta.label, icon: meta.icon, set: false },
+    { value: 'style', label: 'Style', icon: 'palette', set: !preset || preset.name !== 'Classic' },
+    { value: 'logo', label: 'Logo', icon: 'image', set: Boolean(logo) },
+    { value: 'words', label: 'Words', icon: 'type', set: Boolean(caption) },
+  ];
 
-          {kind === 'wifi' && (
-            <div className="grid gap-4">
-              <Field label="Network name" htmlFor={field('ssid')}>
-                <Input
-                  id={field('ssid')}
-                  autoComplete="off"
-                  enterKeyHint="next"
-                  {...quiet}
-                  placeholder="Salt & Ember Guest"
-                  value={wifi.ssid}
-                  onChange={(event) => setWifi({ ...wifi, ssid: event.target.value })}
-                />
-              </Field>
-              <Choices
-                label="Security"
-                value={wifi.security === 'nopass' ? 'nopass' : 'password'}
-                onChange={(next) =>
-                  setWifi({
-                    ...wifi,
-                    security:
-                      next === 'nopass' ? 'nopass' : wifi.security === 'WEP' ? 'WEP' : 'WPA',
-                  })
-                }
-                options={[
-                  { value: 'password', label: 'Has a password', icon: 'lock' },
-                  { value: 'nopass', label: 'No password' },
-                ]}
-              />
-              {wifi.security !== 'nopass' && (
-                <Field label="Password" htmlFor={field('pass')}>
-                  <Input
-                    id={field('pass')}
-                    autoComplete="off"
-                    enterKeyHint="done"
-                    {...quiet}
-                    value={wifi.password}
-                    onChange={(event) => setWifi({ ...wifi, password: event.target.value })}
-                  />
-                </Field>
-              )}
-              <Extra
-                label="Hidden or older network?"
-                filled={wifi.hidden || wifi.security === 'WEP'}
-              >
-                <div className="grid">
-                  <label className="flex min-h-11 items-center gap-2.5 text-[14px] text-ink-2">
-                    <input
-                      type="checkbox"
-                      checked={wifi.hidden}
-                      onChange={(event) => setWifi({ ...wifi, hidden: event.target.checked })}
-                      className="size-4.5 accent-[var(--accent,var(--color-ink))]"
-                    />
-                    The network is hidden
-                  </label>
-                  <label className="flex min-h-11 items-center gap-2.5 text-[14px] text-ink-2">
-                    <input
-                      type="checkbox"
-                      checked={wifi.security === 'WEP'}
-                      onChange={(event) =>
-                        setWifi({ ...wifi, security: event.target.checked ? 'WEP' : 'WPA' })
-                      }
-                      className="size-4.5 accent-[var(--accent,var(--color-ink))]"
-                    />
-                    <span>
-                      It uses older security <span className="text-muted">(WEP)</span>
-                    </span>
-                  </label>
-                </div>
-              </Extra>
-            </div>
-          )}
+  const hasFiles = (event: React.DragEvent) =>
+    Array.from(event.dataTransfer.types).includes('Files');
 
-          {kind === 'contact' && (
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="First name" htmlFor={field('c-first')}>
-                <Input
-                  id={field('c-first')}
-                  autoComplete="given-name"
-                  enterKeyHint="next"
-                  placeholder="Rosa"
-                  value={contact.first}
-                  onChange={(event) => setContact({ ...contact, first: event.target.value })}
-                />
-              </Field>
-              <Field label="Last name" htmlFor={field('c-last')}>
-                <Input
-                  id={field('c-last')}
-                  autoComplete="family-name"
-                  enterKeyHint="next"
-                  placeholder="Delgado"
-                  value={contact.last}
-                  onChange={(event) => setContact({ ...contact, last: event.target.value })}
-                />
-              </Field>
-              <Field label="Phone" htmlFor={field('c-phone')} className="col-span-2">
-                <Input
-                  id={field('c-phone')}
-                  type="tel"
-                  inputMode="tel"
-                  autoComplete="tel"
-                  enterKeyHint="next"
-                  placeholder="+1 555 010 0199"
-                  value={contact.phone}
-                  onChange={(event) => setContact({ ...contact, phone: event.target.value })}
-                />
-              </Field>
-              <Field label="Email" htmlFor={field('c-email')} className="col-span-2">
-                <Input
-                  id={field('c-email')}
-                  type="email"
-                  inputMode="email"
-                  autoComplete="email"
-                  enterKeyHint="done"
-                  {...quiet}
-                  placeholder="rosa@saltandember.example"
-                  value={contact.email}
-                  onChange={(event) => setContact({ ...contact, email: event.target.value })}
-                />
-              </Field>
-              <div className="col-span-2 grid">
-                <Extra
-                  label="Add company, website or a note"
-                  filled={Boolean(contact.org || contact.title || contact.url || contact.note)}
-                >
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="Company" htmlFor={field('c-org')}>
-                      <Input
-                        id={field('c-org')}
-                        autoComplete="organization"
-                        enterKeyHint="next"
-                        placeholder="Salt & Ember"
-                        value={contact.org}
-                        onChange={(event) => setContact({ ...contact, org: event.target.value })}
-                      />
-                    </Field>
-                    <Field label="Job title" htmlFor={field('c-title')}>
-                      <Input
-                        id={field('c-title')}
-                        autoComplete="organization-title"
-                        enterKeyHint="next"
-                        placeholder="Owner"
-                        value={contact.title}
-                        onChange={(event) => setContact({ ...contact, title: event.target.value })}
-                      />
-                    </Field>
-                    <Field label="Website" htmlFor={field('c-url')} className="col-span-2">
-                      <Input
-                        id={field('c-url')}
-                        type="url"
-                        inputMode="url"
-                        autoComplete="url"
-                        enterKeyHint="next"
-                        {...quiet}
-                        placeholder="saltandember.example"
-                        value={contact.url}
-                        onChange={(event) => setContact({ ...contact, url: event.target.value })}
-                      />
-                    </Field>
-                    <Field label="Note" htmlFor={field('c-note')} className="col-span-2">
-                      <Input
-                        id={field('c-note')}
-                        enterKeyHint="done"
-                        value={contact.note}
-                        onChange={(event) => setContact({ ...contact, note: event.target.value })}
-                      />
-                    </Field>
-                  </div>
-                </Extra>
-              </div>
-            </div>
-          )}
-
-          {kind === 'phone' && (
-            <Field label="Phone number" htmlFor={field('phone')}>
-              <Input
-                id={field('phone')}
-                type="tel"
-                inputMode="tel"
-                autoComplete="tel"
-                enterKeyHint="done"
-                placeholder="+1 555 010 0199"
-                value={phone}
-                onChange={(event) => setPhone(event.target.value)}
-              />
-            </Field>
-          )}
-
-          {kind === 'sms' && (
-            <div className="grid gap-4">
-              <Field label="Send to" htmlFor={field('sms-to')}>
-                <Input
-                  id={field('sms-to')}
-                  type="tel"
-                  inputMode="tel"
-                  autoComplete="tel"
-                  enterKeyHint="done"
-                  placeholder="+1 555 010 0199"
-                  value={sms.number}
-                  onChange={(event) => setSms({ ...sms, number: event.target.value })}
-                />
-              </Field>
-              <Extra label="Add a ready-to-send message" filled={Boolean(sms.message)}>
-                <Field label="Message" htmlFor={field('sms-body')} optional>
-                  <Textarea
-                    id={field('sms-body')}
-                    rows={3}
-                    maxLength={300}
-                    placeholder="Table for 4 tonight at 7?"
-                    value={sms.message}
-                    onChange={(event) => setSms({ ...sms, message: event.target.value })}
-                  />
-                </Field>
-              </Extra>
-            </div>
-          )}
-
-          {kind === 'email' && (
-            <div className="grid gap-4">
-              <Field label="Email address" htmlFor={field('mail-to')}>
-                <Input
-                  id={field('mail-to')}
-                  type="email"
-                  inputMode="email"
-                  autoComplete="email"
-                  enterKeyHint="done"
-                  {...quiet}
-                  placeholder="hello@yourshop.example"
-                  value={email.to}
-                  onChange={(event) => setEmail({ ...email, to: event.target.value })}
-                />
-              </Field>
-              <Extra
-                label="Add a subject and message"
-                filled={Boolean(email.subject || email.body)}
-              >
-                <Field label="Subject" htmlFor={field('mail-subject')} optional>
-                  <Input
-                    id={field('mail-subject')}
-                    enterKeyHint="next"
-                    placeholder="Catering inquiry"
-                    value={email.subject}
-                    onChange={(event) => setEmail({ ...email, subject: event.target.value })}
-                  />
-                </Field>
-                <Field label="Message" htmlFor={field('mail-body')} optional>
-                  <Textarea
-                    id={field('mail-body')}
-                    rows={3}
-                    value={email.body}
-                    onChange={(event) => setEmail({ ...email, body: event.target.value })}
-                  />
-                </Field>
-              </Extra>
-            </div>
-          )}
-        </Surface>
-      </div>
-
-      {/* The code, with steps 4 under it: right under what you type on phones; beside it on desktops. */}
-      <div className="contents lg:sticky lg:top-24 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:flex lg:flex-col lg:gap-3 lg:self-start">
-        <Surface
-          as="section"
-          id={field('stage')}
+  return (
+    <div className="flex flex-col gap-3 sm:gap-4 lg:grid lg:grid-cols-[minmax(0,1.04fr)_minmax(0,1fr)] lg:items-start lg:gap-6">
+      {/* The object: the code, large, with the download right under it. */}
+      <div className="contents lg:sticky lg:top-20 lg:flex lg:flex-col lg:gap-4">
+        <Stage
+          material="light"
+          id={idFor('stage')}
           aria-label="Your code"
-          className="relative isolate order-2 overflow-hidden !p-5 sm:!p-7 lg:order-none"
+          role="region"
+          className="order-1 scroll-mt-20 !px-5 !pt-8 !pb-5 sm:!px-8 sm:!pt-12 sm:!pb-7 lg:order-none"
+          onDragEnter={(event) => {
+            if (!hasFiles(event)) return;
+            event.preventDefault();
+            dragDepth.current += 1;
+            setDropping(true);
+          }}
+          onDragOver={(event) => {
+            if (!hasFiles(event)) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'copy';
+          }}
+          onDragLeave={() => {
+            dragDepth.current = Math.max(0, dragDepth.current - 1);
+            if (!dragDepth.current) setDropping(false);
+          }}
+          onDrop={(event) => {
+            if (!hasFiles(event)) return;
+            event.preventDefault();
+            dragDepth.current = 0;
+            setDropping(false);
+            takeLogo(event.dataTransfer.files[0]);
+          }}
         >
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-0 -z-10"
-            style={{
-              background: `radial-gradient(60% 50% at 50% 42%, color-mix(in srgb, ${ACCENT} 18%, transparent), transparent 72%), radial-gradient(50% 40% at 100% 100%, color-mix(in srgb, var(--glow, ${ACCENT}) 14%, transparent), transparent 70%)`,
-            }}
-          />
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-0 -z-10 opacity-60"
-            style={{
-              backgroundImage: `linear-gradient(color-mix(in srgb, ${ACCENT} 10%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, ${ACCENT} 10%, transparent) 1px, transparent 1px)`,
-              backgroundSize: '22px 22px',
-              maskImage: 'radial-gradient(60% 55% at 50% 45%, #000, transparent)',
-            }}
-          />
-          <div className="mb-5 flex items-center justify-between gap-3">
-            <span className="flex items-center gap-2 text-[13px] font-medium text-ink-2">
-              <span
-                className={cn(
-                  'size-2 rounded-full',
-                  hasContent ? (risks.length ? 'bg-caution' : 'bg-positive') : 'bg-faint',
-                )}
-              />
-              {hasContent ? (risks.length ? 'Check before printing' : 'Ready to scan') : 'Preview'}
-            </span>
-            {preset && <span className="text-[12.5px] text-muted">{preset.name} look</span>}
-          </div>
-
-          <div className="relative mx-auto w-full max-w-[236px] sm:max-w-[300px]">
+          <div className="relative mx-auto w-full max-w-[248px] sm:max-w-[340px] lg:max-w-[380px] xl:max-w-[400px]">
             <Viewfinder />
             <div
-              className="relative overflow-hidden rounded-[18px] p-3 shadow-[0_28px_60px_-30px_var(--glow,rgb(0_0_0/.5))] transition-colors duration-300 sm:p-4"
+              ref={card}
+              className="relative overflow-hidden rounded-[20px] p-3 shadow-[0_30px_60px_-30px_rgb(12_26_29/.5),0_0_0_1px_rgb(12_26_29/.06)] transition-[background-color] duration-200 sm:p-4"
               style={{
                 background:
                   look.bg ||
-                  'repeating-conic-gradient(#e7e4dc 0% 25%, #ffffff 0% 50%) 50% / 16px 16px',
+                  'repeating-conic-gradient(#dfe5e6 0% 25%, #ffffff 0% 50%) 50% / 16px 16px',
               }}
             >
               {drawn ? (
                 <svg
                   key="code"
                   viewBox={`0 0 ${drawn.total} ${drawn.total + band}`}
-                  className="block h-auto w-full animate-pop"
+                  className="fx-pop block h-auto w-full"
                   role="img"
                   aria-label={`QR code for ${value.slice(0, 120)}`}
                 >
@@ -1184,58 +728,85 @@ export function QrStudio() {
                 <div key="ghost" className="relative">
                   <svg
                     viewBox={`0 0 ${ghost.total} ${ghost.total}`}
-                    className="block h-auto w-full opacity-[.16]"
+                    className="block h-auto w-full opacity-[.13]"
                     aria-hidden="true"
                   >
                     <QrShapes shapes={ghost.shapes} />
                   </svg>
-                  <span
-                    aria-hidden="true"
-                    className="qr-sweep absolute inset-x-0 top-0 h-1/4"
-                    style={{
-                      background: `linear-gradient(to bottom, transparent, color-mix(in srgb, var(--glow, ${ACCENT}) 30%, transparent), transparent)`,
-                    }}
-                  />
-                  <p className="absolute inset-0 grid place-items-center px-4 text-center">
-                    <span className="max-w-[16ch] rounded-[14px] bg-[#12110d] px-3.5 py-2 text-[13px] leading-snug font-medium text-balance text-[#f4f1ea] shadow-lift sm:max-w-none">
-                      {code.state === 'too-long'
-                        ? 'That’s too much for one code. Try something shorter.'
-                        : 'Your code will look like this'}
+                  <p className="absolute inset-0 grid place-items-center px-3 text-center">
+                    <span className="fx-pop inline-flex max-w-full items-center gap-1.5 rounded-full bg-ink px-4 py-2.5 text-[14px] leading-snug font-semibold text-balance text-on-ink shadow-lift sm:text-[15px]">
+                      {code.state === 'too-long' ? (
+                        'Too much for one code. Try something shorter.'
+                      ) : (
+                        <>
+                          {meta.empty}
+                          <Icon name="arrow-down" size={16} className="shrink-0 lg:hidden" />
+                          <Icon name="arrow-right" size={16} className="hidden shrink-0 lg:block" />
+                        </>
+                      )}
                     </span>
                   </p>
                 </div>
               )}
+              {dropping && (
+                <div className="fx-pop absolute inset-0 grid place-items-center bg-[color-mix(in_srgb,var(--color-surface)_55%,transparent)]">
+                  <span
+                    className="grid size-[42%] place-items-center rounded-[18px] border-[2.5px] border-dashed border-[var(--accent-ink,var(--color-ink))] text-center text-[14px] font-bold text-ink"
+                    style={{ background: 'color-mix(in srgb, var(--accent) 30%, white)' }}
+                  >
+                    <span className="grid justify-items-center gap-1">
+                      <Icon name="image" size={22} />
+                      Drop your logo
+                    </span>
+                  </span>
+                </div>
+              )}
             </div>
+            {stamped && stamps && (
+              <Stamp key={stamps.count} className="-top-4 -right-4 sm:-top-5 sm:-right-7">
+                {risks.length ? 'Saved' : 'Ready to scan'}
+              </Stamp>
+            )}
           </div>
 
-          <p className="mt-6 truncate text-center text-[13.5px] font-medium text-ink-2">
-            {drawn ? opensLine(content) : 'It draws itself as you type.'}
-          </p>
-          {drawn && risks.length > 0 && (
-            <div className="mt-3 grid gap-1.5">
-              {risks.map((risk) => (
-                <Note key={risk} icon="alert" tone="caution">
-                  {risk}
-                </Note>
+          <div className="mt-6 grid min-h-6 gap-2 sm:mt-8">
+            {drawn && (
+              <p className="flex min-w-0 items-center justify-center gap-1.5 text-[14px] font-medium text-ink-2 sm:text-[15px]">
+                <Icon
+                  name={risks.length ? 'alert' : 'check-circle'}
+                  size={16}
+                  className={cn('shrink-0', risks.length ? 'text-caution' : 'text-positive')}
+                />
+                <span className="truncate">{opensLine(content)}</span>
+              </p>
+            )}
+            {drawn &&
+              risks.map((risk) => (
+                <p
+                  key={risk.text}
+                  className="fx-rise flex items-center gap-3 rounded-[14px] bg-caution-soft py-1.5 pr-1.5 pl-3.5 text-left text-[13.5px] leading-snug text-caution"
+                >
+                  <span className="min-w-0 flex-1 py-1">{risk.text}</span>
+                  {risk.fix && (
+                    <button
+                      type="button"
+                      onClick={risk.fix.apply}
+                      className="fx-move min-h-10 shrink-0 rounded-[10px] bg-surface px-3 text-[13.5px] font-semibold text-ink shadow-card active:scale-[.96]"
+                    >
+                      {risk.fix.label}
+                    </button>
+                  )}
+                </p>
               ))}
-            </div>
-          )}
-          {drawn && risks.length === 0 && (
-            <p className="mt-1 text-center text-[12.5px] text-muted">
-              Scan it once with your phone before you print a stack.
-            </p>
-          )}
-        </Surface>
+          </div>
+        </Stage>
 
-        {/* Step 4: one big download, kept under the thumb on phones. */}
+        {/* The payoff, under the thumb on phones: one big download that stamps the code. */}
         <ActionBar
           // This page's phone gutter is 12px, not the 16px the bar assumes.
-          className={cn(
-            'order-4 !mt-0 max-sm:-mx-3! max-sm:px-3! lg:order-none',
-            !drawn && 'hidden lg:block',
-          )}
+          className="order-3 !mt-0 max-sm:-mx-3! max-sm:px-3! sm:order-2 lg:order-none"
         >
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2">
             {drawn && (
               // On phones the code rides along with the button, so it's never out of sight.
               <button
@@ -1243,8 +814,8 @@ export function QrStudio() {
                 aria-label="Show the code"
                 onClick={() =>
                   document
-                    .getElementById(field('stage'))
-                    ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+                    .getElementById(idFor('stage'))
+                    ?.scrollIntoView({ block: 'start', behavior: reduced ? 'auto' : 'smooth' })
                 }
                 className="size-14 shrink-0 rounded-[14px] p-1 shadow-card sm:hidden"
                 style={{ background: look.bg || '#ffffff' }}
@@ -1254,369 +825,475 @@ export function QrStudio() {
                 </svg>
               </button>
             )}
-            <ActionButton icon="download" disabled={!drawn} onClick={downloadPng}>
+            <ActionButton
+              icon="download"
+              disabled={!drawn}
+              onClick={downloadPng}
+              className="min-w-0 flex-1 lg:!h-16 lg:!rounded-[18px] lg:!text-[18px]"
+            >
               Download PNG
             </ActionButton>
+            <button
+              type="button"
+              aria-label="Download SVG"
+              title="SVG: sharp at any size, for print"
+              disabled={!drawn}
+              onClick={downloadSvg}
+              className="fx-move h-14 shrink-0 rounded-[16px] bg-surface px-4 text-[15px] font-bold text-ink shadow-[inset_0_0_0_1.5px_var(--color-line-strong)] hover:bg-ink/[.05] active:scale-[.96] disabled:opacity-40 sm:h-13 lg:!h-16 lg:rounded-[18px] lg:px-5"
+            >
+              SVG
+            </button>
+          </div>
+          <div
+            className={cn(
+              'mt-1 flex items-center justify-center gap-1',
+              !shownStatus && 'max-sm:hidden',
+            )}
+          >
+            <button
+              type="button"
+              disabled={!drawn}
+              onClick={copyImage}
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-full px-3.5 text-[14px] font-medium text-ink-2 transition-colors hover:bg-ink/[.05] hover:text-ink disabled:opacity-40"
+            >
+              <Icon name="copy" size={15} /> Copy image
+            </button>
+            <button
+              type="button"
+              disabled={!drawn}
+              onClick={copyText}
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-full px-3.5 text-[14px] font-medium text-ink-2 transition-colors hover:bg-ink/[.05] hover:text-ink disabled:opacity-40"
+            >
+              <Icon name={kind === 'link' ? 'link' : 'file-text'} size={15} />
+              {kind === 'link' ? 'Copy link' : 'Copy text'}
+            </button>
           </div>
           <p
             role="status"
-            className="mt-1.5 min-h-4 text-center text-[12.5px] text-muted empty:hidden"
+            className={cn(
+              'min-h-4 text-center text-[13px] empty:hidden',
+              shownStatus?.tone === 'done' && 'font-semibold text-ink',
+              shownStatus?.tone === 'quiet' && 'text-muted',
+              shownStatus?.tone === 'problem' && 'text-critical',
+            )}
           >
-            {message}
-          </p>
-        </ActionBar>
-
-        <Surface className={cn('order-5 !py-1 lg:order-none', drawn ? 'grid' : 'hidden lg:grid')}>
-          <button
-            type="button"
-            disabled={!drawn}
-            onClick={downloadSvg}
-            className="flex min-h-12 items-center gap-3 text-left text-[14.5px] font-medium text-ink-2 transition-colors hover:text-ink disabled:opacity-40"
-          >
-            <span className="grid size-7 place-items-center rounded-full bg-well">
-              <Icon name="download" size={14} />
-            </span>
-            <span className="flex-1">SVG for print</span>
-            <span className="text-[12.5px] font-normal text-muted">Sharp at any size</span>
-          </button>
-          <MoreOptions
-            label="Print settings"
-            summary={`${size} wide · border ${look.margin}`}
-            className="border-t border-line pt-1 pb-1 [&[open]]:pb-4"
-          >
-            <div className="grid gap-4">
-              <div className="grid gap-2">
-                <span className="text-[13px] font-medium text-ink-2">Image size</span>
-                <Choices
-                  label="Image size"
-                  value={String(size)}
-                  onChange={(next) => setSize(Number(next))}
-                  options={SIZES}
-                />
-              </div>
-              <div className="grid gap-2">
-                <span className="text-[13px] font-medium text-ink-2">Sturdiness</span>
-                {logo ? (
-                  <p className="text-[12.5px] text-muted">
-                    Set to the sturdiest while there’s a logo, so it still scans.
-                  </p>
-                ) : (
-                  <>
-                    <Choices
-                      label="Sturdiness"
-                      value={chosenLevel}
-                      onChange={setChosenLevel}
-                      options={LEVELS}
-                    />
-                    <p className="text-[12.5px] text-muted">
-                      Sturdier codes survive scuffs, with more dots.
-                    </p>
-                  </>
+            {shownStatus && (
+              <span key={shownStatus.text} className="fx-pop inline-flex items-center gap-1.5">
+                {shownStatus.tone === 'done' && (
+                  <Icon name="check-circle" size={15} className="text-positive" />
                 )}
-              </div>
-              <Field
-                label={
-                  <span className="flex w-full items-center justify-between">
-                    Border
-                    <span className="mono-num text-[11px] font-normal text-muted">
-                      {look.margin}
-                    </span>
-                  </span>
-                }
-                htmlFor={field('margin')}
-              >
-                <input
-                  id={field('margin')}
-                  type="range"
-                  min={0}
-                  max={8}
-                  step={1}
-                  value={look.margin}
-                  onChange={(event) => setLook({ ...look, margin: Number(event.target.value) })}
-                  className="w-full accent-[var(--accent,var(--color-ink))]"
-                />
-              </Field>
-            </div>
-          </MoreOptions>
-        </Surface>
+                <span className="min-w-0 truncate">{shownStatus.text}</span>
+              </span>
+            )}
+          </p>
+          {shownStatus?.tone === 'done' && !risks.length && (
+            <p className="fx-rise mt-0.5 text-center text-[12.5px] text-muted [--i:2] max-sm:hidden">
+              Scan it once with your phone before you print a stack.
+            </p>
+          )}
+        </ActionBar>
       </div>
 
-      {/* Step 3: a look in one tap; the details wait under More options. */}
-      <Surface
-        as="section"
-        aria-labelledby={field('look')}
-        className="order-3 grid gap-4 sm:!p-6 lg:order-none lg:col-start-1 lg:row-start-2 lg:self-start"
+      {/* The controls: tabs under the code on a phone, all of it beside the code on a desktop. */}
+      <div
+        id={idFor('controls')}
+        className="order-2 min-w-0 rounded-[26px] bg-surface shadow-card sm:order-3 lg:order-none"
       >
-        <div className="grid gap-1">
-          <div className="flex items-center gap-3">
-            <span className="grid size-11 shrink-0 place-items-center rounded-[14px] bg-signal-soft text-signal-ink">
-              <Icon name="palette" size={20} />
-            </span>
-            <div className="min-w-0">
-              <p className="text-[12.5px] font-medium text-muted">
-                <span className="mono-num">3</span> · Style
-              </p>
-              <h2
-                id={field('look')}
-                className="font-display text-[21px] leading-tight font-bold tracking-[-0.02em] text-ink sm:text-[23px]"
-              >
-                Make it yours
-              </h2>
-            </div>
-          </div>
-          <p className="mt-1 text-[14px] leading-snug text-muted">
-            Pick a look. Every one is checked to scan.
-          </p>
-        </div>
         <div
-          role="group"
-          aria-label="Looks"
-          className="grid grid-cols-3 gap-2.5 sm:grid-cols-6 sm:gap-2 lg:grid-cols-3 xl:grid-cols-6"
+          role="tablist"
+          aria-label="Edit your code"
+          className="m-2 grid grid-cols-4 gap-1 rounded-[18px] bg-ink/[.05] p-1 lg:hidden"
         >
-          {LOOKS.map((option) => {
-            const on = option === preset;
+          {tabs.map((tab) => {
+            const on = panel === tab.value;
             return (
               <button
-                key={option.name}
+                key={tab.value}
                 type="button"
-                aria-pressed={on}
-                aria-label={`${option.name} look`}
-                onClick={() =>
-                  setLook((current) => ({
-                    ...current,
-                    fg: option.fg,
-                    bg: option.bg,
-                    corners: option.corners,
-                    dot: option.dot,
-                    corner: option.corner,
-                  }))
-                }
+                role="tab"
+                aria-selected={on}
+                aria-controls={idFor(`panel-${tab.value}`)}
+                onClick={() => setPanel(tab.value)}
                 className={cn(
-                  'grid min-w-0 gap-2 rounded-[16px] p-2 pb-2.5 text-center transition-[background-color,box-shadow,transform] active:scale-[.97]',
-                  on
-                    ? 'bg-signal-soft shadow-[inset_0_0_0_2px_var(--accent,var(--color-ink))]'
-                    : 'bg-well shadow-[inset_0_0_0_1px_var(--color-line)] hover:bg-ink/[.09]',
+                  'fx-move relative flex min-h-14 min-w-0 flex-col items-center justify-center gap-0.5 rounded-[14px] px-1 text-[12.5px] font-semibold active:scale-[.96]',
+                  on ? 'bg-surface text-ink shadow-card' : 'text-muted',
                 )}
               >
-                <LookThumb look={option} />
-                <span className={cn('text-[13.5px] font-semibold', on ? 'text-ink' : 'text-ink-2')}>
-                  {option.name}
-                </span>
+                <Icon
+                  name={tab.icon}
+                  size={19}
+                  className={on ? 'text-[var(--accent-ink,var(--color-ink))]' : undefined}
+                />
+                <span className="max-w-full truncate">{tab.label}</span>
+                {tab.set && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute top-2 right-[calc(50%-18px)] size-1.5 rounded-full"
+                    style={{ background: 'var(--accent-ink, var(--color-ink))' }}
+                  />
+                )}
               </button>
             );
           })}
         </div>
 
-        <MoreOptions
-          summary={[
-            DOTS.find((option) => option.value === look.dot)?.label + ' dots',
-            logo && 'logo',
-            caption && 'caption',
-          ]
-            .filter(Boolean)
-            .join(' · ')}
-          className="border-t border-line pt-2"
-        >
-          <div className="grid gap-5 pb-1">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="grid content-start gap-2">
-                <span className="text-[13px] font-medium text-ink-2">Dots</span>
-                <Choice
-                  label="Dot style"
-                  value={look.dot}
-                  onChange={(dot) => setLook({ ...look, dot })}
-                  options={DOTS}
-                  render={(dot) => <StyleSample dot={dot} />}
-                />
-              </div>
-              <div className="grid content-start gap-2">
-                <span className="text-[13px] font-medium text-ink-2">Corners</span>
-                <Choice
-                  label="Corner style"
-                  value={look.corner}
-                  onChange={(corner) => setLook({ ...look, corner })}
-                  options={CORNERS}
-                  render={(corner) => <StyleSample corner={corner} />}
-                />
-              </div>
-            </div>
+        <div className="grid px-4 pt-3 pb-5 sm:px-6 lg:divide-y lg:divide-line lg:px-7 lg:pt-6 lg:pb-3">
+          {/* What it opens: the kind, then only its fields. */}
+          <Section
+            id={idFor('panel-content')}
+            shown={panel === 'content'}
+            title="What it opens"
+            icon={meta.icon}
+          >
+            <KindTiles options={KINDS} value={kind} onPick={choose} compact />
+            <ContentFields
+              key={kind}
+              kind={kind}
+              fields={fields}
+              set={set}
+              idFor={idFor}
+              linkWarning={linkWarning}
+            />
+            {!value && (
+              <SampleButton
+                onClick={() => {
+                  fillSample();
+                  // On a phone, show the code that just drew itself.
+                  requestAnimationFrame(() => {
+                    const stage = document.getElementById(idFor('stage'));
+                    if (stage && stage.getBoundingClientRect().top < 0)
+                      stage.scrollIntoView({
+                        block: 'start',
+                        behavior: reduced ? 'auto' : 'smooth',
+                      });
+                  });
+                }}
+                className="!mx-0 -mt-2 -ml-3 self-start"
+              >
+                Try an example
+              </SampleButton>
+            )}
+          </Section>
 
-            <div className="grid gap-2">
-              <span className="text-[13px] font-medium text-ink-2">Colors</span>
-              <div className="flex flex-wrap gap-2">
-                {(
-                  [
-                    ['fg', 'Code'],
-                    ['bg', 'Background'],
-                    ['corners', 'Corners'],
-                  ] as const
-                ).map(([key, name]) => (
-                  <label
-                    key={key}
-                    className="flex items-center gap-2 rounded-[12px] bg-subtle py-1.5 pr-3 pl-1.5 text-[12.5px] shadow-[inset_0_0_0_1px_var(--color-line)]"
-                  >
-                    <input
-                      type="color"
-                      value={look[key] || (key === 'bg' ? '#ffffff' : look.fg)}
-                      onChange={(event) => setLook({ ...look, [key]: event.target.value })}
-                      className="size-8 cursor-pointer rounded-[8px] border-0 bg-transparent p-0"
-                      aria-label={`${name} color`}
-                    />
-                    <span>
-                      <span className="block text-ink-2">{name}</span>
-                      <span className="mono-num block text-[10.5px] text-muted">
-                        {key === 'bg' && !look.bg
-                          ? 'None'
-                          : key === 'corners' && !look.corners
-                            ? 'Same'
-                            : look[key]}
-                      </span>
-                    </span>
-                  </label>
-                ))}
-                <label className="flex min-h-11 items-center gap-2 px-1 text-[13px] text-ink-2">
-                  <input
-                    type="checkbox"
-                    checked={!look.bg}
-                    onChange={(event) =>
-                      setLook({ ...look, bg: event.target.checked ? '' : '#ffffff' })
-                    }
-                    className="size-4 accent-[var(--accent,var(--color-ink))]"
-                  />
-                  See-through
-                </label>
-              </div>
-            </div>
-
-            <div className="grid gap-2 rounded-[16px] bg-subtle p-3 shadow-[inset_0_0_0_1px_var(--color-line)]">
-              <div className="flex flex-wrap items-center gap-3">
-                {logo ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={logo.src}
-                    alt="Your logo"
-                    className="size-11 rounded-[10px] bg-white object-contain p-1"
-                  />
-                ) : (
-                  <span className="grid size-11 place-items-center rounded-[10px] bg-well text-muted">
-                    <Icon name="image" size={18} />
-                  </span>
-                )}
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[14px] font-medium text-ink">Logo in the middle</span>
-                  <span className="block text-[12.5px] text-muted">
-                    {logo ? 'The code is made sturdier so it still scans.' : 'PNG, JPG or SVG.'}
-                  </span>
-                </span>
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
-                  className="sr-only"
-                  id={field('logo')}
-                  onChange={async (event) => {
-                    const file = event.target.files?.[0];
-                    event.target.value = '';
-                    if (!file) return;
-                    try {
-                      setLogoError('');
-                      const src = await logoFrom(file);
-                      setLogo((current) => ({
-                        src,
-                        size: current?.size ?? 0.2,
-                        plate: current?.plate ?? true,
-                      }));
-                    } catch (error) {
-                      setLogoError(
-                        error instanceof Error ? error.message : 'That logo couldn’t be read.',
-                      );
-                    }
-                  }}
-                />
-                <label
-                  htmlFor={field('logo')}
-                  className="inline-flex h-10 cursor-pointer items-center gap-1.5 rounded-[11px] bg-well px-3 text-[13.5px] font-medium text-ink-2 hover:bg-ink/10 hover:text-ink"
-                >
-                  <Icon name="upload" size={15} /> {logo ? 'Change' : 'Add a logo'}
-                </label>
-                {logo && (
+          {/* The look: every choice is a picture of the result. */}
+          <Section id={idFor('panel-style')} shown={panel === 'style'} title="Style" icon="palette">
+            <div
+              role="radiogroup"
+              aria-label="Looks"
+              className="grid grid-cols-3 gap-2 sm:grid-cols-6"
+            >
+              {LOOKS.map((option) => {
+                const on = option === preset;
+                return (
                   <button
+                    key={option.name}
                     type="button"
-                    onClick={() => setLogo(null)}
-                    className="h-10 rounded-[11px] px-3 text-[13.5px] text-muted hover:bg-ink/5 hover:text-ink"
+                    role="radio"
+                    aria-checked={on}
+                    aria-label={`${option.name} look`}
+                    onClick={() =>
+                      setLook((current) => ({
+                        ...current,
+                        fg: option.fg,
+                        bg: option.bg,
+                        corners: option.corners,
+                        dot: option.dot,
+                        corner: option.corner,
+                      }))
+                    }
+                    className={cn(
+                      'fx-move grid min-w-0 gap-1.5 rounded-[16px] p-1.5 pb-2 text-center active:scale-[.95]',
+                      on
+                        ? 'bg-surface shadow-[inset_0_0_0_2px_var(--accent-ink,var(--color-ink)),0_12px_24px_-16px_var(--accent,transparent)]'
+                        : 'bg-ink/[.045] shadow-[inset_0_0_0_1px_var(--color-line)] hover:bg-ink/[.08]',
+                    )}
                   >
-                    Remove
-                  </button>
-                )}
-              </div>
-              {logoError && <p className="text-[12.5px] text-critical">{logoError}</p>}
-              {logo && (
-                <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
-                  <label className="grid gap-1 text-[12.5px] text-muted">
-                    <span className="flex justify-between">
-                      Logo size <span className="mono-num">{Math.round(logo.size * 100)}%</span>
+                    <LookThumb look={option} />
+                    <span
+                      className={cn('text-[12.5px] font-semibold', on ? 'text-ink' : 'text-ink-2')}
+                    >
+                      {option.name}
                     </span>
-                    <input
-                      type="range"
-                      min={LOGO_MIN}
-                      max={LOGO_MAX}
-                      step={0.01}
-                      value={logo.size}
-                      onChange={(event) => setLogo({ ...logo, size: Number(event.target.value) })}
-                      className="accent-[var(--accent,var(--color-ink))]"
-                    />
-                  </label>
-                  <label className="flex items-center gap-2 text-[13px] text-ink-2">
-                    <input
-                      type="checkbox"
-                      checked={logo.plate}
-                      onChange={(event) => setLogo({ ...logo, plate: event.target.checked })}
-                      className="size-4 accent-[var(--accent,var(--color-ink))]"
-                    />
-                    Plate behind it
+                  </button>
+                );
+              })}
+            </div>
+            <div className="grid gap-5 sm:grid-cols-[4fr_3fr] sm:gap-4">
+              <Group label="Dots">
+                <StyleTiles
+                  label="Dot style"
+                  type="dot"
+                  value={look.dot}
+                  options={DOTS}
+                  onChange={(dot) => setLook({ ...look, dot })}
+                  color={look.fg}
+                  background={look.bg || '#ffffff'}
+                />
+              </Group>
+              <Group label="Corners">
+                <StyleTiles
+                  label="Corner style"
+                  type="corner"
+                  value={look.corner}
+                  options={CORNERS}
+                  onChange={(corner) => setLook({ ...look, corner })}
+                  color={look.corners || look.fg}
+                  background={look.bg || '#ffffff'}
+                />
+              </Group>
+            </div>
+            <Group label="Code">
+              <SwatchRow
+                label="Code color"
+                value={look.fg}
+                options={CODE_COLORS}
+                onChange={(fg) => setLook({ ...look, fg })}
+              />
+            </Group>
+            <Group label="Background">
+              <SwatchRow
+                label="Background color"
+                value={look.bg}
+                options={BACKGROUNDS}
+                onChange={(bg) => setLook({ ...look, bg })}
+              />
+            </Group>
+            <Group label="Corner color">
+              <SwatchRow
+                label="Corner color"
+                value={look.corners}
+                options={CORNER_COLORS}
+                onChange={(corners) => setLook({ ...look, corners })}
+                same={look.fg}
+              />
+            </Group>
+          </Section>
+
+          {/* A logo in the middle: dropped on the code, or picked here. */}
+          <Section id={idFor('panel-logo')} shown={panel === 'logo'} title="Logo" icon="image">
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/svg+xml"
+              className="sr-only"
+              id={idFor('logo')}
+              tabIndex={-1}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                takeLogo(file);
+              }}
+            />
+            {logo ? (
+              <div className="fx-pop grid gap-4">
+                <div className="flex items-center gap-4">
+                  <span
+                    className="grid size-[72px] shrink-0 place-items-center rounded-[16px] p-2 shadow-[inset_0_0_0_1px_var(--color-line)]"
+                    style={{ background: look.bg || '#ffffff' }}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={logo.src} alt="Your logo" className="size-full object-contain" />
+                  </span>
+                  <label className="grid min-w-0 flex-1 gap-1.5">
+                    <span className="text-[13px] font-semibold text-ink-2">Size</span>
+                    <span className="flex items-center gap-2.5">
+                      <span aria-hidden="true" className="size-2.5 rounded-[3px] bg-ink/30" />
+                      <input
+                        type="range"
+                        aria-label="Logo size"
+                        min={LOGO_MIN}
+                        max={LOGO_MAX}
+                        step={0.01}
+                        value={logo.size}
+                        onChange={(event) => setLogo({ ...logo, size: Number(event.target.value) })}
+                        className="h-11 min-w-0 flex-1 accent-[var(--accent-ink,var(--color-ink))] lg:h-8"
+                      />
+                      <span aria-hidden="true" className="size-4.5 rounded-[5px] bg-ink/30" />
+                    </span>
                   </label>
                 </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {look.bg && (
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={logo.plate}
+                      onClick={() => setLogo({ ...logo, plate: !logo.plate })}
+                      className="fx-move inline-flex min-h-11 items-center gap-2.5 rounded-full bg-ink/[.05] py-1 pr-4 pl-1.5 text-[14px] font-medium text-ink-2 hover:bg-ink/[.08] lg:min-h-10"
+                    >
+                      <span
+                        className={cn(
+                          'fx-move relative h-6 w-10 rounded-full',
+                          logo.plate ? 'bg-[var(--accent-ink,var(--color-ink))]' : 'bg-ink/20',
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            'fx-move absolute top-0.5 left-0.5 size-5 rounded-full bg-white shadow-card',
+                            logo.plate && 'translate-x-4',
+                          )}
+                        />
+                      </span>
+                      Box behind it
+                    </button>
+                  )}
+                  <label
+                    htmlFor={idFor('logo')}
+                    className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-full px-3.5 text-[14px] font-medium text-ink-2 hover:bg-ink/[.05] hover:text-ink lg:min-h-10"
+                  >
+                    <Icon name="replace" size={15} /> Change
+                  </label>
+                  <button
+                    type="button"
+                    aria-label="Remove logo"
+                    onClick={() => setLogo(null)}
+                    className="inline-flex min-h-11 items-center gap-1.5 rounded-full px-3.5 text-[14px] font-medium text-muted hover:bg-ink/[.05] hover:text-ink lg:min-h-10"
+                  >
+                    <Icon name="trash" size={15} /> Remove
+                  </button>
+                </div>
+                <p className="text-[12.5px] text-muted">
+                  The code gets sturdier with a logo, so it still scans.
+                </p>
+              </div>
+            ) : (
+              <label
+                htmlFor={idFor('logo')}
+                onDragOver={(event) => {
+                  if (!hasFiles(event)) return;
+                  event.preventDefault();
+                }}
+                onDrop={(event) => {
+                  if (!hasFiles(event)) return;
+                  event.preventDefault();
+                  takeLogo(event.dataTransfer.files[0]);
+                }}
+                className="fx-move group flex min-h-[92px] cursor-pointer items-center gap-4 rounded-[18px] border-[1.5px] border-dashed border-line-strong bg-ink/[.025] p-4 hover:border-[var(--accent-ink,var(--color-ink))] hover:bg-ink/[.04] active:scale-[.99]"
+              >
+                <span className="fx-move grid size-14 shrink-0 place-items-center rounded-[16px] bg-[color-mix(in_srgb,var(--accent,var(--color-ink))_22%,transparent)] text-[var(--accent-ink,var(--color-ink))] group-hover:rotate-[-5deg]">
+                  <Icon name="image" size={24} />
+                </span>
+                <span className="grid gap-0.5">
+                  <span className="text-[16px] font-bold text-ink">Add your logo</span>
+                  <span className="text-[13px] text-muted">
+                    <span className="lg:hidden">Pick one from your photos or files</span>
+                    <span className="hidden lg:inline">Or drag it straight onto the code</span>
+                  </span>
+                </span>
+              </label>
+            )}
+            {logoError && (
+              <p role="alert" className="-mt-2 text-[13px] text-critical">
+                {logoError}
+              </p>
+            )}
+          </Section>
+
+          {/* Words under the code, so people know what they're scanning. */}
+          <Section
+            id={idFor('panel-words')}
+            shown={panel === 'words'}
+            title="Words under it"
+            icon="type"
+          >
+            <div
+              role="radiogroup"
+              aria-label="Words under the code"
+              className="flex flex-wrap gap-2"
+            >
+              {['', ...CAPTIONS[kind]].map((suggestion) => {
+                const on = caption === suggestion;
+                return (
+                  <button
+                    key={suggestion || 'none'}
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    onClick={() => setCaption(suggestion)}
+                    className={cn(
+                      'fx-move min-h-11 rounded-full px-4 text-[14px] font-medium active:scale-[.96] lg:min-h-10',
+                      on
+                        ? 'text-[var(--on-accent,#12110d)] shadow-[0_8px_20px_-12px_var(--accent,transparent)]'
+                        : 'bg-ink/[.05] text-ink-2 hover:bg-ink/10 hover:text-ink',
+                    )}
+                    style={on ? { background: 'var(--accent, var(--color-ink))' } : undefined}
+                  >
+                    {suggestion || 'None'}
+                  </button>
+                );
+              })}
+            </div>
+            <Input
+              aria-label="Your own words"
+              value={caption}
+              maxLength={32}
+              enterKeyHint="done"
+              placeholder="Or write your own"
+              onChange={(event) => setCaption(event.target.value)}
+            />
+          </Section>
+
+          {/* The technical settings, for whoever wants them. */}
+          <Advanced
+            summary={`${size} px · ${LEVELS.find((option) => option.value === level)?.label} correction`}
+            className="pt-4 lg:pt-4"
+          >
+            <div className="grid gap-5 pb-3">
+              <Group label="Error correction">
+                {logo ? (
+                  <p className="text-[13px] text-muted">
+                    High, while there’s a logo: it covers part of the code.
+                  </p>
+                ) : (
+                  <Choices
+                    label="Error correction"
+                    value={chosenLevel}
+                    onChange={setChosenLevel}
+                    options={LEVELS}
+                  />
+                )}
+              </Group>
+              <Group
+                label="Quiet zone"
+                aside={
+                  <span className="mono-num text-[12px] font-normal text-muted">
+                    {look.margin} modules
+                  </span>
+                }
+              >
+                <input
+                  type="range"
+                  aria-label="Quiet zone"
+                  min={0}
+                  max={8}
+                  step={1}
+                  value={look.margin}
+                  onChange={(event) => setLook({ ...look, margin: Number(event.target.value) })}
+                  className="h-8 w-full accent-[var(--accent-ink,var(--color-ink))]"
+                />
+              </Group>
+              <Group label="Picture size">
+                <Choices
+                  label="Picture size"
+                  value={String(size)}
+                  onChange={(next) => setSize(Number(next))}
+                  options={SIZES}
+                />
+              </Group>
+              {code.state === 'ready' && (
+                <Group label="Inside the code">
+                  <p className="mono-num text-[12px] text-muted">
+                    Version {(code.matrix.length - 17) / 4} · {code.matrix.length}×
+                    {code.matrix.length} modules · UTF-8
+                  </p>
+                  <pre className="max-h-32 overflow-auto rounded-[12px] bg-ink/[.045] px-3 py-2.5 font-mono text-[12px] leading-relaxed break-all whitespace-pre-wrap text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line)]">
+                    {value}
+                  </pre>
+                </Group>
               )}
             </div>
-
-            <div className="grid gap-2">
-              <Field
-                label="Words under the code"
-                htmlFor={field('caption')}
-                optional
-                hint="Printed with the code, so people know what they’re scanning."
-              >
-                <Input
-                  id={field('caption')}
-                  value={caption}
-                  maxLength={32}
-                  enterKeyHint="done"
-                  placeholder={CAPTIONS[kind]?.[0] ?? 'Scan me'}
-                  onChange={(event) => setCaption(event.target.value)}
-                />
-              </Field>
-              <div className="flex flex-wrap gap-1.5">
-                {(CAPTIONS[kind] ?? ['Scan me']).map((suggestion) => (
-                  <button
-                    key={suggestion}
-                    type="button"
-                    aria-pressed={caption === suggestion}
-                    onClick={() => setCaption(caption === suggestion ? '' : suggestion)}
-                    className={cn(
-                      'min-h-9 rounded-full px-3.5 text-[13px] transition-colors',
-                      caption === suggestion
-                        ? 'text-[#12110d]'
-                        : 'bg-well text-ink-2 hover:bg-ink/10',
-                    )}
-                    style={caption === suggestion ? { background: ACCENT } : undefined}
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </MoreOptions>
-      </Surface>
+          </Advanced>
+        </div>
+      </div>
     </div>
   );
 }
