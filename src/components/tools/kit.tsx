@@ -550,7 +550,9 @@ export function Choices<T extends string>({
       aria-label={label}
       className={cn(
         'flex gap-2',
-        scroll ? 'scroller -mx-4 overflow-x-auto px-4 sm:mx-0 sm:flex-wrap sm:px-0' : 'flex-wrap',
+        scroll
+          ? 'scroller -mx-4 scroll-px-4 overflow-x-auto px-4 sm:mx-0 sm:flex-wrap sm:px-0'
+          : 'flex-wrap',
         className,
       )}
     >
