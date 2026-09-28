@@ -92,7 +92,7 @@ function Photo({
   );
 }
 
-const QR_ROWS = [
+export const QR_ROWS = [
   '1111111011001111101111111',
   '1000001000010100101000001',
   '1011101001110001001011101',
@@ -120,9 +120,10 @@ const QR_ROWS = [
   '1111111011011001001000111',
 ];
 
-const inFinder = (row: number, col: number) =>
+export const inFinder = (row: number, col: number) =>
   (row < 7 && col < 7) || (row < 7 && col > 17) || (row > 17 && col < 7);
-const inLogo = (row: number, col: number) => row >= 10 && row <= 14 && col >= 10 && col <= 14;
+export const inLogo = (row: number, col: number) =>
+  row >= 10 && row <= 14 && col >= 10 && col <= 14;
 
 const compositions: Record<ToolId, Draw> = {
   split: (a) => (

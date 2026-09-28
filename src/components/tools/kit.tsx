@@ -596,7 +596,12 @@ export function Choices<T extends string>({
             {option.icon && <Icon name={option.icon} size={size === 'lg' ? 18 : 16} />}
             <span className="whitespace-nowrap">{option.label}</span>
             {option.hint && (
-              <span className={cn('text-[12.5px]', on ? 'text-[var(--on-accent,#12110d)]/65' : 'text-muted')}>
+              <span
+                className={cn(
+                  'text-[12.5px]',
+                  on ? 'text-[var(--on-accent,#12110d)]/65' : 'text-muted',
+                )}
+              >
                 {option.hint}
               </span>
             )}
@@ -677,7 +682,9 @@ export function ChoiceCards<T extends string>({
                 aria-hidden="true"
                 className={cn(
                   'absolute top-3 right-3 grid size-5.5 place-items-center rounded-full transition-colors',
-                  on ? 'text-[var(--on-accent,#12110d)]' : 'shadow-[inset_0_0_0_1.5px_var(--color-line-strong)]',
+                  on
+                    ? 'text-[var(--on-accent,#12110d)]'
+                    : 'shadow-[inset_0_0_0_1.5px_var(--color-line-strong)]',
                 )}
                 style={on ? { background: ACCENT } : undefined}
               >
@@ -1201,7 +1208,8 @@ export function Swatches({
             className={cn(
               'fx-move grid shrink-0 place-items-center rounded-full shadow-[inset_0_0_0_1px_rgb(0_0_0/.12)] active:scale-90',
               box,
-              on && 'scale-110 ring-[2.5px] ring-ink ring-offset-2 ring-offset-[var(--color-surface)]',
+              on &&
+                'scale-110 ring-[2.5px] ring-ink ring-offset-2 ring-offset-[var(--color-surface)]',
             )}
             style={{ background: color.value }}
           />
@@ -1213,7 +1221,8 @@ export function Swatches({
           className={cn(
             'fx-move relative grid shrink-0 cursor-pointer place-items-center rounded-full shadow-[inset_0_0_0_1px_rgb(0_0_0/.12)]',
             box,
-            !known && 'scale-110 ring-[2.5px] ring-ink ring-offset-2 ring-offset-[var(--color-surface)]',
+            !known &&
+              'scale-110 ring-[2.5px] ring-ink ring-offset-2 ring-offset-[var(--color-surface)]',
           )}
           style={{
             background: known
@@ -1279,7 +1288,13 @@ export function Payoff({
   /** The result itself: the palette, the totals, the pages. */
   children?: ReactNode;
   /** The one thing to do now. */
-  action?: { label: ReactNode; icon?: IconName; onClick?: () => void; href?: string; download?: string };
+  action?: {
+    label: ReactNode;
+    icon?: IconName;
+    onClick?: () => void;
+    href?: string;
+    download?: string;
+  };
   /** Quieter actions (copy, share). */
   secondary?: ReactNode;
   onReset?: () => void;

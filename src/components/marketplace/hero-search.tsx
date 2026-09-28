@@ -4,18 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { cn } from '@/components/ui/cn';
 import { Icon } from '@/components/ui/icon';
 import { toolHref, type Tool } from '@/lib/catalog';
-import { IntentLink } from './intent-link';
 import { EXAMPLES, ResultList, useResultKeys, useToolSearch } from '@/components/world/search';
-
-/** Jumps for the most common jobs, straight to the tool. */
-const INTENTS: { label: string; slug: string }[] = [
-  { label: 'Split a check', slug: 'split' },
-  { label: 'Find a time', slug: 'when' },
-  { label: 'Make a QR code', slug: 'qr' },
-  { label: 'Resize photos', slug: 'resize' },
-  { label: 'Merge PDFs', slug: 'pdf' },
-  { label: 'Crop for Instagram', slug: 'social-crop' },
-];
 
 /**
  * An example of what to type, changing every few seconds while the box is empty and idle. One
@@ -51,7 +40,7 @@ export function HeroSearch() {
   return (
     <div className="w-full max-w-[760px]">
       <label htmlFor={`${listId}-input`} className="label mb-3 block !text-ink-2">
-        What do you need to do?
+        Or search every tool
       </label>
       <div
         className={cn(
@@ -140,23 +129,7 @@ export function HeroSearch() {
             </p>
           )}
         </div>
-      ) : (
-        <ul
-          className="scrollbar-none -mx-4 mt-3.5 flex gap-2 overflow-x-auto px-4 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0"
-          aria-label="Common jobs"
-        >
-          {INTENTS.map((intent) => (
-            <li key={intent.slug}>
-              <IntentLink
-                href={`/tools/${intent.slug}`}
-                className="inline-flex h-10 shrink-0 items-center whitespace-nowrap gap-1.5 rounded-full bg-white/[.055] px-3.5 text-[13.5px] text-ink-2 shadow-[inset_0_0_0_1px_rgb(255_255_255/.07)] transition-colors hover:bg-white/[.1] hover:text-ink"
-              >
-                {intent.label}
-              </IntentLink>
-            </li>
-          ))}
-        </ul>
-      )}
+      ) : null}
     </div>
   );
 }

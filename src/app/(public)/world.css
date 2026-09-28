@@ -696,8 +696,9 @@ html[data-filtering] [data-editorial] {
 }
 /* Transitions in the tool's personality. */
 .fx-move {
-  transition-property: transform, opacity, background-color, color, box-shadow, width, height,
-    border-radius, inset, aspect-ratio;
+  transition-property:
+    transform, opacity, background-color, color, box-shadow, width, height, border-radius, inset,
+    aspect-ratio;
   transition-duration: var(--motion-dur, 220ms);
   transition-timing-function: var(--motion-ease, ease-out);
 }
@@ -829,8 +830,8 @@ html[data-filtering] [data-editorial] {
       no-repeat,
     linear-gradient(var(--accent-ink), var(--accent-ink)) 18px calc(100% - 18px) / 2.5px 26px
       no-repeat,
-    linear-gradient(var(--accent-ink), var(--accent-ink)) calc(100% - 18px) calc(100% - 18px) /
-      26px 2.5px no-repeat,
+    linear-gradient(var(--accent-ink), var(--accent-ink)) calc(100% - 18px) calc(100% - 18px) / 26px
+      2.5px no-repeat,
     linear-gradient(var(--accent-ink), var(--accent-ink)) calc(100% - 18px) calc(100% - 18px) /
       2.5px 26px no-repeat,
     var(--color-surface);

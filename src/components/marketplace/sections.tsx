@@ -1,19 +1,9 @@
-import type { CSSProperties, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { cn } from '@/components/ui/cn';
 import { Icon } from '@/components/ui/icon';
-import {
-  categories,
-  getTool,
-  isReady,
-  listedTools,
-  toolHref,
-  type Tool,
-  type ToolId,
-} from '@/lib/catalog';
-import { ToolArt } from './art';
-import { FeatureCard, PosterCard, TileCard, ToolRow, WashCard } from './cards';
+import { categories, getTool, isReady, listedTools, type Tool, type ToolId } from '@/lib/catalog';
+import { FeatureCard, PosterCard, QuickAction, TileCard, ToolRow, WashCard } from './cards';
 import { HeroSearch } from './hero-search';
-import { IntentLink } from './intent-link';
 
 /*
  * The marketplace, top to bottom: say what you need (search), two featured tools, the everyday
@@ -67,71 +57,60 @@ function SectionHead({
 
 /* ---------------- hero ---------------- */
 
+/** The first thing on the page: the jobs people come for, each a tiny version of its tool. */
+const QUICK: { id: ToolId; label: string }[] = [
+  { id: 'split', label: 'Split dinner' },
+  { id: 'when', label: 'Find a time' },
+  { id: 'qr', label: 'Make a QR code' },
+  { id: 'resize', label: 'Shrink a photo' },
+  { id: 'pdf', label: 'Merge PDFs' },
+  { id: 'social-crop', label: 'Crop for Instagram' },
+  { id: 'bring', label: 'Plan a potluck' },
+  { id: 'clean', label: 'Tidy file names' },
+];
+
 export function Hero() {
-  const peek = [getTool('qr'), getTool('split'), getTool('palette')];
   return (
     <section
       aria-labelledby="hero-title"
-      className="relative isolate overflow-hidden px-4 pt-24 pb-8 sm:px-6 sm:pt-32 sm:pb-14 lg:px-8 lg:pb-20"
+      className="relative isolate overflow-hidden px-4 pt-[84px] pb-8 sm:px-6 sm:pt-32 sm:pb-12 lg:px-8"
     >
-      {/* Ambient light: three tool colors, as gradients (no blur filters to repaint). */}
+      {/* Ambient light: a few tool colors, as gradients (no blur filters to repaint). */}
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10">
         <div
           className="drift absolute -inset-x-[20%] -top-[30%] h-[130%]"
           style={{
             background:
-              'radial-gradient(38% 34% at 22% 28%, rgb(106 116 255 / .2), transparent 70%), radial-gradient(34% 30% at 86% 42%, rgb(255 179 92 / .13), transparent 70%), radial-gradient(30% 26% at 52% 92%, rgb(32 211 146 / .08), transparent 70%)',
+              'radial-gradient(34% 30% at 18% 22%, rgb(184 243 90 / .12), transparent 70%), radial-gradient(34% 30% at 84% 30%, rgb(255 179 92 / .14), transparent 70%), radial-gradient(30% 26% at 52% 90%, rgb(62 224 208 / .09), transparent 70%)',
           }}
         />
         <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-b from-transparent to-[#0b0b0a]" />
       </div>
 
-      <div
-        className={cn(
-          wrap,
-          'grid items-center gap-14 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,.85fr)]',
-        )}
-      >
-        <div className="min-w-0 animate-rise">
-          <h1
-            id="hero-title"
-            className="t-mega !text-[clamp(64px,17vw,220px)] bg-gradient-to-b from-[#f4f1ea] via-[#e6e1d6] to-[#8f8a80] bg-clip-text text-transparent"
-          >
-            Tools
-          </h1>
-          <p className="mt-4 max-w-[30ch] text-[19px] leading-[1.35] text-ink-2 sm:mt-6 sm:text-[24px]">
-            Small tools that just work.{' '}
-            <span className="text-muted">Open one and get it done.</span>
-          </p>
-          <div className="mt-6 sm:mt-9">
-            <HeroSearch />
-          </div>
-        </div>
-
-        {/* A peek at the gallery: real tools, tilted like prints on a table. */}
-        <div aria-hidden="true" className="relative hidden h-[480px] lg:block">
-          {peek.map((tool, index) => (
-            <IntentLink
-              key={tool.id}
-              href={toolHref(tool)}
-              tabIndex={-1}
-              style={
-                {
-                  top: ['4%', '30%', '58%'][index],
-                  left: ['14%', '-2%', '26%'][index],
-                  rotate: ['6deg', '-5deg', '3deg'][index],
-                  zIndex: [1, 2, 3][index],
-                  animationDelay: `${120 + index * 90}ms`,
-                } as CSSProperties
-              }
-              className="group absolute w-[62%] animate-rise overflow-hidden rounded-[22px] shadow-[0_0_0_1px_rgb(255_255_255/.09),0_40px_80px_-30px_rgb(0_0_0/.9)] transition-transform duration-700 ease-[cubic-bezier(.16,1,.3,1)] hover:!rotate-0 hover:scale-[1.03]"
-            >
-              <ToolArt tool={tool} className="aspect-[4/3] w-full" />
-              <span className="absolute bottom-3 left-3 rounded-full bg-black/60 px-3 py-1 text-[12.5px] font-semibold text-ink">
-                {tool.name}
-              </span>
-            </IntentLink>
+      <div className={wrap}>
+        <h1
+          id="hero-title"
+          className="animate-rise font-display text-[40px] leading-[0.95] font-extrabold tracking-[-0.045em] text-balance text-ink sm:text-[72px] lg:text-[88px]"
+          style={{ fontVariationSettings: "'wdth' 114" }}
+        >
+          What do you want to do?
+        </h1>
+        <nav
+          aria-label="Quick actions"
+          className="mt-5 grid grid-cols-2 gap-2.5 sm:mt-10 sm:grid-cols-4 sm:gap-4"
+        >
+          {QUICK.map(({ id, label }, index) => (
+            <QuickAction
+              key={id}
+              tool={getTool(id)}
+              label={label}
+              className={cn('animate-rise', index >= 6 && 'max-sm:hidden')}
+              style={{ animationDelay: `${60 + index * 35}ms` }}
+            />
           ))}
+        </nav>
+        <div className="mt-5 sm:mt-10">
+          <HeroSearch />
         </div>
       </div>
     </section>

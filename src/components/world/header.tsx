@@ -42,7 +42,9 @@ export function WorldHeader() {
 
   const solid = scrolled || !home || menu;
   // On a tool page the header takes on the tool's world: same Hyphy bar, the tool's room.
-  const tool = pathname.startsWith('/tools/') ? toolBySlug(pathname.split('/')[2] ?? '') : undefined;
+  const tool = pathname.startsWith('/tools/')
+    ? toolBySlug(pathname.split('/')[2] ?? '')
+    : undefined;
   const surface = tool ? worlds[tool.id].surface : 'night';
   const nav = [
     { label: 'Work', href: studio.work, external: true },

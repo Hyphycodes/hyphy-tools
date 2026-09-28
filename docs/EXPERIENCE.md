@@ -7,14 +7,14 @@ technical utilities in one dark template. The architecture is shared; the experi
 
 `src/components/marketplace/worlds.ts` gives every tool a world:
 
-| What          | Field                                                   | Example (Split)                  |
-| ------------- | ------------------------------------------------------- | -------------------------------- |
-| 1. World      | `surface`, `canvas`, `paper`, `ink`, `glow`, `third`, `pattern` | light · cream · receipt paper    |
-| 2. Object     | `object`                                                | `receipt`                        |
-| 3. Action     | `action`                                                | “Split a check”                  |
-| 4. Controls   | the tool's own, from the kit                            | avatars, tap-to-assign, tip chips |
-| 5. Motion     | `motion`: `paper` · `snappy` · `soft` · `springy`       | `paper` (settles)                |
-| 6. Payoff     | `payoff`: `resolve` · `stamp` · `count` · `emerge` · `flip` · `pair` · `share` | `resolve` (receipt → totals) |
+| What        | Field                                                                          | Example (Split)                   |
+| ----------- | ------------------------------------------------------------------------------ | --------------------------------- |
+| 1. World    | `surface`, `canvas`, `paper`, `ink`, `glow`, `third`, `pattern`                | light · cream · receipt paper     |
+| 2. Object   | `object`                                                                       | `receipt`                         |
+| 3. Action   | `action`                                                                       | “Split a check”                   |
+| 4. Controls | the tool's own, from the kit                                                   | avatars, tap-to-assign, tip chips |
+| 5. Motion   | `motion`: `paper` · `snappy` · `soft` · `springy`                              | `paper` (settles)                 |
+| 6. Payoff   | `payoff`: `resolve` · `stamp` · `count` · `emerge` · `flip` · `pair` · `share` | `resolve` (receipt → totals)      |
 
 The tool page (`src/app/(public)/tools/[slug]/page.tsx`) is `.tool-world` with the world's
 colors as variables and `data-surface`, `data-motion`, `data-object`, `data-payoff`.
@@ -51,7 +51,7 @@ Experience parts:
 
 - `Stage` — the stage for the one object: `material="table" | "paper" | "light"`.
 - `DropObject` — the way in, shaped like the object (`shape="receipt" | "photo" | "pages" |
-  "files" | "plain"`), with a picture inside (`art`), a big title (“Drop your receipt”), one
+"files" | "plain"`), with a picture inside (`art`), a big title (“Drop your receipt”), one
   button, and children underneath (sample, “type it in instead”). Catches files dropped
   anywhere on the page.
 - `PresetCards` — outcomes instead of settings (“WEB · ~640 KB”), the recommended one first.
