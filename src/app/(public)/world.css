@@ -866,3 +866,7 @@ html[data-filtering] [data-editorial] {
     inset 1.5px 1.5px 0 var(--drop-edge),
     inset -1.5px 0 0 var(--drop-edge);
 }
+/* A wall calendar is a big pattern: quieter in daylight. */
+.world-night [data-surface='light'] > [data-pattern='calendar']::after {
+  opacity: 0.3;
+}
