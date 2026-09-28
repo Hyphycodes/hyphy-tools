@@ -409,7 +409,23 @@ export const worlds: Record<ToolId, World> = {
     action: 'Make a wish list',
     journey: ['Add your wishes', 'Share with givers', 'No duplicates'],
   },
-  'secret-santa': later('#ff5e57', 'tag', 'fun'),
+  // Pine felt, parchment envelopes, a cranberry seal and a thread of muted gold.
+  'secret-santa': {
+    surface: 'light',
+    canvas: '#efe7d4',
+    paper: '#fffaf0',
+    ink: '#1b2a22',
+    accentInk: '#a3202f',
+    glow: '#c9a24c',
+    third: '#1f4d3a',
+    pattern: 'envelope',
+    object: 'envelope',
+    motion: 'paper',
+    payoff: 'emerge',
+    mood: 'fun',
+    action: 'Draw names',
+    journey: ['Who’s in', 'Draw names', 'Send envelopes'],
+  },
 };
 
 export const worldOf = (tool: Pick<Tool, 'id'>) => worlds[tool.id];

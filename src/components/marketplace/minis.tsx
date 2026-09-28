@@ -1352,9 +1352,76 @@ const minis: Record<ToolId, Draw | null> = {
       </g>
     </>
   ),
+  'secret-santa': (w, a) => {
+    const envelope = (x: number, y: number, tilt: number, name: string, front = false) => (
+      <g key={name} transform={`rotate(${tilt} ${x + 60} ${y + 40})`}>
+        <rect x={x + 3} y={y + 8} width="120" height="80" rx="8" fill="#000" opacity=".22" />
+        <rect x={x} y={y} width="120" height="80" rx="8" fill="#efe2c4" />
+        <path
+          d={`M${x} ${y + 18} L${x + 60} ${y + 50} L${x + 120} ${y + 18} V${y + 80} H${x} Z`}
+          fill="#fbf3e2"
+        />
+        <path
+          d={`M${x} ${y + 4} Q${x} ${y} ${x + 6} ${y} H${x + 114} Q${x + 120} ${y} ${x + 120} ${y + 4} L${x + 60} ${y + 46} Z`}
+          fill="#f5ead0"
+        />
+        <circle cx={x + 60} cy={y + 44} r="11" fill={a} />
+        <path
+          d={`M${x + 60} ${y + 37.5}l2 4.4 4.7.5-3.5 3.2 1 4.7-4.2-2.4-4.2 2.4 1-4.7-3.5-3.2 4.7-.5Z`}
+          fill={w.glow}
+        />
+        <text
+          x={x + 60}
+          y={y + 70}
+          textAnchor="middle"
+          fontSize={front ? 11 : 9.5}
+          fontWeight="700"
+          fill="#3a2a1a"
+          style={display}
+        >
+          For {name}
+        </text>
+      </g>
+    );
+    return (
+      <>
+        <rect x="20" y="20" width="360" height="260" rx="26" fill={w.third} />
+        <rect x="20" y="20" width="360" height="260" rx="26" fill="#000" opacity=".15" />
+        {envelope(48, 58, -10, 'Jerry')}
+        {envelope(232, 52, 8, 'Emauri')}
+        {envelope(62, 170, 6, 'Sophia')}
+        <g>
+          <rect x="150" y="96" width="112" height="86" rx="6" fill="#fffdf6" />
+          <text
+            x="206"
+            y="124"
+            textAnchor="middle"
+            fontSize="7.5"
+            fontWeight="700"
+            fill="#8a6d2e"
+            style={sans}
+            letterSpacing="1.2"
+          >
+            YOU’RE GIVING TO
+          </text>
+          <text
+            x="206"
+            y="150"
+            textAnchor="middle"
+            fontSize="20"
+            fontWeight="800"
+            fill={w.ink}
+            style={display}
+          >
+            Kamila
+          </text>
+        </g>
+        {envelope(146, 150, -2, 'Kamila', true)}
+      </>
+    );
+  },
   receipts: null,
   mileage: null,
-  'secret-santa': null,
 };
 
 /**

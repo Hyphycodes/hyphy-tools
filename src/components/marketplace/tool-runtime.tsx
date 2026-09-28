@@ -50,7 +50,7 @@ const runtimes: Record<ToolId, ComponentType | null> = {
   receipts: null,
   mileage: null,
   wishlist: tool(() => import('@/components/tools/wishlist-tool').then((m) => m.WishlistTool)),
-  'secret-santa': null,
+  'secret-santa': tool(() => import('@/components/tools/santa-tool').then((m) => m.SantaTool)),
 };
 
 export function ToolRuntime({ id }: { id: ToolId }) {
