@@ -1,6 +1,14 @@
 # Architecture
 
-Hyphy Tools is one product for people and the businesses they work in. Everything below serves
+Hyphy Tools has two sides. **The public Tools world** (`/tools`, `/p`) is a static, dark
+marketplace of tools anyone can use without an account; it reads one registry
+(`src/lib/catalog`) and most of its tools run entirely in the browser — see
+[TOOLS.md](TOOLS.md). **Hyphy Spaces** (`/spaces`, `/{space}/…`) is the signed-in product this
+document describes. The two share design tokens and some tools (PDF, Images) but not routes,
+layouts or data: the public world never reads a Workspace, and tools written for both take the
+Space features (Save to Files, attach to a project) only when `useOptionalWorkspace()` finds one.
+
+Hyphy Spaces is one product for people and the businesses they work in. Everything below serves
 one idea: **a person has one identity; what they see depends on the Space they're in.**
 
 ## The model

@@ -11,6 +11,7 @@
     "typecheck": "next typegen && tsc --noEmit",
     "format": "prettier --write .",
     "test": "playwright test",
+    "test:unit": "playwright test -c playwright.unit.config.ts",
     "verify": "npm run lint && npm run typecheck && npm run build",
     "test:auth": "playwright test -c playwright.auth.config.ts",
     "test:data": "NODE_OPTIONS=--conditions=react-server playwright test -c playwright.data.config.ts",
@@ -30,7 +31,8 @@
     "postgres": "^3.4.9",
     "qrcode-generator": "^2.0.4",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

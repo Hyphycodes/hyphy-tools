@@ -6,11 +6,11 @@ session on every request, and a Hyphy profile with a Personal Space made for eve
 
 ## Current state
 
-| Setting                   | What happens                                                                                                              |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `HYPHY_IDENTITY` unset    | **Demo Mode.** No sign-in. `/` opens the app as a Demo Mode person; Preview As, Space switching and Reset work as before. |
-| `HYPHY_IDENTITY=demo`     | Same. Anything other than exactly `supabase` means Demo Mode, so a typo can never switch real accounts on.                |
-| `HYPHY_IDENTITY=supabase` | **Real accounts.** Every app page needs a verified Supabase Auth session; Demo Mode's controls refuse to run.             |
+| Setting                   | What happens                                                                                                                    |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `HYPHY_IDENTITY` unset    | **Demo Mode.** No sign-in. `/spaces` opens the app as a Demo Mode person; Preview As, Space switching and Reset work as before. |
+| `HYPHY_IDENTITY=demo`     | Same. Anything other than exactly `supabase` means Demo Mode, so a typo can never switch real accounts on.                      |
+| `HYPHY_IDENTITY=supabase` | **Real accounts.** Every app page needs a verified Supabase Auth session; Demo Mode's controls refuse to run.                   |
 
 In Demo Mode the account pages (`/sign-in`, `/sign-up`, `/forgot-password`, `/reset-password`,
 `/welcome`, `/auth/error`) can still be opened to review them. They carry a "Preview" line, their
@@ -80,17 +80,19 @@ With real accounts, before every page (static files excluded by the matcher):
    sees them) and the response (so the browser keeps them), plus Supabase's
    `Cache-Control: private, no-cache, no-store`, `Expires` and `Pragma` headers so no CDN can serve
    one person's session to another. Redirects copy the cookies and those headers.
-3. Not signed in and not on a public account page → `/sign-in?next=<where they were going>`.
-   Signed in and on `/sign-in`, `/sign-up` or `/forgot-password` → home.
-4. Remember the Space they're in (`hyphy_space` cookie) so `/` can return there.
+3. Not signed in and not on a public page → `/sign-in?next=<where they were going>`.
+   Signed in and on `/sign-in`, `/sign-up` or `/forgot-password` → `/spaces`.
+4. Remember the Space they're in (`hyphy_space` cookie) so `/spaces` can return there.
 
 Pages and every Server Action check again through `requireSession`/`requireWorkspace` — the proxy is
 the first gate, not the only one (a Server Action posts to whatever route it's on).
 
 ### Route protection
 
-- Public: `/sign-in`, `/sign-up`, `/forgot-password`, `/reset-password`, `/auth/*`.
-- Everything else, including `/welcome`, needs a session.
+- Public: the Tools marketplace (`/`, which redirects to `/tools`; `/tools/*`), published Signal
+  Pages (`/p`), invitations (`/invite/*`), and `/sign-in`, `/sign-up`, `/forgot-password`,
+  `/reset-password`, `/auth/*`.
+- Everything else, including `/spaces` and `/welcome`, needs a session.
 - Unknown Space, or a Space you're not in → the same "This isn't in your Spaces" page.
 - `next` is only ever an internal path (`safeNext` in `lib/auth/routes.ts`): no other origins,
   `//host`, `/\host`, `/..//host`, control characters or schemes, and never back into the account
@@ -99,7 +101,7 @@ the first gate, not the only one (a Server Action posts to whatever route it's o
 ### Active Space
 
 The Space is the URL (`/abc-construction/...`); `getWorkspace` finds it among the person's active
-memberships or returns not-found. For `/`, `homeFor(session, remembered)`:
+memberships or returns not-found. For `/spaces`, `homeFor(session, remembered)`:
 
 1. the remembered Space (`hyphy_space`), **only if** they're an active member right now;
 2. else their first Business Space; 3. else their Personal Space; 4. else anything they belong to.
@@ -204,8 +206,9 @@ This is a checklist, not something done yet.
    been tested against hosted Storage's HTTP API (only its policies, in SQL; docs/FILES.md).
 2. **Migrations.** Every migration through `20261001010000_file_policy_tuning.sql` (Phase 2D) is
    applied to `hyphy-tools-dev`, and `supabase/tests/accounts.sql`, `teams.sql`,
-   `customization.sql` and `files.sql` pass there. A production project gets every migration with
-   `supabase db push` — never `supabase/dev/`.
+   `customization.sql` and `files.sql` pass there. `20261002000000_public_tools_addresses.sql`
+   (reserving `tools` and `spaces` as addresses) is new and **not applied anywhere yet**. A
+   production project gets every migration with `supabase db push` — never `supabase/dev/`.
 3. **Supabase Auth settings** (dashboard → Authentication):
    - Email provider on, **Confirm email on**, minimum password length **8**, **leaked password
      protection on** (the advisor flags it off today), secure password change as preferred.

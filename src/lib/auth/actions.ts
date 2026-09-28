@@ -16,7 +16,7 @@ import {
   type AuthProblem,
 } from './errors';
 import type { AuthFormState } from './form';
-import { authRoutes, safeNext } from './routes';
+import { authRoutes, safeNext, SPACES_HOME } from './routes';
 
 /*
  * Every account action runs here, on the server: the password goes from the form to Supabase
@@ -64,7 +64,7 @@ export async function signIn(_: AuthFormState, form: FormData): Promise<AuthForm
   } catch (error) {
     return report(error, 'sign-in', values);
   }
-  redirect(safeNext(text(form, 'next')));
+  redirect(safeNext(text(form, 'next'), SPACES_HOME));
 }
 
 export async function signUp(_: AuthFormState, form: FormData): Promise<AuthFormState> {

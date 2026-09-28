@@ -1,11 +1,10 @@
 import { redirect } from 'next/navigation';
-import { landingFor, requireSession } from '@/lib/identity';
+import { MARKETPLACE } from '@/lib/auth/routes';
 
 /**
- * Open the app and land in your Space. Demo Mode always has someone (no sign-in); with real
- * accounts, nobody signed in goes to Sign In.
+ * The front door is the public Tools marketplace: nobody is dropped into an account dashboard.
+ * Spaces (the signed-in product) open from `/spaces`.
  */
-export default async function Home() {
-  const session = await requireSession();
-  redirect(await landingFor(session));
+export default function Home() {
+  redirect(MARKETPLACE);
 }

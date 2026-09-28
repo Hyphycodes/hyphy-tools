@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { connection } from 'next/server';
 import { AuthFrame } from '@/components/auth/frame';
+import { SPACES_HOME } from '@/lib/auth/routes';
 import { identityMode } from '@/lib/identity/mode';
 
 /**
@@ -15,7 +16,7 @@ export default async function FlowLayout({ children }: LayoutProps<'/'>) {
         identityMode() === 'demo' ? (
           <div className="border-b border-caution/15 bg-caution-soft/70 px-4 py-2.5 text-center text-[13px] text-caution">
             <span className="font-medium">Preview.</span> Creating a business needs a real account —{' '}
-            <Link href="/" className="font-medium underline underline-offset-2">
+            <Link href={SPACES_HOME} className="font-medium underline underline-offset-2">
               explore the demo businesses
             </Link>
             .

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { cn } from '@/components/ui/cn';
 import { Icon } from '@/components/ui/icon';
+import { SPACES_HOME } from '@/lib/auth/routes';
 
 /** Hyphy Tools' mark: the spark on ink, and the name. */
 export function HyphyMark({ className }: { className?: string }) {
@@ -95,7 +96,7 @@ export function PreviewNotice() {
   return (
     <div className="border-b border-caution/15 bg-caution-soft/70 px-4 py-2.5 text-center text-[13px] text-caution">
       <span className="font-medium">Preview.</span> Sign-in isn’t switched on yet —{' '}
-      <Link href="/" className="font-medium underline underline-offset-2">
+      <Link href={SPACES_HOME} className="font-medium underline underline-offset-2">
         open Hyphy Tools in Demo Mode
       </Link>
       .

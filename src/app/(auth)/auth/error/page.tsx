@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { AuthAside, AuthColumn, AuthHeading, inlineLink } from '@/components/auth/frame';
 import { ButtonLink } from '@/components/ui/button';
-import { authRoutes } from '@/lib/auth/routes';
+import { authRoutes, SPACES_HOME } from '@/lib/auth/routes';
 
 export const metadata: Metadata = { title: 'Link problem' };
 
@@ -53,7 +53,7 @@ export default async function AuthErrorPage({ searchParams }: PageProps<'/auth/e
       </span>
       <AuthHeading title={title}>{body}</AuthHeading>
       {reason === 'preview' ? (
-        <ButtonLink href="/" variant="primary" size="lg" className="w-full">
+        <ButtonLink href={SPACES_HOME} variant="primary" size="lg" className="w-full">
           Open Hyphy Tools
         </ButtonLink>
       ) : reset ? (

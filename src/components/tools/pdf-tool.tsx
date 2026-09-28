@@ -7,10 +7,11 @@ import { cn } from '@/components/ui/cn';
 import { Input, Segmented } from '@/components/ui/form';
 import { Icon } from '@/components/ui/icon';
 import { useToast } from '@/components/ui/toast';
-import { useWorkspace } from '@/components/shell/workspace-context';
+import { useOptionalWorkspace } from '@/components/shell/workspace-context';
 import { AttachPicker } from './attach-picker';
 import { formatBytes, plural } from '@/lib/platform/format';
 import { formatRange, parseRange } from '@/lib/tools/pdf';
+import { PdfOrganize, PdfSplit } from './pdf-pages';
 import type { PdfPreview } from '@/lib/tools/pdf-preview';
 
 /*
@@ -70,10 +71,65 @@ function Sheet({ src, label, className }: { src?: string; label?: string; classN
   );
 }
 
-export function PdfTool({ slug, canSave }: { slug: string; canSave: boolean }) {
+type PdfMode = 'merge' | 'organize' | 'extract' | 'split';
+
+/** The four jobs, with shorter names where a phone is narrow. */
+const MODES: { value: PdfMode; label: React.ReactNode }[] = [
+  {
+    value: 'merge',
+    label: (
+      <>
+        <span className="sm:hidden">Merge</span>
+        <span className="hidden sm:inline">Merge PDFs</span>
+      </>
+    ),
+  },
+  { value: 'organize', label: 'Organize' },
+  {
+    value: 'extract',
+    label: (
+      <>
+        <span className="sm:hidden">Extract</span>
+        <span className="hidden sm:inline">Extract pages</span>
+      </>
+    ),
+  },
+  { value: 'split', label: 'Split' },
+];
+
+/**
+ * Runs anywhere. Inside a Space (`slug`, `canSave`) merged and extracted PDFs can also be saved to
+ * Files and attached to a project; in the public world it's the tool alone, and nothing leaves
+ * the device.
+ */
+export function PdfTool({ slug = '', canSave = false }: { slug?: string; canSave?: boolean }) {
+  const id = useId();
+  const [mode, setMode] = useState<PdfMode>('merge');
+  if (mode === 'organize' || mode === 'split')
+    return (
+      <div className="min-w-0 rounded-[22px] bg-surface p-4 shadow-card sm:p-5">
+        <Segmented name={`${id}-mode`} value={mode} onChange={setMode} options={MODES} />
+        <div className="mt-4">{mode === 'organize' ? <PdfOrganize /> : <PdfSplit />}</div>
+      </div>
+    );
+  return <PdfCombine slug={slug} canSave={canSave} mode={mode} onMode={setMode} />;
+}
+
+/** Merge (Hyphy Studio's PDF Merge) and Extract: many files in, or one file's chosen pages out. */
+function PdfCombine({
+  slug,
+  canSave,
+  mode,
+  onMode,
+}: {
+  slug: string;
+  canSave: boolean;
+  mode: 'merge' | 'extract';
+  onMode: (mode: PdfMode) => void;
+}) {
   const id = useId();
   const toast = useToast();
-  const [mode, setMode] = useState<'merge' | 'extract'>('merge');
+  const setMode = onMode;
   const [files, setFiles] = useState<Entry[]>([]);
   const [thumbs, setThumbs] = useState<(string | undefined)[]>([]);
   const [keep, setKeep] = useState<number[]>([]);
@@ -86,7 +142,8 @@ export function PdfTool({ slug, canSave }: { slug: string; canSave: boolean }) {
   const saving = saver.busy;
   const [saved, setSaved] = useState<string | null>(null);
   const [projectId, setProjectId] = useState('');
-  const workspace = useWorkspace();
+  const workspace = useOptionalWorkspace();
+  const savable = canSave && workspace !== null;
   const nextId = useRef(0);
   const resultUrl = useRef<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -299,9 +356,9 @@ export function PdfTool({ slug, canSave }: { slug: string; canSave: boolean }) {
     toast({
       title: saved.name,
       description: projectId
-        ? `Saved to Files · ${workspace.options.projects.find((item) => item.id === projectId)?.name}`
+        ? `Saved to Files · ${workspace?.options.projects.find((item) => item.id === projectId)?.name}`
         : 'Saved to Files',
-      href: workspace.href(`/files?file=${saved.fileId}`),
+      href: workspace?.href(`/files?file=${saved.fileId}`),
       action: 'Open',
     });
   };
@@ -327,10 +384,7 @@ export function PdfTool({ slug, canSave }: { slug: string; canSave: boolean }) {
             setRange('');
             clearResult();
           }}
-          options={[
-            { value: 'merge', label: 'Merge PDFs' },
-            { value: 'extract', label: 'Extract pages' },
-          ]}
+          options={MODES}
         />
         <input
           ref={input}
@@ -402,7 +456,7 @@ export function PdfTool({ slug, canSave }: { slug: string; canSave: boolean }) {
                         label={entry.unreadable ? 'Can’t preview' : undefined}
                         className="relative"
                       />
-                      <span className="mono-num absolute top-3 left-3 grid size-6 place-items-center rounded-full bg-ink text-[11px] font-medium text-white shadow-lift">
+                      <span className="mono-num absolute top-3 left-3 grid size-6 place-items-center rounded-full bg-ink text-[11px] font-medium text-on-ink shadow-lift">
                         {index + 1}
                       </span>
                     </div>
@@ -653,7 +707,7 @@ export function PdfTool({ slug, canSave }: { slug: string; canSave: boolean }) {
                       <Sheet src={src} />
                     </span>
                   ))}
-                <span className="absolute -right-3 -bottom-2 rounded-full bg-ink px-2.5 py-1 text-[12px] font-medium text-white shadow-lift">
+                <span className="absolute -right-3 -bottom-2 rounded-full bg-ink px-2.5 py-1 text-[12px] font-medium text-on-ink shadow-lift">
                   {plural(result.pages, 'page')}
                 </span>
               </div>
@@ -665,14 +719,14 @@ export function PdfTool({ slug, canSave }: { slug: string; canSave: boolean }) {
                 <a
                   href={result.url}
                   download={result.name}
-                  className="inline-flex h-11 items-center justify-center gap-2 rounded-[11px] bg-ink px-4 text-[15px] font-medium text-white transition-colors hover:bg-ink-2 lg:h-10 lg:text-[14px]"
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-[11px] bg-ink px-4 text-[15px] font-medium text-on-ink transition-colors hover:bg-ink-2 lg:h-10 lg:text-[14px]"
                 >
                   <Icon name="download" size={16} /> Download PDF
                 </a>
-                {canSave &&
+                {savable &&
                   (saved !== null ? (
                     <Link
-                      href={workspace.href(`/files?file=${saved}`)}
+                      href={workspace!.href(`/files?file=${saved}`)}
                       className="inline-flex h-11 items-center justify-center gap-2 rounded-[11px] bg-positive-soft px-4 text-[15px] font-medium text-positive lg:h-10 lg:text-[14px]"
                     >
                       <Icon name="check" size={16} /> Saved to Files · Open

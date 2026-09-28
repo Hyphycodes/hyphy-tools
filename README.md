@@ -1,14 +1,16 @@
 # Hyphy Tools
 
-The software platform of Hyphy LLC: a universal toolbox that grows into a person's or a
-business's operating system. Hyphy Studio (`hyphy-studio`) is the marketing site; this repository
-is the product.
+The software of Hyphy LLC, inside the Hyphy Studio umbrella (`hyphy-studio`, the website, is a
+separate product). It has two sides:
 
-**Demo Mode is the default.** There is no sign-in: open it and you're in, as one of the Demo Mode
-people, in one of their Spaces. Real accounts (Supabase Auth: sign-up, sign-in, recovery, a
-Personal Space for every new account; businesses, invitations and teams) are built and tested but switched off until the hosted
-setup is verified — see [docs/AUTH.md](docs/AUTH.md). The account pages (`/sign-in`, `/sign-up`, …)
-can be opened in Demo Mode as a preview.
+- **The public Tools world** — a dark marketplace anyone can browse, search and use: Split, When?,
+  QR Studio, PDF, Social Crop and the rest. No sign-up; most tools run entirely on your device.
+  This is what `/` opens. See [docs/TOOLS.md](docs/TOOLS.md).
+- **Hyphy Spaces** — the signed-in product: a person's or a business's Spaces with receipts,
+  mileage, projects, people and files. **Demo Mode is the default** there: no sign-in, you're one
+  of the Demo Mode people. Real accounts (Supabase Auth) are built and tested but switched off —
+  see [docs/AUTH.md](docs/AUTH.md). Spaces open from `/spaces` and aren't linked from the public
+  world until accounts do.
 
 ## Run it
 
@@ -16,16 +18,17 @@ Node 22+ and npm.
 
 ```sh
 npm ci
-npm run dev          # http://localhost:3000/platform
+npm run dev          # http://localhost:3000/platform → the Tools marketplace
 ```
 
-No environment variables, database or accounts are needed. `/` opens the current person's main
-Space. The slim **Demo · Preview as…** control at the bottom of the sidebar (a thin line above the top bar on
-phones, or <kbd>Shift</kbd>+<kbd>D</kbd> anywhere) previews as someone else; **Reset** undoes your
-changes.
+No environment variables, database or accounts are needed. `/` opens the public marketplace
+(`/tools`); `/spaces` opens the current person's main Space. There, the slim **Demo · Preview
+as…** control at the bottom of the sidebar (a thin line above the top bar on phones, or
+<kbd>Shift</kbd>+<kbd>D</kbd> anywhere) previews as someone else; **Reset** undoes your changes.
 
 ```sh
 npm run verify       # lint + route types + TypeScript + production build
+npm run test:unit    # the registry, search and every tool's logic (no server)
 npm test             # unit + end-to-end tests (starts `next start` on :3107; build first)
 ```
 
@@ -51,6 +54,14 @@ All people and businesses are fictional. Emails use the reserved `.example` doma
 
 ```
 src/
+  app/(public)/tools/…     the public marketplace and one page per tool (dark world: world.css)
+  app/p/                   a published Signal Page (the page rides inside its link)
+  lib/catalog/             the tool registry: schema, entries, families, search, validation
+  lib/share/               link-as-state (#…) and browser storage for tools that keep things
+  lib/tools/               each tool's logic (split, QR payloads and styles, PDF ranges, …)
+  components/marketplace/  marketplace sections, cards, artwork, tool pages, the tool runtime
+  components/world/        the public header, footer, ⌘K search and reveal motion
+  components/tools/        the tools themselves (public and, for PDF/QR/Images/Links, Spaces)
   app/(app)/[space]/…      every page lives inside a Space: /personal, /hyphy, /abc-construction…
   app/(app)/[space]/actions.ts   every change: validate → check permission → repository
   lib/platform/            the product's rules: types, roles, plans, tool registry, Create registry,
@@ -66,7 +77,6 @@ src/
   components/dashboard/    role-aware dashboard widgets
   components/records/      shared rows: activity, inbox, projects, vehicles, files, receipts
   components/files/        upload queue, drop zone, previews, Open/Download, Trash, logo
-  components/tools/        the tools (QR, PDF, Images ported from Studio; Links, Receipts, Mileage)
   components/ui/           design system primitives
 supabase/                  migrations, RLS and Storage policies, SQL test suites, the local stack
 docs/                      architecture, auth plan, Demo Mode, design, Studio inventory
@@ -75,6 +85,8 @@ tests/                     unit (rules) and end-to-end (personas, access, flows,
 
 ## Read next
 
+- [docs/TOOLS.md](docs/TOOLS.md) — the public Tools world: the registry, adding a tool, privacy
+  facts, link-as-state, search.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — Spaces, roles vs plans vs modules, the registries, data flow.
 - [docs/DEMO-MODE.md](docs/DEMO-MODE.md) — how the preview works and how to remove it.
 - [docs/AUTH.md](docs/AUTH.md) — real accounts: how they work, what's tested, how to switch them on.
@@ -92,7 +104,10 @@ Everything is served under `/platform` (`basePath`, set in `src/lib/base-path.ts
 hyphy-studio.com/platform is a Vercel rewrite to this deployment, which ships on its own. The
 paths below are relative to it.
 
-`/` → your main Space. Inside any Space (`/{space}`):
+Public (no account): `/` → `/tools` (the marketplace, `?c=money` filters), `/tools/{tool}` (every
+tool in [docs/TOOLS.md](docs/TOOLS.md)), `/p#…` (a published Signal Page).
+
+Spaces: `/spaces` → your main Space. Inside any Space (`/{space}`):
 
 | Path                                       | What                                                      |
 | ------------------------------------------ | --------------------------------------------------------- |
@@ -117,3 +132,8 @@ paths below are relative to it.
 
 Ready for Vercel as a standard Next.js project with no environment variables. It is not deployed
 by this repository; create a dedicated Vercel project when you want a preview URL.
+
+Canonical addresses and share cards on the public pages point at Studio's address plus `/platform`
+(Studio serves this app there): `HYPHY_SITE_URL` when it's set, else `NEXT_PUBLIC_STUDIO_URL`, else
+`https://hyphy-studio.vercel.app`, where Studio runs until its custom domain is live. Links back to
+Studio use `NEXT_PUBLIC_STUDIO_URL` the same way.

@@ -29,3 +29,23 @@ export function formatRange(indexes: number[]): string {
   }
   return parts.join(', ');
 }
+
+/** Split: "1-3, 4-6, 8-" → one zero-based page list per part, each in order. */
+export function parseParts(input: string, total: number): number[][] | null {
+  const parts = input
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((part) => parseRange(part, total));
+  if (!parts.length || parts.some((part) => part === null)) return null;
+  return parts as number[][];
+}
+
+/** Split: every `size` pages becomes its own file. */
+export function everyParts(total: number, size: number): number[][] {
+  const step = Math.max(1, Math.floor(size));
+  const parts: number[][] = [];
+  for (let start = 0; start < total; start += step)
+    parts.push(Array.from({ length: Math.min(step, total - start) }, (_, index) => start + index));
+  return parts;
+}

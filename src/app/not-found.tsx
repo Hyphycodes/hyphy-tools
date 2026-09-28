@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { buttonClass } from '@/components/ui/button';
+import { SPACES_HOME } from '@/lib/auth/routes';
 
 export default function NotFound() {
   return (
@@ -11,7 +12,7 @@ export default function NotFound() {
           The page doesn’t exist, or it isn’t shared with you — or, in Demo Mode, with the person
           you’re previewing as. Head home to your Spaces.
         </p>
-        <Link href="/" className={buttonClass({ variant: 'primary', className: 'mt-6' })}>
+        <Link href={SPACES_HOME} className={buttonClass({ variant: 'primary', className: 'mt-6' })}>
           Go home
         </Link>
       </div>

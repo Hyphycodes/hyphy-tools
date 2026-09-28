@@ -5,7 +5,7 @@ export const inputClass = cn(
   'w-full rounded-[11px] bg-surface px-3.5 text-ink placeholder:text-faint',
   'h-12 text-[16px] lg:h-10 lg:rounded-[10px] lg:px-3 lg:text-[14px]',
   'shadow-[inset_0_0_0_1px_var(--color-line-strong)] transition-shadow duration-150',
-  'hover:shadow-[inset_0_0_0_1px_rgb(22_21_15/.26)]',
+  'hover:shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-ink)_26%,transparent)]',
   'focus:shadow-[inset_0_0_0_1.5px_var(--color-signal),0_0_0_4px_rgb(50_64_255/.12)] focus:outline-none',
   'disabled:bg-subtle disabled:text-muted',
 );

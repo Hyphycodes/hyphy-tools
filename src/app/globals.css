@@ -28,6 +28,8 @@
   --color-line-strong: rgb(22 21 15 / 0.16);
   --color-night: #0e0e0c;
   --color-night-2: #1b1b18;
+  /* Text on an ink fill (a primary button): white on paper, near-black in the dark world. */
+  --color-on-ink: #ffffff;
 
   --color-signal: #3240ff;
   --color-signal-hover: #2430e0;

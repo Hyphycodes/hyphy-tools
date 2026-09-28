@@ -7,7 +7,7 @@ type Size = 'sm' | 'md' | 'lg' | 'icon' | 'icon-sm';
 
 const variants: Record<Variant, string> = {
   primary:
-    'bg-ink text-white shadow-[inset_0_1px_0_rgb(255_255_255/.1)] hover:bg-ink-2 active:bg-ink',
+    'bg-ink text-on-ink shadow-[inset_0_1px_0_rgb(255_255_255/.1)] hover:bg-ink-2 active:bg-ink',
   accent:
     'bg-signal text-white shadow-[inset_0_1px_0_rgb(255_255_255/.22),0_6px_16px_-8px_rgb(50_64_255/.8)] hover:bg-signal-hover',
   secondary: 'bg-surface text-ink shadow-card hover:bg-subtle hover:shadow-lift',

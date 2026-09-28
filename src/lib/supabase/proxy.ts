@@ -6,6 +6,7 @@ import {
   safeNext,
   signInPath,
   spaceSegment,
+  SPACES_HOME,
 } from '@/lib/auth/routes';
 import { LAST_SPACE_COOKIE } from '@/lib/identity/active-space';
 import { supabaseConfig } from './config';
@@ -56,7 +57,7 @@ export async function updateSession(request: NextRequest) {
     return redirectKeepingCookies(
       request,
       response,
-      safeNext(request.nextUrl.searchParams.get('next')),
+      safeNext(request.nextUrl.searchParams.get('next'), SPACES_HOME),
     );
 
   const space = signedIn ? spaceSegment(path) : null;

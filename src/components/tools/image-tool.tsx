@@ -7,7 +7,7 @@ import { cn } from '@/components/ui/cn';
 import { Field, Input, Select } from '@/components/ui/form';
 import { Icon } from '@/components/ui/icon';
 import { useToast } from '@/components/ui/toast';
-import { useWorkspace } from '@/components/shell/workspace-context';
+import { useOptionalWorkspace } from '@/components/shell/workspace-context';
 import { AttachPicker } from './attach-picker';
 import { formatBytes } from '@/lib/platform/format';
 
@@ -170,13 +170,18 @@ async function samplePhoto(): Promise<File> {
   return new File([blob], 'Sample photo.jpg', { type: 'image/jpeg' });
 }
 
-export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean }) {
+/**
+ * Runs anywhere. Inside a Space (`slug`, `canSave`) results can also be saved to Files; in the
+ * public world it's the tool alone, and photos never leave the device.
+ */
+export function ImageTool({ slug = '', canSave = false }: { slug?: string; canSave?: boolean }) {
   const toast = useToast();
   const saver = useSaveToFiles(slug);
   const saving = saver.busy;
   const [projectId, setProjectId] = useState('');
   const [savedIds, setSavedIds] = useState<string | null>(null);
-  const workspace = useWorkspace();
+  const workspace = useOptionalWorkspace();
+  const savable = canSave && workspace !== null;
   const id = useId();
   const [items, setItems] = useState<Item[]>([]);
   const [maxWidth, setMaxWidth] = useState('1920');
@@ -407,7 +412,7 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
         saved.length < finished.length
           ? `${finished.length - saved.length} didn’t save`
           : undefined,
-      href: workspace.href(saved.length === 1 ? `/files?file=${saved[0]}` : '/files?view=made'),
+      href: workspace?.href(saved.length === 1 ? `/files?file=${saved[0]}` : '/files?view=made'),
       action: 'Open',
     });
   };
@@ -501,7 +506,7 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
                 onClick={() => setMaxWidth(width)}
                 className={cn(
                   'h-9 rounded-full px-3 text-[13px] transition-colors lg:h-8',
-                  maxWidth === width ? 'bg-ink text-white' : 'bg-well text-ink-2 hover:bg-ink/10',
+                  maxWidth === width ? 'bg-ink text-on-ink' : 'bg-well text-ink-2 hover:bg-ink/10',
                 )}
               >
                 {width || 'Original'}
@@ -650,12 +655,12 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
                     · {formatBytes(latest.file.size)}
                   </span>
                   <Icon name="arrow-right" size={14} className="text-white drop-shadow" />
-                  <span className="rounded-full bg-ink px-2.5 py-1 text-white/70">
+                  <span className="rounded-full bg-ink px-2.5 py-1 text-on-ink/70">
                     After{' '}
-                    <span className="mono-num text-white">
+                    <span className="mono-num text-on-ink">
                       {latest.result.width}×{latest.result.height}
                     </span>{' '}
-                    · <span className="text-white">{formatBytes(latest.result.size)}</span>
+                    · <span className="text-on-ink">{formatBytes(latest.result.size)}</span>
                   </span>
                 </figcaption>
               </figure>
@@ -741,11 +746,11 @@ export function ImageTool({ slug, canSave }: { slug: string; canSave: boolean })
             </ol>
           </>
         )}
-        {canSave && finished.length > 0 && !busy && (
+        {savable && finished.length > 0 && !busy && (
           <div className="grid gap-2 border-t border-line px-4 py-3">
             {savedIds !== null ? (
               <Link
-                href={workspace.href(
+                href={workspace!.href(
                   finished.length === 1 ? `/files?file=${savedIds}` : '/files?view=made',
                 )}
                 className="inline-flex h-11 items-center justify-center gap-2 rounded-[11px] bg-positive-soft text-[15px] font-medium text-positive lg:h-9 lg:text-[13.5px]"

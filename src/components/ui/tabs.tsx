@@ -76,7 +76,7 @@ export function Chips({
             className={cn(
               'inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-[14px] transition-all lg:h-8 lg:px-3 lg:text-[13px]',
               on
-                ? 'bg-ink font-medium text-white'
+                ? 'bg-ink font-medium text-on-ink'
                 : 'bg-surface text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line-strong)] hover:bg-subtle',
             )}
           >

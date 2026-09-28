@@ -9,8 +9,10 @@ const nextConfig: NextConfig = {
     serverActions: { allowedOrigins: ['hyphy-studio.com', 'www.hyphy-studio.com'] },
   },
   async redirects() {
-    // The deployment's own root opens the product.
-    return [{ source: '/', destination: BASE_PATH, basePath: false, permanent: false }];
+    // The deployment's own root opens the public Tools marketplace.
+    return [
+      { source: '/', destination: `${BASE_PATH}/tools`, basePath: false, permanent: false },
+    ];
   },
   async headers() {
     return [

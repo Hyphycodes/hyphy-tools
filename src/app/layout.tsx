@@ -38,7 +38,12 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: LayoutProps<'/'>) {
   return (
-    <html lang="en" className={`${hubot.variable} ${mona.variable} ${martian.variable}`}>
+    // The public world marks <html> before first paint (reveals), so its classes may differ.
+    <html
+      lang="en"
+      className={`${hubot.variable} ${mona.variable} ${martian.variable}`}
+      suppressHydrationWarning
+    >
       <body>{children}</body>
     </html>
   );

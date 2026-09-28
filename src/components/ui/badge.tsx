@@ -10,7 +10,7 @@ const tones: Record<Tone, string> = {
   critical: 'bg-critical-soft text-critical',
   signal: 'bg-signal-soft text-signal-ink',
   outline: 'text-muted shadow-[inset_0_0_0_1px_var(--color-line-strong)]',
-  ink: 'bg-ink text-white',
+  ink: 'bg-ink text-on-ink',
 };
 
 export function Badge({

@@ -2,6 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { SPACES_HOME } from '@/lib/auth/routes';
 import { RuleError } from '@/lib/data/repository';
 import { requireSession } from '@/lib/identity';
 import { checkAddress, isBusinessType, slugify } from '@/lib/platform/business-types';
@@ -63,7 +64,7 @@ export async function createBusinessAction(
 /** Accept an invitation, as the signed-in person. Joined → into the business. */
 export async function acceptInviteAction(form: FormData) {
   const token = text(form, 'token');
-  if (!INVITE_TOKEN.test(token)) redirect('/');
+  if (!INVITE_TOKEN.test(token)) redirect(SPACES_HOME);
   const session = await requireSession(`/invite/${token}`);
   if (!session.account) redirect(`/invite/${token}`);
   const { outcome, slug } = await acceptInvitation(session.person.id, token);

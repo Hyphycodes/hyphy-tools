@@ -7,7 +7,7 @@ import { ButtonLink } from '@/components/ui/button';
 import { Icon } from '@/components/ui/icon';
 import { SpaceMark } from '@/components/ui/marks';
 import { signOut } from '@/lib/auth/actions';
-import { authRoutes } from '@/lib/auth/routes';
+import { authRoutes, SPACES_HOME } from '@/lib/auth/routes';
 import { acceptInviteAction } from '@/lib/business/actions';
 import { getSession } from '@/lib/identity';
 import { identityMode } from '@/lib/identity/mode';
@@ -56,7 +56,7 @@ export default async function InvitePage({ params, searchParams }: PageProps<'/i
         title="Invitations work with real accounts."
         body="This preview runs in Demo Mode, so invitation links don’t do anything here."
         action={
-          <ButtonLink href="/" variant="primary" size="lg" className="w-full">
+          <ButtonLink href={SPACES_HOME} variant="primary" size="lg" className="w-full">
             Open Hyphy Tools
           </ButtonLink>
         }
@@ -171,7 +171,7 @@ export default async function InvitePage({ params, searchParams }: PageProps<'/i
           <PendingButton pendingLabel="Signing out…">Sign in as {invite.email}</PendingButton>
         </form>
         <AuthAside>
-          <Link href="/" className={inlineLink}>
+          <Link href={SPACES_HOME} className={inlineLink}>
             Stay signed in as {signedInAs}
           </Link>
         </AuthAside>
@@ -190,7 +190,7 @@ export default async function InvitePage({ params, searchParams }: PageProps<'/i
         <form action={acceptInviteAction} className="grid gap-2.5">
           <input type="hidden" name="token" value={token} />
           <PendingButton pendingLabel="Joining…">Accept invite</PendingButton>
-          <ButtonLink href="/" size="lg" variant="ghost" className="w-full">
+          <ButtonLink href={SPACES_HOME} size="lg" variant="ghost" className="w-full">
             Not now
           </ButtonLink>
         </form>,
@@ -207,7 +207,7 @@ function Refusal({ title, body, action }: { title: string; body: string; action?
       </span>
       <AuthHeading title={title}>{body}</AuthHeading>
       {action ?? (
-        <ButtonLink href="/" variant="primary" size="lg" className="w-full">
+        <ButtonLink href={SPACES_HOME} variant="primary" size="lg" className="w-full">
           Open Hyphy Tools
         </ButtonLink>
       )}

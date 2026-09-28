@@ -29,3 +29,11 @@ export function useWorkspace() {
   if (!value) throw new Error('useWorkspace needs a WorkspaceProvider.');
   return value;
 }
+
+/**
+ * The Workspace when there is one: tools that also run in the public world (outside any Space)
+ * use this, and offer Space features (save to Files, attach to a project) only when it's there.
+ */
+export function useOptionalWorkspace() {
+  return useContext(WorkspaceContext);
+}

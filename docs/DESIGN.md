@@ -72,3 +72,30 @@ slides away. Nothing loops. `prefers-reduced-motion` removes motion.
 Plain and specific: People, Spaces, Projects, Files, Tools, Needs attention, "Who can access
 this?". Never tenant, RBAC, schema or workflow. Demo content is fictional and labeled; the
 preview says so where it matters ("In this preview, Hyphy keeps a file's details, not the file").
+
+## After dark: the public Tools world
+
+The marketplace and tool pages (`src/app/(public)`, `world.css`) are Hyphy at night — the same
+typefaces and tool colors, re-lit on Hyphy Studio's night surface (`#0b0b0a`).
+
+- **Tokens, re-lit.** `.world-night` redefines the semantic tokens (canvas, surface, subtle, well,
+  ink, muted, faint, line, signal, positive, caution, critical, and `on-ink` for text on an ink
+  fill). Components written against tokens — every tool — work in both worlds unchanged. Shadows
+  become hairline edges and depth.
+- **Cinematic, not busy.** Near-black canvas with a whisper of grain, layered charcoal surfaces,
+  soft accent light behind artwork, big editorial type (Hubot Sans at up to 248px for “Tools”),
+  generous section spacing. No gradients for their own sake, no neon, no glass everywhere.
+- **Tools bring the light.** Each tool has an accent and its own artwork
+  (`components/marketplace/art.tsx`): a composition of what it makes, on a charcoal stage lit in
+  its color. Families rhyme (Gather is warm, Signal electric, Image Lab sunlit, File Lab paper).
+- **Three presentations, never a wall of identical cards.** A tile (artwork first, words beneath,
+  no box), a feature (the artwork is the stage and the words sit in it) and a row (a mark and a
+  line, for the index). Sections vary their compositions: family stages, a two-up money spread,
+  a ticket for drops.
+- **Search is the centerpiece.** “What are you trying to do?” with examples that type themselves,
+  results as you type, the reason a tool matched, and ⌘K everywhere.
+- **Motion with a job.** Sections reveal once as they arrive, the hero's light drifts slowly,
+  cards lift toward you on hover, opening a tool cross-fades the page. All CSS and the View
+  Transitions API; reduced motion turns every bit of it off.
+- **Phones first.** The hero, search and filters fit 390px; family rows swipe; tools stack with
+  their result first where it matters (QR draws above its controls); touch targets are 44px.

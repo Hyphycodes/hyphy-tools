@@ -629,6 +629,7 @@ test.describe('safe destinations after sign-in', () => {
       expect(safeNext(path)).toBe('/');
     expect(signInPath('/abc/projects')).toBe('/sign-in?next=%2Fabc%2Fprojects');
     expect(signInPath('/')).toBe('/sign-in');
+    expect(signInPath('/spaces')).toBe('/sign-in');
     expect(signInPath('//evil.example')).toBe('/sign-in');
   });
   test('which pages are open, and which only while signed out', () => {
@@ -638,6 +639,11 @@ test.describe('safe destinations after sign-in', () => {
     expect(isPublicPath('/welcome')).toBe(false);
     expect(isPublicPath('/personal')).toBe(false);
     expect(isPublicPath('/sign-inside')).toBe(false);
+    // The Tools marketplace and Signal Pages never need an account; Spaces always do.
+    for (const path of ['/', '/tools', '/tools/split', '/p'])
+      expect(isPublicPath(path), path).toBe(true);
+    for (const path of ['/spaces', '/toolshed', '/personal/tools/qr'])
+      expect(isPublicPath(path), path).toBe(false);
     expect(isSignedOutOnlyPath('/sign-up')).toBe(true);
     expect(isSignedOutOnlyPath('/reset-password')).toBe(false);
   });
@@ -647,6 +653,8 @@ test.describe('safe destinations after sign-in', () => {
     expect(spaceSegment('/sign-in')).toBeNull();
     expect(spaceSegment('/welcome')).toBeNull();
     expect(spaceSegment('/')).toBeNull();
+    expect(spaceSegment('/tools/split')).toBeNull();
+    expect(spaceSegment('/spaces')).toBeNull();
     expect(spaceSegment('/ABC')).toBeNull();
     // The seed's Spaces never use a reserved address.
     for (const space of data.spaces.filter((item) => item.kind === 'business'))

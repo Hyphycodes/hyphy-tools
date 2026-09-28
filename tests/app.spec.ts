@@ -53,8 +53,8 @@ test.beforeEach(async ({ context, baseURL }) => {
   await previewAs(context, 'jerry', baseURL!);
 });
 
-test('opens straight into the product, no sign-in', async ({ page }) => {
-  await visit(page, '/');
+test('Spaces open straight into the product, no sign-in', async ({ page }) => {
+  await visit(page, '/spaces');
   await expect(page).toHaveURL(/\/hyphy$/);
   await expect(page.getByRole('heading', { level: 1 })).toContainText('Jerry');
   await expect(

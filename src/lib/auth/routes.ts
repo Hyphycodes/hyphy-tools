@@ -24,15 +24,31 @@ const ACCOUNT_PAGES = [
   '/auth',
 ];
 
-/** Open to everyone: the account pages, and invitation links (read before signing in). */
-const PUBLIC = [...ACCOUNT_PAGES, '/invite'];
+/**
+ * Where the Spaces product opens: your last Space. `/` belongs to the public Tools marketplace,
+ * which never needs an account.
+ */
+export const SPACES_HOME = '/spaces';
+
+/** The public Tools marketplace and every tool page: open to everyone, always. */
+export const MARKETPLACE = '/tools';
+
+/** A Signal Page opened from its link (the page itself rides in the link). */
+export const SIGNAL_PAGE = '/p';
+
+/**
+ * Open to everyone: the front door, the marketplace and Signal Pages, the account pages, and
+ * invitation links (read before signing in).
+ */
+const PUBLIC = [MARKETPLACE, SIGNAL_PAGE, ...ACCOUNT_PAGES, '/invite'];
 
 /** Only for people who aren't signed in; a signed-in visit goes home. */
 const SIGNED_OUT_ONLY = [authRoutes.signIn, authRoutes.signUp, authRoutes.forgotPassword];
 
 const under = (path: string, prefix: string) => path === prefix || path.startsWith(`${prefix}/`);
 
-export const isPublicPath = (path: string) => PUBLIC.some((prefix) => under(path, prefix));
+export const isPublicPath = (path: string) =>
+  path === '/' || PUBLIC.some((prefix) => under(path, prefix));
 export const isSignedOutOnlyPath = (path: string) =>
   SIGNED_OUT_ONLY.some((prefix) => under(path, prefix));
 
@@ -59,6 +75,8 @@ export const reservedSlugs = [
   'dev',
   'settings',
   'help',
+  'tools',
+  'spaces',
 ] as const;
 
 /** `/abc/projects` → `abc`, for remembering the last Space someone used. */
@@ -93,10 +111,10 @@ export function safeNext(raw: unknown, fallback = '/'): string {
   return `${path}${url.search}${url.hash}`;
 }
 
-/** Sign-in, coming back to `next` afterwards. */
+/** Sign-in, coming back to `next` afterwards (Spaces open on their own; no need to say so). */
 export function signInPath(next?: string) {
   const back = next ? safeNext(next, '') : '';
-  return back && back !== '/'
+  return back && back !== '/' && back !== SPACES_HOME
     ? `${authRoutes.signIn}?next=${encodeURIComponent(back)}`
     : authRoutes.signIn;
 }

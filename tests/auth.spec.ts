@@ -89,10 +89,16 @@ async function counts(email: string) {
 
 test.describe.configure({ mode: 'serial' });
 
-test('the app is closed to anyone not signed in, and remembers where they were going', async ({
+test('Spaces are closed to anyone not signed in, and remember where they were going', async ({
   page,
 }) => {
+  // The front door is the public Tools marketplace: no account, ever.
   await visit(page, '/');
+  await expect(page).toHaveURL(`${BASE_PATH}/tools`);
+  await visit(page, '/tools/split');
+  await expect(page.getByRole('heading', { level: 1, name: 'Split' })).toBeVisible();
+
+  await visit(page, '/spaces');
   await expect(page).toHaveURL(`${BASE_PATH}/sign-in`);
   await expect(page.getByRole('heading', { name: 'Welcome back.' })).toBeVisible();
   // No Demo Mode: nobody to preview as.
@@ -155,7 +161,7 @@ test('a new account’s Home offers first steps and shows no demo data', async (
   // Their only Space is their own; other Spaces don't exist for them.
   await visit(page, '/abc-construction');
   await expect(page.getByText(/This isn’t in your Spaces/)).toBeVisible();
-  await visit(page, '/');
+  await visit(page, '/spaces');
   await expect(page).toHaveURL(`${BASE_PATH}/personal`);
 
   // A tool works and the dashboard fills in.
