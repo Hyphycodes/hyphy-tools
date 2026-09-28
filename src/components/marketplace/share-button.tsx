@@ -51,7 +51,7 @@ export function ShareButton({
       onClick={share}
       aria-label={compact ? label : undefined}
       className={cn(
-        'inline-flex h-10 items-center gap-2 rounded-full bg-white/[.06] px-4 text-[14px] font-medium text-ink-2 shadow-[inset_0_0_0_1px_rgb(255_255_255/.08)] transition-colors hover:bg-white/10 hover:text-ink',
+        'inline-flex h-10 items-center gap-2 rounded-full bg-ink/[.06] px-4 text-[14px] font-medium text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line)] transition-colors hover:bg-ink/10 hover:text-ink',
         className,
       )}
     >

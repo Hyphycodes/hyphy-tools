@@ -6,6 +6,8 @@ import { cn } from '@/components/ui/cn';
 import { Icon } from '@/components/ui/icon';
 import { Kbd } from '@/components/ui/kbd';
 import { IntentLink } from '@/components/marketplace/intent-link';
+import { worlds, worldStyle } from '@/components/marketplace/worlds';
+import { toolBySlug } from '@/lib/catalog';
 import { studio } from '@/lib/public';
 import { openSearch } from './search';
 import { Wordmark } from './wordmark';
@@ -39,6 +41,9 @@ export function WorldHeader() {
   }
 
   const solid = scrolled || !home || menu;
+  // On a tool page the header takes on the tool's world: same Hyphy bar, the tool's room.
+  const tool = pathname.startsWith('/tools/') ? toolBySlug(pathname.split('/')[2] ?? '') : undefined;
+  const surface = tool ? worlds[tool.id].surface : 'night';
   const nav = [
     { label: 'Work', href: studio.work, external: true },
     { label: 'Tools', href: '/tools', current: pathname.startsWith('/tools') },
@@ -46,10 +51,14 @@ export function WorldHeader() {
 
   return (
     <header
+      data-surface={surface}
+      style={tool ? worldStyle(tool) : undefined}
       className={cn(
-        'fixed inset-x-0 top-0 z-50 transition-[background-color,box-shadow,backdrop-filter] duration-300',
+        'world-header fixed inset-x-0 top-0 z-50 text-ink transition-[background-color,box-shadow,backdrop-filter] duration-300',
         solid
-          ? 'bg-[rgb(11_11_10/.72)] shadow-[0_1px_0_rgb(255_255_255/.06)] backdrop-blur-xl backdrop-saturate-150'
+          ? surface === 'light'
+            ? 'bg-[color-mix(in_srgb,var(--w-canvas)_82%,transparent)] shadow-[0_1px_0_var(--color-line)] backdrop-blur-xl backdrop-saturate-150'
+            : 'bg-[rgb(11_11_10/.72)] shadow-[0_1px_0_rgb(255_255_255/.06)] backdrop-blur-xl backdrop-saturate-150'
           : 'bg-transparent',
       )}
     >
@@ -86,12 +95,12 @@ export function WorldHeader() {
           <button
             type="button"
             onClick={() => openSearch()}
-            className="flex h-10 items-center gap-2.5 rounded-full bg-white/[.06] pr-2 pl-3.5 text-[14px] text-muted shadow-[inset_0_0_0_1px_rgb(255_255_255/.06)] transition-colors hover:bg-white/[.1] hover:text-ink sm:pr-2.5"
+            className="flex h-10 items-center gap-2.5 rounded-full bg-ink/[.06] pr-2 pl-3.5 text-[14px] text-muted shadow-[inset_0_0_0_1px_var(--color-line)] transition-colors hover:bg-ink/[.1] hover:text-ink sm:pr-2.5"
           >
             <Icon name="search" size={16} />
             <span className="hidden sm:inline">Search tools</span>
             <span className="hidden sm:inline-flex">
-              <Kbd className="!bg-white/10 !text-muted">{mac ? '⌘K' : 'Ctrl K'}</Kbd>
+              <Kbd className="!bg-ink/10 !text-muted">{mac ? '⌘K' : 'Ctrl K'}</Kbd>
             </span>
           </button>
           <a
@@ -106,7 +115,7 @@ export function WorldHeader() {
             aria-controls="world-menu"
             aria-label={menu ? 'Close menu' : 'Menu'}
             onClick={() => setMenu((open) => !open)}
-            className="grid size-10 place-items-center rounded-full bg-white/[.06] text-ink-2 shadow-[inset_0_0_0_1px_rgb(255_255_255/.06)] md:hidden"
+            className="grid size-10 place-items-center rounded-full bg-ink/[.06] text-ink-2 shadow-[inset_0_0_0_1px_var(--color-line)] md:hidden"
           >
             <Icon name={menu ? 'x' : 'menu'} size={18} />
           </button>

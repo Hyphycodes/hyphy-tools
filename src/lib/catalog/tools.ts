@@ -650,7 +650,7 @@ export const tools: Tool[] = [
       storage: ['none'],
       note: 'Converted in your browser. Nothing is uploaded, and camera details and location are left out of the PDF.',
     },
-    accent: '#ff9a62',
+    accent: '#6a84ff',
     accentInk: 'dark',
     icon: 'file-stack',
     keywords: [
@@ -755,7 +755,7 @@ export const tools: Tool[] = [
       storage: ['none'],
       note: 'Files are fingerprinted in your browser. Nothing is uploaded, and nothing is deleted.',
     },
-    accent: '#9fb2ff',
+    accent: '#ffa24c',
     accentInk: 'dark',
     icon: 'copy',
     keywords: [

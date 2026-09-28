@@ -137,6 +137,13 @@ import {
   ZoomIn,
   ZoomOut,
   type LucideIcon,
+  Info,
+  Maximize2,
+  Merge,
+  Monitor,
+  Shrink,
+  Smartphone,
+  Wand2,
 } from 'lucide-react';
 
 /*
@@ -363,6 +370,13 @@ const lucide = {
   wallet: Wallet,
   'zoom-in': ZoomIn,
   'zoom-out': ZoomOut,
+  info: Info,
+  maximize: Maximize2,
+  merge: Merge,
+  monitor: Monitor,
+  shrink: Shrink,
+  smartphone: Smartphone,
+  wand: Wand2,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof brand | keyof typeof lucide;

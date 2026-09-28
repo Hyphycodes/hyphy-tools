@@ -1,8 +1,8 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { ToolRuntime } from '@/components/marketplace/tool-runtime';
-import { ComingSoon, Related, ToolDetails, ToolHeader } from '@/components/marketplace/tool-page';
-import { worldOf, worldStyle } from '@/components/marketplace/worlds';
+import { ComingSoon, ToolFooter, ToolHeader } from '@/components/marketplace/tool-page';
+import { worldData, worldOf, worldStyle } from '@/components/marketplace/worlds';
 import { isReady, routableTools, toolBySlug } from '@/lib/catalog';
 
 /**
@@ -34,8 +34,8 @@ export default async function ToolPage({ params }: PageProps<'/tools/[slug]'>) {
   const tool = toolBySlug((await params).slug);
   if (!tool) notFound();
   return (
-    <article className="tool-world" style={worldStyle(tool)}>
-      {/* The tool's world: its two lights and its pattern, behind the header and the tool. */}
+    <article className="tool-world" style={worldStyle(tool)} {...worldData(tool)}>
+      {/* The tool's world: its light and its pattern, behind the header and the workspace. */}
       <div aria-hidden="true" className="world-backdrop" data-pattern={worldOf(tool).pattern} />
       <ToolHeader tool={tool} />
       <section
@@ -45,8 +45,7 @@ export default async function ToolPage({ params }: PageProps<'/tools/[slug]'>) {
       >
         {isReady(tool) ? <ToolRuntime id={tool.id} /> : <ComingSoon tool={tool} />}
       </section>
-      <ToolDetails tool={tool} />
-      <Related tool={tool} />
+      <ToolFooter tool={tool} />
     </article>
   );
 }

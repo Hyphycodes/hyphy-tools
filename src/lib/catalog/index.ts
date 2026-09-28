@@ -107,7 +107,7 @@ export function accountLabel(tool: Pick<Tool, 'account'>) {
 export type PrivacyFacts = {
   /** A short chip: "Runs on your device". */
   label: string;
-  /** The quiet line under a tool's name: "Processed on your device". */
+  /** The one quiet line beside a tool's name: "Stays on your device". */
   short: string;
   /** Fully local: nothing reaches Hyphy. */
   local: boolean;
@@ -130,7 +130,11 @@ export function privacyFacts(tool: Pick<Tool, 'privacy'>): PrivacyFacts {
       : storage.includes('browser')
         ? 'On your device · saved in this browser'
         : 'Runs on your device';
-  const short = !local ? 'Kept with your account' : 'Processed on your device';
+  const short = !local
+    ? 'Kept with your account'
+    : storage.includes('link')
+      ? 'Never sent to Hyphy'
+      : 'Stays on your device';
   const lines: string[] = [];
   if (note) lines.push(note);
   if (processing === 'device')

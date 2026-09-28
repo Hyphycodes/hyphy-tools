@@ -19,7 +19,7 @@ function StatusTag({ tool, className }: { tool: Tool; className?: string }) {
     <span
       className={cn(
         'inline-flex h-5 shrink-0 items-center rounded-full px-2 text-[10.5px] font-semibold tracking-wide uppercase',
-        tool.status === 'beta' ? 'bg-signal-soft text-signal-ink' : 'bg-white/[.07] text-muted',
+        tool.status === 'beta' ? 'bg-signal-soft text-signal-ink' : 'bg-ink/[.07] text-muted',
         className,
       )}
     >
@@ -137,7 +137,7 @@ export function ToolRow({ tool, className }: { tool: Tool; className?: string })
         <span className="block truncate text-[13.5px] text-muted">{tool.tagline}</span>
       </span>
       {ready ? (
-        <span className="hidden h-8 shrink-0 items-center rounded-full bg-white/[.07] px-3.5 text-[13px] font-semibold text-ink transition-colors group-hover:bg-white/[.12] min-[380px]:inline-flex">
+        <span className="hidden h-8 shrink-0 items-center rounded-full bg-ink/[.07] px-3.5 text-[13px] font-semibold text-ink transition-colors group-hover:bg-ink/[.12] min-[380px]:inline-flex">
           Open
         </span>
       ) : (
