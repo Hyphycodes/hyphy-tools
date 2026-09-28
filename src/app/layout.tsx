@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { Hubot_Sans, Martian_Mono, Mona_Sans } from 'next/font/google';
+import localFont from 'next/font/local';
 import './globals.css';
 
 const hubot = Hubot_Sans({
@@ -13,6 +14,23 @@ const mona = Mona_Sans({
   axes: ['wdth'],
   variable: '--font-mona',
   display: 'swap',
+});
+/**
+ * Hubot Sans draws its zero slashed, which reads as code in a total or a date. Display type
+ * borrows Mona Sans's plain zero (just that one glyph, 2.5 KB, variable weight and width).
+ */
+const zero = localFont({
+  src: './fonts/mona-sans-zero.woff2',
+  weight: '200 900',
+  variable: '--font-zero',
+  display: 'swap',
+  preload: false,
+  fallback: [],
+  adjustFontFallback: false,
+  declarations: [
+    { prop: 'unicode-range', value: 'U+0030' },
+    { prop: 'font-stretch', value: '75% 125%' },
+  ],
 });
 const martian = Martian_Mono({
   subsets: ['latin'],
@@ -41,7 +59,7 @@ export default function RootLayout({ children }: LayoutProps<'/'>) {
     // The public world marks <html> before first paint (reveals), so its classes may differ.
     <html
       lang="en"
-      className={`${hubot.variable} ${mona.variable} ${martian.variable}`}
+      className={`${hubot.variable} ${mona.variable} ${martian.variable} ${zero.variable}`}
       suppressHydrationWarning
     >
       <body>{children}</body>

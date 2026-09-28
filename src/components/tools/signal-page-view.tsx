@@ -13,7 +13,7 @@ import {
 
 const fonts = {
   sans: 'var(--font-mona), system-ui, sans-serif',
-  display: 'var(--font-hubot), var(--font-mona), system-ui, sans-serif',
+  display: 'var(--font-zero), var(--font-hubot), var(--font-mona), system-ui, sans-serif',
   mono: 'var(--font-martian), ui-monospace, monospace',
 } as const;
 

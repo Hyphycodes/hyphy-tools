@@ -20,7 +20,7 @@ const CARD = '#1a1a17';
 const mono: CSSProperties = { fontFamily: 'var(--font-martian), ui-monospace, monospace' };
 const sans: CSSProperties = { fontFamily: 'var(--font-mona), system-ui, sans-serif' };
 const display: CSSProperties = {
-  fontFamily: 'var(--font-hubot), var(--font-mona), sans-serif',
+  fontFamily: 'var(--font-zero), var(--font-hubot), var(--font-mona), sans-serif',
   fontVariationSettings: "'wdth' 112",
 };
 

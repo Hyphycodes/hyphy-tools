@@ -1,8 +1,8 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { notFound } from 'next/navigation';
 import { ToolRuntime } from '@/components/marketplace/tool-runtime';
 import { ComingSoon, ToolFooter, ToolHeader } from '@/components/marketplace/tool-page';
-import { worldData, worldOf, worldStyle } from '@/components/marketplace/worlds';
+import { worldData, worldOf, worldStyle, worlds } from '@/components/marketplace/worlds';
 import { isReady, routableTools, toolBySlug } from '@/lib/catalog';
 
 /**
@@ -12,6 +12,13 @@ import { isReady, routableTools, toolBySlug } from '@/lib/catalog';
  */
 export function generateStaticParams() {
   return routableTools.map((tool) => ({ slug: tool.slug }));
+}
+
+/** The phone's browser bar wears the tool's room (light worlds), not the marketplace's night. */
+export async function generateViewport({ params }: PageProps<'/tools/[slug]'>): Promise<Viewport> {
+  const tool = toolBySlug((await params).slug);
+  const world = tool ? worlds[tool.id] : null;
+  return world?.surface === 'light' ? { themeColor: world.canvas, colorScheme: 'light' } : {};
 }
 
 export async function generateMetadata({ params }: PageProps<'/tools/[slug]'>): Promise<Metadata> {

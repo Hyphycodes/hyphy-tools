@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { cn } from '@/components/ui/cn';
 import { Input } from '@/components/ui/form';
 import { Icon } from '@/components/ui/icon';
@@ -42,11 +42,15 @@ export type PageJob = 'arrange' | 'keep' | 'split';
 export type MadeFile = { name: string; blob: Blob; pages: number; covers: Cover[] };
 
 /** A page on the desk: which page of the original, how far it's turned, and whether it stays. */
-type Page = { index: number; turn: number; removed: boolean };
+export type Page = { index: number; turn: number; removed: boolean };
+
+/** Whether an arrangement differs from the file as it came. */
+export const isArranged = (list: Page[]) =>
+  list.some((page, position) => page.index !== position || angle(page.turn) || page.removed);
 
 const upright = (count: number): Page[] =>
   Array.from({ length: count }, (_, index) => ({ index, turn: 0, removed: false }));
-const angle = (turn: number) => ((turn % 360) + 360) % 360;
+export const angle = (turn: number) => ((turn % 360) + 360) % 360;
 
 async function open(file: File, width: number) {
   const { openPdf } = await import('@/lib/tools/pdf-preview');
@@ -180,12 +184,18 @@ const tints = ['var(--accent)', 'var(--glow, #c8a27a)', 'var(--third, #8c8177)']
 
 export function PdfPages({
   file,
+  arranged,
+  onArrange,
   onMade,
   onError,
   top,
   fixedBar = true,
 }: {
   file: File;
+  /** The arrangement made last time this file was open, so leaving and coming back keeps it. */
+  arranged?: Page[];
+  /** Every change to the arrangement, for the desk to keep with the file. */
+  onArrange?: (pages: Page[]) => void;
   /** A new PDF (or several) is ready. */
   onMade: (job: PageJob, files: MadeFile[]) => void;
   onError?: (message: string) => void;
@@ -218,15 +228,27 @@ export function PdfPages({
   const [seen, setSeen] = useState<number | null>(null);
   if (pdf.pages !== null && seen !== pdf.pages) {
     setSeen(pdf.pages);
-    const fresh = upright(pdf.pages);
+    const fresh = arranged?.length === pdf.pages ? arranged : upright(pdf.pages);
     setPages(fresh);
-    setCuts(cutsEvery(fresh, 1));
+    setCuts(
+      cutsEvery(
+        fresh.filter((page) => !page.removed),
+        1,
+      ),
+    );
   }
 
+  // The desk keeps the arrangement with the file (adding more PDFs doesn't lose it).
+  const latestArrange = useRef(onArrange);
+  useLayoutEffect(() => {
+    latestArrange.current = onArrange;
+  });
+  useEffect(() => {
+    if (pages.length) latestArrange.current?.(pages);
+  }, [pages]);
+
   const kept = pages.filter((page) => !page.removed);
-  const changed = pages.some(
-    (page, position) => page.index !== position || angle(page.turn) || page.removed,
-  );
+  const changed = isArranged(pages);
   const keepSet = new Set(keep);
   const typedParts = ranges.trim() && total ? parseParts(ranges, total) : null;
   const pieces = piecesFrom(kept, cuts);

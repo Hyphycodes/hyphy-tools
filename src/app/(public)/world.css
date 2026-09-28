@@ -53,7 +53,7 @@
 */
 html[data-world='night'],
 html[data-world='night'] body {
-  background: #0b0b0a;
+  background: var(--page-bg, #0b0b0a);
   color-scheme: dark;
 }
 html[data-world='night'] dialog::backdrop {

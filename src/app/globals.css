@@ -13,7 +13,8 @@
 
 @theme {
   --font-sans: var(--font-mona), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-display: var(--font-hubot), var(--font-mona), ui-sans-serif, system-ui, sans-serif;
+  --font-display:
+    var(--font-zero), var(--font-hubot), var(--font-mona), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-martian), ui-monospace, 'SFMono-Regular', monospace;
 
   --color-canvas: #f3f1eb;

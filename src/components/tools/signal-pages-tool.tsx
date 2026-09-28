@@ -383,7 +383,7 @@ function DesignThumb({
               design.font === 'mono'
                 ? 'var(--font-martian), monospace'
                 : design.font === 'display'
-                  ? 'var(--font-hubot), sans-serif'
+                  ? 'var(--font-zero), var(--font-hubot), sans-serif'
                   : 'var(--font-mona), sans-serif',
             textTransform: design.font === 'mono' ? 'uppercase' : undefined,
             letterSpacing: '-0.02em',

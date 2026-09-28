@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { cn } from '@/components/ui/cn';
 import { Icon } from '@/components/ui/icon';
 import { Kbd } from '@/components/ui/kbd';
@@ -46,6 +46,18 @@ export function WorldHeader() {
     ? toolBySlug(pathname.split('/')[2] ?? '')
     : undefined;
   const surface = tool ? worlds[tool.id].surface : 'night';
+  const room = tool && surface === 'light' ? worlds[tool.id].canvas : null;
+
+  // Past the edges (a pull on a phone) the page is the tool's room too. The browser bar's color
+  // comes from the tool page's viewport (generateViewport).
+  useEffect(() => {
+    if (!room) return;
+    const root = document.documentElement;
+    root.style.setProperty('--page-bg', room);
+    return () => {
+      root.style.removeProperty('--page-bg');
+    };
+  }, [room]);
   const nav = [
     { label: 'Work', href: studio.work, external: true },
     { label: 'Tools', href: '/tools', current: pathname.startsWith('/tools') },

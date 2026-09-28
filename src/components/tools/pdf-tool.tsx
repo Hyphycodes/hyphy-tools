@@ -12,7 +12,7 @@ import { zip } from '@/lib/files/zip';
 import { formatBytes, plural } from '@/lib/platform/format';
 import { AttachPicker } from './attach-picker';
 import { DropObject, Payoff, PillButton, SampleButton } from './kit';
-import { PdfPages, type MadeFile, type PageJob } from './pdf-pages';
+import { PdfPages, angle, isArranged, type MadeFile, type Page, type PageJob } from './pdf-pages';
 import {
   DeskBar,
   DeskButton,
@@ -38,7 +38,21 @@ const MAX_FILES = 20;
 const MAX_BYTES = 50 * 1024 * 1024;
 const MAX_PAGES = 500;
 
-type Doc = { id: number; file: File; pages?: number; thumb?: string; unreadable?: boolean };
+type Doc = {
+  id: number;
+  file: File;
+  pages?: number;
+  thumb?: string;
+  unreadable?: boolean;
+  /** Its pages as arranged when it was open on its own: merged in that order and turn. */
+  arranged?: Page[];
+};
+
+/** Pages a document brings to a merge: its arrangement if it has one. */
+const pagesOf = (doc: Doc) =>
+  doc.arranged && isArranged(doc.arranged)
+    ? doc.arranged.filter((page) => !page.removed).length
+    : doc.pages;
 type Job = PageJob | 'merge';
 type Made = { job: Job; files: (MadeFile & { url: string })[]; from: number };
 
@@ -253,7 +267,7 @@ function PdfDesk({ slug, canSave }: { slug: string; canSave: boolean }) {
     setBusy(true);
     setMessage('');
     try {
-      const { PDFDocument } = await import('pdf-lib');
+      const { PDFDocument, degrees } = await import('pdf-lib');
       const output = await PDFDocument.create();
       for (const doc of docs) {
         let input;
@@ -264,10 +278,21 @@ function PdfDesk({ slug, canSave }: { slug: string; canSave: boolean }) {
             `“${doc.file.name}” could not be read. Use an unencrypted, undamaged PDF.`,
           );
         }
-        if (output.getPageCount() + input.getPageCount() > MAX_PAGES)
+        const order =
+          doc.arranged && isArranged(doc.arranged)
+            ? doc.arranged.filter((page) => !page.removed)
+            : input.getPageIndices().map((index) => ({ index, turn: 0, removed: false }));
+        if (output.getPageCount() + order.length > MAX_PAGES)
           throw new Error('This batch has more than 500 pages. Please use a smaller batch.');
-        const pages = await output.copyPages(input, input.getPageIndices());
-        pages.forEach((page) => output.addPage(page));
+        const pages = await output.copyPages(
+          input,
+          order.map((page) => page.index),
+        );
+        pages.forEach((page, position) => {
+          const by = angle(order[position].turn);
+          if (by) page.setRotation(degrees((page.getRotation().angle + by) % 360));
+          output.addPage(page);
+        });
       }
       const bytes = await output.save();
       show('merge', [
@@ -370,6 +395,8 @@ function PdfDesk({ slug, canSave }: { slug: string; canSave: boolean }) {
             <PdfPages
               key={focused.id}
               file={focused.file}
+              arranged={focused.arranged}
+              onArrange={(pages) => patch(focused.id, { arranged: pages })}
               fixedBar={!workspace}
               onMade={show}
               top={
@@ -468,7 +495,7 @@ function PdfStack({
       onReorder(next);
     },
   });
-  const totalPages = docs.reduce((sum, doc) => sum + (doc.pages ?? 0), 0);
+  const totalPages = docs.reduce((sum, doc) => sum + (pagesOf(doc) ?? 0), 0);
   const reading = docs.some((doc) => doc.pages === undefined && !doc.unreadable);
 
   return (
@@ -543,7 +570,7 @@ function PdfStack({
                     {doc.unreadable
                       ? 'Can’t be opened'
                       : doc.pages
-                        ? plural(doc.pages, 'page')
+                        ? `${plural(pagesOf(doc) ?? doc.pages, 'page')}${doc.arranged && isArranged(doc.arranged) ? ' · arranged' : ''}`
                         : 'Reading…'}
                     <span className="max-sm:hidden"> · {formatBytes(doc.file.size)}</span>
                   </p>
